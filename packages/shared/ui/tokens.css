@@ -1,0 +1,64 @@
+/* Shared design tokens for the extension popup, mobile page and admin panel.
+   Import after `@import "tailwindcss";` */
+:root {
+  --vf-page: #faf9f7;
+  --vf-card: #ffffff;
+  --vf-subtle: #f4f3f0;
+  --vf-border: #e5e3df;
+  --vf-text: #1f1e1c;
+  --vf-muted: #6b6863;
+  --vf-accent-bg: #dce8fb;
+  --vf-accent-text: #1e4e9c;
+  --vf-live-bg: #d7f0d9;
+  --vf-live-text: #1f6b2a;
+  --vf-warn-bg: #f9e2b0;
+  --vf-warn-text: #7a5000;
+  --vf-danger: #d4433d;
+  --vf-danger-bg: #fbe0de;
+  --vf-danger-text: #a32b26;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --vf-page: #1a1918;
+    --vf-card: #24231f;
+    --vf-subtle: #2d2c28;
+    --vf-border: #3a3834;
+    --vf-text: #f2f0ec;
+    --vf-muted: #a5a29b;
+    --vf-accent-bg: #1f3557;
+    --vf-accent-text: #a9c6f5;
+    --vf-live-bg: #1e3b22;
+    --vf-live-text: #9ad7a2;
+    --vf-warn-bg: #4a3610;
+    --vf-warn-text: #f2c66d;
+    --vf-danger: #e2574f;
+    --vf-danger-bg: #4a1f1d;
+    --vf-danger-text: #f3a39e;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-page: var(--vf-page);
+  --color-card: var(--vf-card);
+  --color-subtle: var(--vf-subtle);
+  --color-line: var(--vf-border);
+  --color-ink: var(--vf-text);
+  --color-muted: var(--vf-muted);
+  --color-accent-bg: var(--vf-accent-bg);
+  --color-accent-ink: var(--vf-accent-text);
+  --color-live-bg: var(--vf-live-bg);
+  --color-live-ink: var(--vf-live-text);
+  --color-warn-bg: var(--vf-warn-bg);
+  --color-warn-ink: var(--vf-warn-text);
+  --color-danger: var(--vf-danger);
+  --color-danger-bg: var(--vf-danger-bg);
+  --color-danger-ink: var(--vf-danger-text);
+}
+
+body {
+  background: var(--vf-page);
+  color: var(--vf-text);
+}

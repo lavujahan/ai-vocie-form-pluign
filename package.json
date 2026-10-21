@@ -1,0 +1,17 @@
+{
+  "name": "voice-form-filler",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter ./apps/* dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "seed:admin": "pnpm --filter web seed:admin",
+    "eval:mapping": "pnpm --filter web eval:mapping"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "prettier": "^3.6.0"
+  }
+}

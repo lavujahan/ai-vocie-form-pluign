@@ -1,0 +1,9 @@
+@import 'tailwindcss';
+@import '@vff/shared/ui/tokens.css';
+
+@source '../components';
+
+html,
+body {
+  -webkit-tap-highlight-color: transparent;
+}

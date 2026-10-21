@@ -1,0 +1,40 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "seed:admin": "tsx --env-file-if-exists=.env.local scripts/create-admin.ts",
+    "eval:mapping": "tsx --env-file-if-exists=.env.local scripts/eval-mapping.ts",
+    "check:db": "tsx --env-file-if-exists=.env.local scripts/check-db.ts"
+  },
+  "dependencies": {
+    "@openai/agents": "0.21.0",
+    "@supabase/supabase-js": "^2.118.0",
+    "@vff/shared": "workspace:*",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.13",
+    "lucide-react": "^1.61.0",
+    "next": "~15.5.28",
+    "openai": "^7.39.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "server-only": "^0.0.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
