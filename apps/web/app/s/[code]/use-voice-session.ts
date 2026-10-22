@@ -140,6 +140,12 @@ export function useVoiceSession(code: string) {
     };
   }, [code, applySnapshot]);
 
+  /** Re-reads the whole session; used after each utterance and after reconnects so nothing is missed. */
+  const refresh = useCallback(async () => {
+    const res = await authFetch(`/api/sessions/${code}`);
+    if (res.ok) applySnapshot((await res.json()) as SessionSnapshot);
+  }, [authFetch, applySnapshot, code]);
+
   // ---------- Realtime ----------
   const sessionId = session?.id;
   useEffect(() => {
@@ -152,6 +158,7 @@ export function useVoiceSession(code: string) {
       accessToken: async () => tokenRef.current?.token ?? null,
     });
     let subscribedOnce = false;
+    let cancelled = false;
     const filter = `session_id=eq.${sessionId}`;
     const channel = client
       .channel(`phone:${sessionId}`)
@@ -177,21 +184,25 @@ export function useVoiceSession(code: string) {
         const row = p.new as SessionInfo;
         setSession((s) => (s ? { ...s, form_name: row.form_name, status: row.status } : s));
       })
-      .subscribe(async (status) => {
+    // The token must be on the socket *before* joining: Realtime records the subscription's role at
+    // join time, and a join that races the async accessToken callback is stored as `anon`, which
+    // RLS then filters out (subscribed, but no events ever arrive).
+    client.realtime.setAuth(tokenRef.current?.token ?? null).then(() => {
+      if (cancelled) return;
+      channel.subscribe(async (status) => {
         setLive(status === 'SUBSCRIBED');
         if (status === 'SUBSCRIBED') {
           // After a reconnect, catch up on anything missed.
-          if (subscribedOnce) {
-            const res = await authFetch(`/api/sessions/${code}`);
-            if (res.ok) applySnapshot((await res.json()) as SessionSnapshot);
-          }
+          if (subscribedOnce) await refresh();
           subscribedOnce = true;
         }
       });
+    });
     return () => {
+      cancelled = true;
       client.removeChannel(channel);
     };
-  }, [phase, sessionId, code, authFetch, applySnapshot]);
+  }, [phase, sessionId, refresh]);
 
   // ---------- actions ----------
   const takeSeq = useCallback(() => {
@@ -228,6 +239,8 @@ export function useVoiceSession(code: string) {
             error: body.error ?? null,
             blob: body.status === 'error' ? blob : undefined,
           });
+          // Values normally arrive over Realtime; re-read once so a missed event can't leave rows empty.
+          if (body.status === 'done') void refresh();
         } else {
           setUtt(seq, { status: 'error', error: body.error, blob });
         }
@@ -235,7 +248,7 @@ export function useVoiceSession(code: string) {
         setUtt(seq, { status: 'error', error: 'Network error. Tap to retry.', blob });
       }
     },
-    [authFetch, takeSeq],
+    [authFetch, takeSeq, refresh],
   );
 
   /** Retry with a new seq: the retry is "newer speech" than anything said in between. */
@@ -261,9 +274,10 @@ export function useVoiceSession(code: string) {
         body: JSON.stringify({ seq: takeSeq(), values: [{ field_key: fieldKey, value }] }),
       });
       const body = (await res.json()) as { errors?: Record<string, string> } & ApiError;
+      if (res.ok) void refresh();
       return body.errors?.[fieldKey] ?? (res.ok ? null : body.error);
     },
-    [authFetch, code, takeSeq],
+    [authFetch, code, takeSeq, refresh],
   );
 
   const complete = useCallback(async () => {

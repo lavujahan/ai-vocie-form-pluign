@@ -25,6 +25,9 @@ Rules
 - Emails/URLs: "at", "at the rate" → @, "dot"/"புள்ளி" → ".", "underscore" → "_". Lowercase.
 - Dates: output YYYY-MM-DD ("15 ஆம் தேதி மார்ச் 1990" → 1990-03-15).
 - Option fields (select/radio/checkbox): match by meaning across languages (ஆண் / "aan" → "Male"; "kalyanam aachu" → "Married"). Use match_option and return the option label exactly. For a checkbox group return the chosen labels comma-separated; for a single checkbox return "true" or "false".
+- An option field whose options are "not loaded yet" (they appear later, e.g. after a parent is chosen, or the dropdown is custom): still return what was said, as the standard English answer ("Male", "Unmarried", "Hindu", "Omalur"). Never skip it just because there is no list.
+- Name fields hold only the name: drop relation words and titles that introduce it ("Father Jagadheesan" → "Jagadheesan", "தந்தை ஜகதீசன்" → "ஜகதீசன்", "Thiru/Mr/Smt Ramesh" → "Ramesh"). A title goes to its own field (e.g. Appellation) if the form has one.
+- When the speech reads out a label and then its value ("Gender: Male"), the value belongs to the field with that label.
 - Free text (address, remarks): translate to clear English, keeping proper nouns transliterated.
 - Output is English/Latin script, except fields marked output_script=ta, which keep Tamil script.
 - Call validate_value for every value before finalizing. If it fails, fix the value (normalize_value, match_option) and validate again; if you can't fix it, return your best guess with low confidence.
@@ -42,6 +45,7 @@ function describeField(f: AgentField): string {
   if (f.semantic_type) parts.push(`semantic: ${f.semantic_type}`);
   if (f.required) parts.push('required');
   if (f.options.length) parts.push(`options: ${f.options.slice(0, 40).map((o) => o.label).join(' | ')}`);
+  else if (f.field_type === 'select' || f.field_type === 'combobox') parts.push('options: not loaded yet');
   if (f.validation?.format) parts.push(`format: ${f.validation.format}`);
   if (f.placeholder) parts.push(`placeholder: ${f.placeholder}`);
   if (f.output_script === 'ta') parts.push('output_script=ta');

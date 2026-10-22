@@ -192,14 +192,18 @@ async function ensureRealtime() {
       const row = p.new as SessionInfo;
       patchSnapshot((snap) => ({ ...snap, session: { ...snap.session, form_name: row.form_name, status: row.status } }));
       await commit();
-    })
-    .subscribe(async (status) => {
-      live = status === 'SUBSCRIBED';
-      broadcast();
-      if (live) await refreshSnapshot();
     });
 
   rt = { client, channel, sessionId: s.session_id };
+  // Put the token on the socket before joining. Otherwise the join races the async accessToken
+  // callback, Realtime stores the subscription as `anon`, and RLS silently drops every event.
+  await client.realtime.setAuth(state.auth.token);
+  if (rt?.channel !== channel) return; // stopped or replaced meanwhile
+  channel.subscribe(async (status) => {
+    live = status === 'SUBSCRIBED';
+    broadcast();
+    if (live) await refreshSnapshot();
+  });
 }
 
 function stopRealtime() {

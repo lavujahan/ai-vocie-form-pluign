@@ -158,6 +158,16 @@ describe('Field Mapping Agent (scripted model)', () => {
     expect(p).toContain('phone = "9876543210"');
   });
 
+  it('tells the model when a dropdown has no options yet', () => {
+    const p = buildMapperPrompt({
+      fields: [{ field_key: 'gender', label: 'Gender', field_type: 'select', required: true, options: [] }],
+      current: {},
+      transcript: 'Gender male',
+      targetFieldKey: null,
+    });
+    expect(p).toContain('options: not loaded yet');
+  });
+
   it('detects empty transcripts', () => {
     expect(isEmptyTranscript('')).toBe(true);
     expect(isEmptyTranscript('...')).toBe(true);

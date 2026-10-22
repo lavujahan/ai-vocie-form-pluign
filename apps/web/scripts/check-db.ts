@@ -114,6 +114,39 @@ try {
   check('RLS: users table is not readable by clients', (users2.data?.length ?? 0) === 0);
   const write = await asToken(await userToken(a.id)).from('field_values').update({ value: 'hacked' }).eq('session_id', session.id).select('id');
   check('RLS: clients cannot write values', (write.data?.length ?? 0) === 0);
+
+  // ---- Realtime: the phone and the extension get value changes pushed ----
+  for (const [who, token] of [
+    ['phone', await phoneToken(session.id)],
+    ['extension user', await userToken(a.id)],
+  ] as const) {
+    const client = asToken(token);
+    let status = '';
+    let statusErr = '';
+    await client.realtime.setAuth(token); // same as the app: token on the socket before joining
+    const got = new Promise<string>((resolve) => {
+      client
+        .channel(`check:${who}:${session.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'field_values', filter: `session_id=eq.${session.id}` }, (p) =>
+          resolve((p.new as { value: string }).value),
+        )
+        .subscribe((s, err) => {
+          status = s;
+          if (err) statusErr = err.message;
+        });
+    });
+    for (let i = 0; i < 50 && status !== 'SUBSCRIBED' && !statusErr; i++) await sleep(100);
+    await sleep(1000); // let the server finish setting up the postgres_changes subscription
+    const value = `realtime-${who}-${Date.now()}`;
+    await admin.from('field_values').update({ value }).eq('field_id', field.id);
+    const received = await Promise.race([got, sleep(8000).then(() => null)]);
+    check(
+      `Realtime: ${who} receives value changes`,
+      received === value,
+      received === value ? '' : `channel status ${status || 'none'}${statusErr ? ` (${statusErr})` : ''}, no event within 8s`,
+    );
+    await client.removeAllChannels();
+  }
 } catch (e) {
   console.error('check-db crashed:', e);
   failures++;
