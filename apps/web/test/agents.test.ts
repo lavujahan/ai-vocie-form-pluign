@@ -34,6 +34,7 @@ describe('sanitizeMapping (output guardrail)', () => {
         ],
         unmapped_speech: '  ',
         missing_required: ['email', 'ghost'],
+        command: null,
       },
       EVAL_FORM,
       null,
@@ -72,6 +73,7 @@ describe('sanitizeMapping (output guardrail)', () => {
         ],
         unmapped_speech: null,
         missing_required: [],
+        command: null,
       },
       EVAL_FORM,
       null,
@@ -88,6 +90,7 @@ describe('sanitizeMapping (output guardrail)', () => {
         ],
         unmapped_speech: null,
         missing_required: [],
+        command: null,
       },
       EVAL_FORM,
       'city',
@@ -97,13 +100,13 @@ describe('sanitizeMapping (output guardrail)', () => {
 
   it('lowers confidence when Tamil script leaks into an English field', () => {
     const r = sanitizeMapping(
-      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [] },
+      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [], command: null },
       EVAL_FORM,
       null,
     );
     expect(r.values[0].confidence).toBeLessThanOrEqual(0.5);
     const ta = sanitizeMapping(
-      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [] },
+      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [], command: null },
       EVAL_FORM,
       null,
     );
@@ -122,7 +125,7 @@ describe('sanitizeAnalysis', () => {
         { field_key: 'a', label: 'A', field_type: 'text', required: false, options: [], multiple: false, dynamic_options: false, group_key: null, depends_on: null, step_index: 0, min: null, max: null, pattern: null, placeholder: null, context: null },
       ],
     } satisfies FormSchema;
-    const base = { clean_label: 'A', semantic_type: 'other', required: false, step_index: 0, output_script: 'en' } as const;
+    const base = { clean_label: 'A', semantic_type: 'other', required: false, step_index: 0, output_script: 'en', label_ta: '' } as const;
     const out = sanitizeAnalysis(
       {
         form_purpose: 'Test',
@@ -147,6 +150,7 @@ describe('Field Mapping Agent (scripted model)', () => {
       ],
       unmapped_speech: null,
       missing_required: ['email', 'phone'],
+      command: null,
     };
     const model = new ScriptedModel([
       [functionCall('validate_value', { field_key: 'gender', value: 'aan' }, { callId: 'c1' })],
@@ -202,5 +206,30 @@ describe('Field Mapping Agent (scripted model)', () => {
     expect(isEmptyTranscript('...')).toBe(true);
     expect(isEmptyTranscript('ok')).toBe(false);
     expect(isEmptyTranscript('ஆம்')).toBe(false);
+  });
+});
+
+describe('spoken corrections and commands', () => {
+  it('shows the mapper what was just said, so "no, Jagan" can find its field', () => {
+    const prompt = buildMapperPrompt({
+      fields: EVAL_FORM,
+      current: { full_name: 'Jahan' },
+      transcript: 'illa, Jagan',
+      targetFieldKey: null,
+      recent: [{ speech: 'Name vandhu Jahan', set: { full_name: 'Jahan' } }],
+    });
+    expect(prompt).toContain('Recent speech (oldest first):\n- "Name vandhu Jahan" → full_name="Jahan"');
+    expect(buildMapperPrompt({ fields: EVAL_FORM, current: {}, transcript: 'x', targetFieldKey: null })).not.toContain('Recent speech');
+  });
+
+  it('passes a command through only when the speech set no values, and never in single-field mode', () => {
+    const cmd = { values: [], unmapped_speech: null, missing_required: [], command: 'start_over' as const };
+    expect(sanitizeMapping(cmd, EVAL_FORM, null).command).toBe('start_over');
+    expect(sanitizeMapping(cmd, EVAL_FORM, 'full_name').command).toBeNull();
+    const withValue = {
+      ...cmd,
+      values: [{ field_key: 'city', value: 'Salem', confidence: 0.9, source_phrase: null, number_parts: null }],
+    };
+    expect(sanitizeMapping(withValue, EVAL_FORM, null).command).toBeNull();
   });
 });

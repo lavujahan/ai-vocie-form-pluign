@@ -1,18 +1,17 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, Check, ChevronRight, Copy, Loader2, Mic, MonitorX, RotateCcw, Send, Square, WifiOff } from 'lucide-react';
 import {
   LOW_CONFIDENCE,
   type ChoiceHint,
-  type ChoiceReason,
   type DesktopReport,
   type DesktopState,
   type ResetScope,
   type SessionField,
   type SessionValue,
 } from '@vff/shared';
-import { MSG } from '@/lib/session-rules';
+import { fieldLabelFor, initialLang, saveLang, serverText, translate, type Lang, type TextKey } from '@/lib/i18n';
 import { Button, Card, FieldRow, Pill, cx } from '@/components/ui';
 import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
@@ -32,31 +31,57 @@ type FieldStatus =
   /** The computer couldn't match the spoken value to the dropdown's loaded options: pick one. */
   | { kind: 'pick'; hint: ChoiceHint; value?: SessionValue };
 
-export function displayValue(f: SessionField, v: string | null | undefined): string {
-  if (!v) return '';
-  if (f.field_type === 'checkbox' && !f.multiple) return v === 'true' ? 'Yes' : v === 'false' ? 'No' : v;
-  return v;
+// ---------- language (English / Tamil screens) ----------
+
+const LangCtx = createContext<{ lang: Lang; setLang: (l: Lang) => void }>({ lang: 'en', setLang: () => {} });
+
+/** Screen text, field labels and server messages in the chosen language. */
+function useI18n() {
+  const { lang } = useContext(LangCtx);
+  return {
+    lang,
+    t: (key: TextKey, vars?: Record<string, string | number>) => translate(lang, key, vars),
+    label: (f: SessionField) => fieldLabelFor(lang, f),
+    srv: (text: string | null | undefined) => serverText(lang, text),
+  };
 }
 
-const HINT_TEXT: Record<ChoiceReason, string> = {
-  ambiguous: 'Which one did you mean?',
-  no_match: "That isn't in the list. Pick the right one, or say it again.",
-  parent_changed: "That doesn't fit the new choice above. Pick again, or say it again.",
-  not_loaded: "The list didn't load on the computer. Pick from the list, or say it again.",
-};
+function displayValue(f: SessionField, v: string | null | undefined, t: ReturnType<typeof useI18n>['t']): string {
+  if (!v) return '';
+  if (f.field_type === 'checkbox' && !f.multiple) return v === 'true' ? t('yes') : v === 'false' ? t('no') : v;
+  return v;
+}
 
 function fmtTime(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 export function VoiceSession({ code }: { code: string }) {
+  const [lang, setLangState] = useState<Lang>('en');
+  // Read after mount (localStorage / phone language) so server and client render the same first.
+  useEffect(() => setLangState(initialLang()), []);
+  const setLang = (l: Lang) => {
+    setLangState(l);
+    saveLang(l);
+  };
+  return (
+    <LangCtx.Provider value={{ lang, setLang }}>
+      <SessionScreen code={code} />
+    </LangCtx.Provider>
+  );
+}
+
+function SessionScreen({ code }: { code: string }) {
   const s = useVoiceSession(code);
+  const { t, label, srv } = useI18n();
   const [mode, setMode] = useState<Mode>('full');
   const [view, setView] = useState<View>('record');
   const [target, setTarget] = useState<string | null>(null);
   const [recordingTarget, setRecordingTarget] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Bumped when the user says "send it": the review page asks before sending. */
+  const [askSend, setAskSend] = useState(0);
 
   /**
    * Tags for one recording: the first piece gets `seq`; each extra piece (long recordings are cut
@@ -120,9 +145,10 @@ export function VoiceSession({ code }: { code: string }) {
     const added = s.fields.length - fieldCount.current;
     if (fieldCount.current > 0 && added > 0) {
       const step = steps.get(s.fields[s.fields.length - 1].id);
-      setNotice(`${added} new ${added === 1 ? 'field' : 'fields'} on the computer${step ? ` (step ${step})` : ''}.`);
+      setNotice(t(added === 1 ? 'newFieldsOne' : 'newFieldsMany', { n: added, step: step ? t('stepSuffix', { n: step }) : '' }));
     }
     fieldCount.current = s.fields.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.fields, steps]);
 
   // Reloading or leaving now would lose the recording, or pieces that are still uploading.
@@ -130,21 +156,40 @@ export function VoiceSession({ code }: { code: string }) {
     if (!recordingNow && processing === 0) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
-      e.returnValue = 'Recording in progress. Leave anyway?';
+      e.returnValue = t('beforeUnload');
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordingNow, processing]);
+
+  // A spoken command never acts by itself: it opens the same confirmation a tap would.
+  useEffect(() => {
+    const c = s.command;
+    if (!c) return;
+    s.clearCommand();
+    if (c.command === 'start_over') {
+      setResetOpen(true);
+      window.scrollTo(0, 0);
+    } else if (c.command === 'send') {
+      showView('review');
+      setAskSend((n) => n + 1);
+    } else {
+      const left = s.fields.filter((f) => ['missing', 'pick'].includes(statusOf(f).kind)).map(label);
+      setNotice(left.length ? t('whatsLeftSome', { list: left.join(', ') }) : t('whatsLeftNone'));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.command]);
 
   async function startOver(scope: ResetScope) {
     if (recorder.state === 'recording') recorder.stop();
     setRecordingTarget(null);
     const err = await s.reset(scope);
-    if (err) return err;
+    if (err) return srv(err);
     setResetOpen(false);
     setTarget(null);
     setView('record');
-    setNotice(scope === 'both' ? 'Cleared here and on the computer. Ready for the next applicant.' : 'Answers cleared. Ready for the next applicant.');
+    setNotice(t(scope === 'both' ? 'clearedBoth' : 'clearedPhone'));
     window.scrollTo(0, 0);
     return null;
   }
@@ -164,12 +209,12 @@ export function VoiceSession({ code }: { code: string }) {
       if (mode === 'field' && target) setTarget(nextEmpty(target));
       return;
     }
-    const t = mode === 'field' ? target ?? nextEmpty(null) : null;
-    if (mode === 'field' && !t) return;
-    if (t !== target) setTarget(t);
+    const tgt = mode === 'field' ? target ?? nextEmpty(null) : null;
+    if (mode === 'field' && !tgt) return;
+    if (tgt !== target) setTarget(tgt);
     const seq = s.takeSeq(); // seq = when the user spoke, not when processing finishes
     // Long recordings are sent in ~28 s pieces, each with the next seq.
-    if (await recorder.start(...pieceTags(seq, t))) setRecordingTarget(t);
+    if (await recorder.start(...pieceTags(seq, tgt))) setRecordingTarget(tgt);
   }
 
   /** Mic inside the review list: records straight into one field without leaving the page. */
@@ -198,7 +243,7 @@ export function VoiceSession({ code }: { code: string }) {
     return (
       <Shell>
         <Card className="flex items-center gap-3 text-sm text-muted">
-          <Loader2 size={18} className="animate-spin" /> Connecting to your computer…
+          <Loader2 size={18} className="animate-spin" /> {t('connecting')}
         </Card>
       </Shell>
     );
@@ -208,9 +253,9 @@ export function VoiceSession({ code }: { code: string }) {
       <Shell>
         <Card>
           <h1 className="flex items-center gap-2 text-base font-semibold">
-            <AlertCircle size={18} className="text-danger" /> Can&apos;t continue
+            <AlertCircle size={18} className="text-danger" /> {t('cantContinue')}
           </h1>
-          <p className="mt-2 text-sm text-muted">{s.fatal}</p>
+          <p className="mt-2 text-sm text-muted">{srv(s.fatal)}</p>
         </Card>
       </Shell>
     );
@@ -222,9 +267,9 @@ export function VoiceSession({ code }: { code: string }) {
       <Shell>
         <Card>
           <h1 className="flex items-center gap-2 text-base font-semibold text-danger-ink">
-            <MonitorX size={18} /> Tab closed
+            <MonitorX size={18} /> {t('tabClosedTitle')}
           </h1>
-          <p className="mt-2 text-sm text-muted">{MSG.tabClosed.replace(/^Tab closed\. /, '')}</p>
+          <p className="mt-2 text-sm text-muted">{t('tabClosedBody')}</p>
         </Card>
       </Shell>
     );
@@ -239,7 +284,7 @@ export function VoiceSession({ code }: { code: string }) {
       <DesktopBanner state={desktop} />
       {!s.online && (
         <p className="mb-3 flex items-center gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
-          <WifiOff size={16} className="shrink-0" /> You&apos;re offline. Recordings are sent when you&apos;re back online.
+          <WifiOff size={16} className="shrink-0" /> {t('offline')}
         </p>
       )}
       {notice && (
@@ -268,6 +313,7 @@ export function VoiceSession({ code }: { code: string }) {
           sent={s.session?.status === 'filled'}
           desktop={desktop}
           report={s.session?.desktop_report ?? null}
+          askSend={askSend}
           onBack={() => showView('record')}
           onEdit={s.editValue}
           onMic={micFor}
@@ -288,13 +334,13 @@ export function VoiceSession({ code }: { code: string }) {
       <Card>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h1 className="text-base font-semibold">{s.session?.form_name || 'Form'}</h1>
+            <h1 className="text-base font-semibold">{s.session?.form_name || t('form')}</h1>
             {/* With several forms open on the computer, the site helps check this is the right QR. */}
             {hostOf(s.session?.page_url) && <p className="truncate text-xs text-muted">{hostOf(s.session?.page_url)}</p>}
           </div>
           {processing > 0 && (
             <Pill tone="neutral">
-              <Loader2 size={12} className="mr-1 animate-spin" /> {processing} processing
+              <Loader2 size={12} className="mr-1 animate-spin" /> {t('processing', { n: processing })}
             </Pill>
           )}
         </div>
@@ -315,7 +361,7 @@ export function VoiceSession({ code }: { code: string }) {
                 mode === m ? 'border-transparent bg-accent-bg font-medium text-accent-ink' : 'border-line bg-card text-ink',
               )}
             >
-              {m === 'full' ? 'Full form' : 'Field by field'}
+              {t(m === 'full' ? 'modeFull' : 'modeField')}
             </button>
           ))}
         </div>
@@ -324,7 +370,7 @@ export function VoiceSession({ code }: { code: string }) {
           <button
             onClick={toggleMic}
             disabled={recorder.state === 'unsupported' || (mode === 'field' && !target && !recording)}
-            aria-label={recording ? 'Stop recording' : 'Start recording'}
+            aria-label={t(recording ? 'stopRec' : 'startRec')}
             className={cx(
               'relative grid size-24 place-items-center rounded-full bg-danger text-white shadow-sm transition-transform active:scale-95 disabled:opacity-40',
               recording && 'ring-8 ring-danger/20',
@@ -335,24 +381,22 @@ export function VoiceSession({ code }: { code: string }) {
           </button>
           <p className={cx('mt-3 text-center text-sm', recording ? 'font-medium text-danger-ink' : 'text-muted')}>
             {recorder.state === 'unsupported'
-              ? 'This browser can’t record audio. Open the link in Chrome (Android) or Safari (iPhone).'
+              ? t('unsupported')
               : recorder.state === 'denied'
-                ? 'Microphone access was blocked.'
+                ? t('micBlocked')
                 : recording
-                  ? `Listening… ${fmtTime(recorder.elapsed)}`
+                  ? t('listening', { time: fmtTime(recorder.elapsed) })
                   : mode === 'field'
                     ? targetField
-                      ? `Tap to speak: ${targetField.label}`
-                      : 'All fields have values'
-                    : 'Tap to speak'}
+                      ? t('tapToSpeakField', { label: label(targetField) })
+                      : t('allFilled')
+                    : t('tapToSpeak')}
           </p>
           {recorder.state === 'unsupported' && <CopyLinkButton />}
           {recorder.state === 'denied' && <MicHelp onRetry={toggleMic} />}
           {!recording && recorder.notice && (
             <p className="mt-2 rounded-lg bg-warn-bg px-3 py-2 text-center text-sm text-warn-ink">
-              {recorder.notice === 'interrupted'
-                ? 'Recording stopped (screen locked, call or app switch). What you said was sent. Tap the mic to continue.'
-                : 'Tap, speak, then tap again to stop.'}
+              {t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort')}
             </p>
           )}
         </div>
@@ -369,7 +413,7 @@ export function VoiceSession({ code }: { code: string }) {
               disabled={!u.blob}
               className="mt-2 flex w-full items-center gap-2 rounded-lg bg-danger-bg px-3 py-2 text-left text-sm text-danger-ink"
             >
-              <AlertCircle size={16} /> {u.error ?? 'Failed'}
+              <AlertCircle size={16} /> {u.error ? srv(u.error) : t('failed')}
             </button>
           ))}
       </Card>
@@ -380,7 +424,7 @@ export function VoiceSession({ code }: { code: string }) {
             <Fragment key={f.id}>
               <StepDivider step={steps.get(f.id)} />
               <FieldRow
-                label={f.label}
+                label={label(f)}
                 active={f.field_key === target}
                 onClick={() => {
                   const st = statusOf(f);
@@ -396,17 +440,32 @@ export function VoiceSession({ code }: { code: string }) {
       )}
 
       <Button className="mt-3 w-full" onClick={() => showView('review')}>
-        Check before sending · {filledCount}/{s.fields.length}
+        {t('checkBeforeSending')} · {filledCount}/{s.fields.length}
         <ChevronRight size={16} />
       </Button>
-      {!s.live && <p className="mt-2 text-center text-xs text-muted">Reconnecting…</p>}
+      {!s.live && <p className="mt-2 text-center text-xs text-muted">{t('reconnecting')}</p>}
       {!resetOpen && <StartOverButton onClick={() => setResetOpen(true)} />}
     </Shell>
   );
 }
 
+/** Page frame, with the தமிழ் / English switch. */
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto min-h-dvh max-w-md px-4 py-4">{children}</main>;
+  const { lang, setLang } = useContext(LangCtx);
+  return (
+    <main className="mx-auto min-h-dvh max-w-md px-4 py-4">
+      <div className="mb-2 flex justify-end">
+        <button
+          onClick={() => setLang(lang === 'ta' ? 'en' : 'ta')}
+          className="min-h-8 rounded-md border border-line px-2.5 text-xs text-muted hover:text-ink"
+          lang={lang === 'ta' ? 'en' : 'ta'}
+        >
+          {translate(lang, 'switchLang')}
+        </button>
+      </div>
+      {children}
+    </main>
+  );
 }
 
 /**
@@ -424,8 +483,9 @@ function stepStarts(fields: SessionField[]): Map<string, number> {
 }
 
 function StepDivider({ step }: { step: number | undefined }) {
+  const { t } = useI18n();
   if (!step) return null;
-  return <p className="pt-3 pb-1 text-xs font-semibold tracking-wide text-muted uppercase">Step {step}</p>;
+  return <p className="pt-3 pb-1 text-xs font-semibold tracking-wide text-muted uppercase">{t('step', { n: step })}</p>;
 }
 
 function hostOf(url: string | undefined): string {
@@ -438,19 +498,21 @@ function hostOf(url: string | undefined): string {
 
 /** The form tab on the computer moved to another site: speaking is fine, sending isn't. */
 function DesktopBanner({ state }: { state: DesktopState }) {
+  const { t } = useI18n();
   if (state !== 'moved') return null;
   return (
     <p className="mb-3 flex items-start gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
-      <MonitorX size={16} className="mt-0.5 shrink-0" /> {MSG.tabMoved}
+      <MonitorX size={16} className="mt-0.5 shrink-0" /> {t('srvTabMoved')}
     </p>
   );
 }
 
 function StartOverButton({ onClick }: { onClick: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="mt-4 text-center">
       <button onClick={onClick} className="inline-flex min-h-10 items-center gap-1.5 px-3 text-sm text-muted hover:text-ink">
-        <RotateCcw size={14} /> Start over
+        <RotateCcw size={14} /> {t('startOver')}
       </button>
     </div>
   );
@@ -466,6 +528,7 @@ function StartOverSheet({
   onCancel: () => void;
   onConfirm: (scope: ResetScope) => Promise<string | null>;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState<ResetScope | null>(null);
   const [error, setError] = useState<string | null>(null);
   const run = async (scope: ResetScope) => {
@@ -476,20 +539,18 @@ function StartOverSheet({
   return (
     <Card className="mb-3 border-danger/40">
       <h2 className="flex items-center gap-2 text-base font-semibold">
-        <RotateCcw size={16} /> Start over
+        <RotateCcw size={16} /> {t('startOver')}
       </h2>
-      <p className="mt-1 text-sm text-muted">
-        Clear all {count} {count === 1 ? 'answer' : 'answers'}? This can&apos;t be undone.
-      </p>
+      <p className="mt-1 text-sm text-muted">{t(count === 1 ? 'clearOne' : 'clearMany', { n: count })}</p>
       <div className="mt-3 space-y-2">
         <Button className="w-full" loading={busy === 'phone'} disabled={!!busy} onClick={() => run('phone')}>
-          Clear phone answers
+          {t('clearPhone')}
         </Button>
         <Button className="w-full" loading={busy === 'both'} disabled={!!busy} onClick={() => run('both')}>
-          Clear phone and computer form
+          {t('clearBoth')}
         </Button>
         <Button variant="ghost" className="w-full" disabled={!!busy} onClick={onCancel}>
-          Cancel
+          {t('cancel')}
         </Button>
       </div>
       {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
@@ -499,6 +560,7 @@ function StartOverSheet({
 
 /** In-app browsers (WhatsApp, Lens…) can't record: copy the link to open it in Chrome or Safari. */
 function CopyLinkButton() {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   return (
     <Button
@@ -508,58 +570,60 @@ function CopyLinkButton() {
           await navigator.clipboard.writeText(window.location.href);
           setCopied(true);
         } catch {
-          window.prompt('Copy this link and open it in Chrome:', window.location.href);
+          window.prompt(t('copyPrompt'), window.location.href);
         }
       }}
     >
-      <Copy size={14} /> {copied ? 'Link copied. Paste it in Chrome' : 'Copy link'}
+      <Copy size={14} /> {t(copied ? 'linkCopied' : 'copyLink')}
     </Button>
   );
 }
 
 function MicHelp({ onRetry }: { onRetry: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="mt-2 w-full rounded-lg bg-subtle px-3 py-2 text-sm text-ink/90">
-      <p className="font-medium">To allow the microphone:</p>
+      <p className="font-medium">{t('micHelpTitle')}</p>
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted">
-        <li>Chrome (Android): tap the icon left of the address, then Permissions → Microphone → Allow.</li>
-        <li>Safari (iPhone): tap “aA” in the address bar, then Website Settings → Microphone → Allow.</li>
+        <li>{t('micHelpChrome')}</li>
+        <li>{t('micHelpSafari')}</li>
       </ul>
       <Button className="mt-2 w-full" onClick={onRetry}>
-        Try again
+        {t('tryAgain')}
       </Button>
     </div>
   );
 }
 
 function StatusMarker({ field, status }: { field: SessionField; status: FieldStatus }) {
+  const { t } = useI18n();
   switch (status.kind) {
     case 'recording':
       return (
         <span className="inline-flex items-center gap-1.5 text-danger-ink">
-          <span className="size-2 animate-pulse rounded-full bg-danger" /> Recording
+          <span className="size-2 animate-pulse rounded-full bg-danger" /> {t('recordingPill')}
         </span>
       );
     case 'processing':
-      return <Loader2 size={16} className="inline animate-spin text-muted" aria-label="Processing" />;
+      return <Loader2 size={16} className="inline animate-spin text-muted" aria-label={t('processingLabel')} />;
     case 'error':
-      return <Pill tone="danger">Tap to retry</Pill>;
+      return <Pill tone="danger">{t('tapToRetry')}</Pill>;
     case 'low':
       return (
         <span className="inline-flex items-center gap-2">
-          {displayValue(field, status.value.value)} <Pill tone="warn">Check this</Pill>
+          {displayValue(field, status.value.value, t)} <Pill tone="warn">{t('checkThis')}</Pill>
         </span>
       );
     case 'filled':
       return (
         <span className="inline-flex items-center gap-1.5">
-          <Check size={14} className="text-live-ink" /> {displayValue(field, status.value.value)}
+          <Check size={14} className="text-live-ink" /> {displayValue(field, status.value.value, t)}
         </span>
       );
     case 'missing':
-      return <Pill tone="warn">Say it</Pill>;
+      return <Pill tone="warn">{t('sayIt')}</Pill>;
     case 'pick':
-      return <Pill tone="warn">Pick one</Pill>;
+      return <Pill tone="warn">{t('pickOne')}</Pill>;
     default:
       return <span className="text-muted">—</span>;
   }
@@ -571,6 +635,7 @@ function ReviewView({
   sent,
   desktop,
   report,
+  askSend,
   onBack,
   onEdit,
   onMic,
@@ -584,6 +649,8 @@ function ReviewView({
   sent: boolean;
   desktop: DesktopState;
   report: DesktopReport | null;
+  /** Bumped when the user said "send it": ask before sending. */
+  askSend: number;
   onBack: () => void;
   onEdit: (key: string, value: string | null) => Promise<string | null>;
   onMic: (key: string) => void;
@@ -592,10 +659,12 @@ function ReviewView({
   onRetry: (u: LocalUtterance) => void;
   onSend: () => Promise<string | null>;
 }) {
+  const { t, label, srv } = useI18n();
   const [editing, setEditing] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [confirmMissing, setConfirmMissing] = useState(false);
+  /** Asking before sending: required fields are empty, or the send was spoken. */
+  const [confirm, setConfirm] = useState<'missing' | 'voice' | null>(null);
   const [sends, setSends] = useState(0);
   const ack = useDesktopAck(sent, report, sends);
   const steps = useMemo(() => stepStarts(fields), [fields]);
@@ -603,22 +672,28 @@ function ReviewView({
   const missing = fields.filter((f) => ['missing', 'pick'].includes(statusOf(f).kind)).length;
   // Sent, but the computer didn't fill (asleep, or the form page changed): allow sending again.
   const canResend = ack.kind === 'timeout' || ack.kind === 'nothing';
+  const canSend = desktop === 'open' && (!sent || canResend);
   const send = async () => {
-    setConfirmMissing(false);
+    setConfirm(null);
     setSending(true);
     const err = await onSend();
-    setSendError(err);
+    setSendError(err ? srv(err) : null);
     if (!err) setSends((n) => n + 1);
     setSending(false);
   };
 
+  useEffect(() => {
+    if (askSend > 0 && canSend) setConfirm('voice');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [askSend]);
+
   return (
     <Card>
       <div className="flex items-center gap-2">
-        <button onClick={onBack} aria-label="Back to recording" className="-ml-1 grid size-9 place-items-center rounded-lg hover:bg-subtle">
+        <button onClick={onBack} aria-label={t('backToRecording')} className="-ml-1 grid size-9 place-items-center rounded-lg hover:bg-subtle">
           <ArrowLeft size={18} />
         </button>
-        <h1 className="text-base font-semibold">Check before sending</h1>
+        <h1 className="text-base font-semibold">{t('checkBeforeSending')}</h1>
       </div>
       <div className="mt-2">
         {fields.map((f) => {
@@ -627,8 +702,8 @@ function ReviewView({
             <div key={f.id} className="border-b border-line last:border-b-0">
               <StepDivider step={steps.get(f.id)} />
               <FieldRow
-                label={f.label}
-                sub={st.kind === 'pick' ? `You said “${st.hint.spoken}”` : 'value' in st ? st.value?.source_phrase : undefined}
+                label={label(f)}
+                sub={st.kind === 'pick' ? t('youSaid', { text: st.hint.spoken }) : 'value' in st ? st.value?.source_phrase : undefined}
                 onClick={() => {
                   if (st.kind === 'error' && st.utt.blob) onRetry(st.utt);
                   else setEditing(editing === f.field_key ? null : f.field_key);
@@ -644,7 +719,7 @@ function ReviewView({
                   onSave={async (v) => {
                     const err = await onEdit(f.field_key, v);
                     if (!err) setEditing(null);
-                    return err;
+                    return err ? srv(err) : null;
                   }}
                   recording={recordingKey === f.field_key}
                   elapsed={elapsed}
@@ -660,18 +735,18 @@ function ReviewView({
           );
         })}
       </div>
-      <p className="mt-3 text-xs text-muted">Tap any value to edit or re-speak it. Captcha and OTP: type them on the computer.</p>
-      {confirmMissing ? (
+      <p className="mt-3 text-xs text-muted">{t('tapToEdit')}</p>
+      {confirm ? (
         <div className="mt-3 rounded-lg bg-warn-bg px-3 py-2">
           <p className="text-sm text-warn-ink">
-            {missing} required {missing === 1 ? 'field is' : 'fields are'} empty. Send anyway?
+            {missing ? t(missing === 1 ? 'missingOne' : 'missingMany', { n: missing }) : t('voiceSendConfirm')}
           </p>
           <div className="mt-2 flex gap-2">
             <Button className="flex-1" onClick={send}>
-              Send anyway
+              {t(missing ? 'sendAnyway' : 'sendNow')}
             </Button>
-            <Button variant="ghost" onClick={() => setConfirmMissing(false)}>
-              Cancel
+            <Button variant="ghost" onClick={() => setConfirm(null)}>
+              {t('cancel')}
             </Button>
           </div>
         </div>
@@ -679,21 +754,21 @@ function ReviewView({
         <Button
           className="mt-3 w-full"
           loading={sending}
-          disabled={desktop !== 'open' || (sent && !canResend)}
-          onClick={() => (missing && !sent ? setConfirmMissing(true) : send())}
+          disabled={!canSend}
+          onClick={() => (missing && !sent ? setConfirm('missing') : send())}
         >
           {sent && !canResend ? (
             <>
-              <Check size={16} /> Sent to desktop
+              <Check size={16} /> {t('sentToDesktop')}
             </>
           ) : (
             <>
-              <Send size={16} /> {sent ? 'Send again' : 'Send to desktop'}
+              <Send size={16} /> {t(sent ? 'sendAgain' : 'sendToDesktop')}
             </>
           )}
         </Button>
       )}
-      {desktop === 'moved' && <p className="mt-2 text-xs text-warn-ink">{MSG.tabMoved}</p>}
+      {desktop === 'moved' && <p className="mt-2 text-xs text-warn-ink">{t('srvTabMoved')}</p>}
       {sendError && <p className="mt-2 text-xs text-danger-ink">{sendError}</p>}
       {sent && !sendError && <AckLine ack={ack} />}
     </Card>
@@ -727,8 +802,8 @@ function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: numbe
     // sent before this page loaded: any report counts.
     if (sends > 0) sentWith.current = report?.at ?? null;
     else if (sentWith.current === undefined) sentWith.current = null;
-    const t = setTimeout(() => setTimedOut(true), ACK_TIMEOUT_MS);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setTimedOut(true), ACK_TIMEOUT_MS);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sent, sends]);
 
@@ -740,32 +815,25 @@ function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: numbe
 }
 
 function AckLine({ ack }: { ack: Ack }) {
+  const { t } = useI18n();
   switch (ack.kind) {
     case 'waiting':
       return (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
-          <Loader2 size={12} className="animate-spin" /> Filling on the computer…
+          <Loader2 size={12} className="animate-spin" /> {t('ackWaiting')}
         </p>
       );
     case 'filled':
       return (
         <p className="mt-2 text-xs text-live-ink">
-          Filled on computer ✓ {ack.report.filled}/{ack.report.total}
-          {ack.report.skipped > 0 && <span className="text-warn-ink"> · {ack.report.skipped} not filled, check them there</span>}
+          {t('ackFilled', { filled: ack.report.filled, total: ack.report.total })}
+          {ack.report.skipped > 0 && <span className="text-warn-ink">{t('ackSkipped', { n: ack.report.skipped })}</span>}
         </p>
       );
     case 'nothing':
-      return (
-        <p className="mt-2 text-xs text-danger-ink">
-          Nothing could be filled on the computer. The form page may have changed. Open it again on the computer, then Send again.
-        </p>
-      );
+      return <p className="mt-2 text-xs text-danger-ink">{t('ackNothing')}</p>;
     case 'timeout':
-      return (
-        <p className="mt-2 text-xs text-danger-ink">
-          The computer hasn&apos;t responded. Is the browser open with the form tab? Then Send again.
-        </p>
-      );
+      return <p className="mt-2 text-xs text-danger-ink">{t('ackTimeout')}</p>;
     default:
       return null;
   }
@@ -788,6 +856,7 @@ function ValueEditor({
   recording: boolean;
   elapsed: number;
 }) {
+  const { t, label } = useI18n();
   const [value, setValue] = useState(initial ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -798,8 +867,8 @@ function ValueEditor({
     input = (
       <select className={inputCls} value={value} onChange={(e) => setValue(e.target.value)}>
         <option value="">—</option>
-        <option value="true">Yes</option>
-        <option value="false">No</option>
+        <option value="true">{t('yes')}</option>
+        <option value="false">{t('no')}</option>
       </select>
     );
   } else if (field.field_type === 'checkbox' && field.multiple) {
@@ -846,23 +915,23 @@ function ValueEditor({
       {field.choice_hint && (
         <div className="rounded-lg bg-warn-bg/60 px-3 py-2 text-sm">
           <p className="text-warn-ink">
-            You said “{field.choice_hint.spoken}”. {HINT_TEXT[field.choice_hint.reason]}
+            {t('youSaid', { text: field.choice_hint.spoken })}. {t(`hint_${field.choice_hint.reason}`)}
           </p>
           {field.choice_hint.top.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
-              {field.choice_hint.top.map((label) => (
+              {field.choice_hint.top.map((opt) => (
                 <button
-                  key={label}
+                  key={opt}
                   type="button"
                   disabled={busy}
                   onClick={async () => {
                     setBusy(true);
-                    setError(await onSave(label));
+                    setError(await onSave(opt));
                     setBusy(false);
                   }}
                   className="min-h-10 rounded-lg border border-line bg-card px-3 font-medium text-ink"
                 >
-                  {label}
+                  {opt}
                 </button>
               ))}
             </div>
@@ -871,7 +940,7 @@ function ValueEditor({
       )}
       {input}
       {error && <p className="text-xs text-danger-ink">{error}</p>}
-      {recording && <p className="text-xs font-medium text-danger-ink">Listening… tap the stop button when done.</p>}
+      {recording && <p className="text-xs font-medium text-danger-ink">{t('listeningStop')}</p>}
       <div className="flex gap-2">
         <Button
           className="flex-1"
@@ -882,11 +951,11 @@ function ValueEditor({
             setBusy(false);
           }}
         >
-          Save
+          {t('save')}
         </Button>
         <Button
           onClick={onMic}
-          aria-label={recording ? 'Stop recording' : `Speak ${field.label}`}
+          aria-label={recording ? t('stopRec') : t('speakField', { label: label(field) })}
           className={recording ? 'border-danger text-danger-ink' : ''}
         >
           {recording ? (
@@ -898,7 +967,7 @@ function ValueEditor({
           )}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
-          Cancel
+          {t('cancel')}
         </Button>
       </div>
     </div>

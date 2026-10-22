@@ -4,7 +4,7 @@
  */
 export const EXAMPLE_FORM = `full_name (Full name, text) · father_name (Father name, text) · email (Email, email) · phone (Phone, tel) · dob (Date of birth, date) · gender (Gender, radio: Male | Female | Other) · marital (Marital status, select: Single | Married) · city (City, text) · address (Address, textarea) · name_ta (Name in Tamil, text, output_script=ta)`;
 
-export const FEW_SHOT: { speech: string; current?: string; output: string }[] = [
+export const FEW_SHOT: { speech: string; current?: string; recent?: string; output: string }[] = [
   {
     speech: 'en peru Ramesh Kumar, email ramesh at gmail dot com, ooru Chennai',
     output:
@@ -41,12 +41,37 @@ export const FEW_SHOT: { speech: string; current?: string; output: string }[] = 
     output:
       '{"values":[{"field_key":"address","value":"12 Gandhi Street, Anna Nagar, Chennai","confidence":0.85,"source_phrase":"12 காந்தி தெரு, அண்ணா நகர், சென்னை"}],"unmapped_speech":"weather nalla irukku","missing_required":[]}',
   },
+  // A correction that doesn't name the field: the recent speech says which field "Jahan" was.
+  {
+    speech: 'illa, Jahan illa, Jagan',
+    current: 'full_name = "Jahan"',
+    recent: '"Name vandhu Jahan" → full_name="Jahan"',
+    output: '{"values":[{"field_key":"full_name","value":"Jagan","confidence":0.9,"source_phrase":"Jagan"}],"unmapped_speech":null,"missing_required":[]}',
+  },
+  // A partial edit: change one digit of the current value, keep the rest exactly.
+  {
+    speech: 'phone number la kadaisi digit 5',
+    current: 'phone = "9876543210"',
+    output: '{"values":[{"field_key":"phone","value":"9876543215","confidence":0.85,"source_phrase":"kadaisi digit 5"}],"unmapped_speech":null,"missing_required":[]}',
+  },
+  // Spelled-out letters become one word.
+  {
+    speech: 'father name spelling J A G A D H E E S A N',
+    output: '{"values":[{"field_key":"father_name","value":"Jagadheesan","confidence":0.95,"source_phrase":"J A G A D H E E S A N"}],"unmapped_speech":null,"missing_required":[]}',
+  },
+  // A command, not a value: the phone asks before acting on it.
+  {
+    speech: 'ellam azhichidunga, start over',
+    output: '{"values":[],"unmapped_speech":null,"missing_required":[],"command":"start_over"}',
+  },
 ];
 
-// number_parts is omitted above where it is null, to keep the examples short.
+// number_parts and command are omitted above where they are null, to keep the examples short.
 export function renderFewShot(): string {
   return FEW_SHOT.map(
     (e, i) =>
-      `Example ${i + 1}\nSpeech: ${e.speech}${e.current ? `\nCurrent values: ${e.current}` : ''}\nOutput: ${e.output}`,
+      `Example ${i + 1}\nSpeech: ${e.speech}${e.current ? `\nCurrent values: ${e.current}` : ''}${
+        e.recent ? `\nRecent speech: ${e.recent}` : ''
+      }\nOutput: ${e.output}`,
   ).join('\n\n');
 }

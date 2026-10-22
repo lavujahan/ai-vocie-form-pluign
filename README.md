@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql` and `0005_session_reset.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql` and `0006_corrections_tamil.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -78,7 +78,7 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 | `pnpm test` | Unit tests (vitest), no network:<br>• shared normalization and validation<br>• login lockout and IP rate limit<br>• JWTs<br>• agent tools and guardrails<br>• Field Mapping Agent on a scripted model<br>• detector and filler on jsdom, including React controlled inputs |
 | `pnpm --filter extension e2e` | Builds the extension, loads it unpacked in Chromium with Playwright, and fills the vanilla, React and Vue fixtures through the real content script. Checks the framework state, latest-wins re-fill and Undo. Run `npx playwright install chromium` once first. |
 | `pnpm --filter web check:db` | Runs against your Supabase project: latest-wins upsert (seq 3, 1, 2 finishing out of order), single-use pairing and RLS isolation. |
-| `pnpm eval:mapping` | Sends about 30 Tamil, English and Tanglish fixtures to the real Field Mapping Agent and prints per-field accuracy. Uses OpenAI tokens. |
+| `pnpm eval:mapping` | Sends 54 fixtures to the real Field Mapping Agent and prints per-field accuracy per tag. The fixtures cover English, Tanglish and Tamil, a CAN registration form, corrections and spoken commands. `--only can,corrections` runs a subset; `--model gpt-4o-mini` compares models. Reports are saved to `apps/web/eval-results/`. Uses OpenAI tokens. |
 
 ## Deploying
 
@@ -121,6 +121,24 @@ One signed-in user can fill several forms at once, for example two CAN registrat
 - **Moved tabs are safe.** A tab that has moved to a different site is never filled with the old form's values.
 - **Limit:** 5 active forms per browser.
 - **Sign out** ends all of them.
+
+## Spoken corrections and commands
+
+The Field Mapping Agent also sees the **last 3 recordings** and the fields they set. That lets corrections that don't name a field work. All of these go through the same AI call, with no extra agent and no extra delay:
+- **Pointing back at the last answer:** "no, not Jahan, Jagan", "Jahan illa, Jagan" and "change it to 9876…" correct the field that was just said.
+- **Partial edits:** "the last digit is 5" and "pincode la 455 illa 445" change part of the current value.
+- **Spelled names:** "J A G A N", including Tamil letter names, becomes "Jagan".
+- **Commands:** "start over", "send it" and "what is left?" (also in Tanglish and Tamil). The phone never acts on these by itself:
+  - "start over" opens the Start over sheet;
+  - "send it" asks "Send the form to the computer now?";
+  - "what is left?" lists the required fields that are still empty.
+
+## Phone screens in Tamil
+
+The **தமிழ் / English** switch at the top of the phone page changes every screen text and message.
+- The choice is remembered on the phone; the default follows the phone's language.
+- Field labels show both languages, like "தந்தை பெயர் · Father's name". The Form Analyzer writes `label_ta` (migration `0006`), and the English label stays so it matches the computer screen.
+- Values filled into the form stay in English.
 
 ## Custom dropdowns (react-select, MUI, choices.js, select2)
 
@@ -201,6 +219,5 @@ These are planned for later:
 - cross-origin iframes
 - PWA manifest
 - offscreen-document fallback for the service worker
-- correction Orchestrator agent
 
 See `PLAN.md` for the full design.

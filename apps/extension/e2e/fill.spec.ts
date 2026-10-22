@@ -173,6 +173,9 @@ test('custom dropdowns: react-select, MUI, choices.js and select2 fill like a us
   expect(byKey.village.label).toBe('Revenue village');
   expect(byKey.relationship.options?.map((o) => o.label)).toEqual(['Father', 'Mother', 'Husband', 'Guardian']);
   expect(byKey.taluk.dynamic_options).toBe(true);
+  // Multi-select is known when scanning, so the AI gets "(multiple)" for it.
+  expect(byKey.languages.multiple).toBe(true);
+  expect(byKey.district.multiple).toBe(false);
 
   const report = await toContent<FillResult>(url, {
     type: 'FILL',

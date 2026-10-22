@@ -52,6 +52,8 @@ export type FieldRow = {
   position: number;
   dynamic_options: boolean;
   choice_hint: ChoiceHint | null;
+  /** Migration 0006. */
+  label_ta?: string | null;
 };
 
 const BASE_COLUMNS =
@@ -143,6 +145,7 @@ export function toSessionField(f: FieldRow): SessionField {
     depends_on: f.depends_on,
     dynamic_options: f.dynamic_options ?? false,
     choice_hint: f.choice_hint ?? null,
+    label_ta: f.label_ta ?? null,
   };
 }
 
@@ -165,6 +168,42 @@ export async function getValues(sessionId: string): Promise<SessionValue[]> {
       .select('field_id, value, confidence, source_phrase, source_seq, updated_at')
       .eq('session_id', sessionId),
   ) as SessionValue[];
+}
+
+/**
+ * The last few recordings before `beforeSeq` (since the last Start over), oldest first, with the
+ * fields each one still holds: context for corrections like "no, not Jahan, Jagan". Earlier pieces of
+ * the recording being mapped are left out (they are already joined into its transcript).
+ */
+export async function recentSpeech(
+  session: Pick<SessionRow, 'id' | 'reset_seq'>,
+  beforeSeq: number,
+  recordingId: string | null,
+  fields: Pick<FieldRow, 'id' | 'field_key'>[],
+  values: SessionValue[],
+  limit = 3,
+): Promise<{ speech: string; set: Record<string, string | null> }[]> {
+  const { data, error } = await db()
+    .from('utterances')
+    .select('seq, transcript, recording_id')
+    .eq('session_id', session.id)
+    .eq('status', 'done')
+    .lt('seq', beforeSeq)
+    .gt('seq', session.reset_seq ?? 0)
+    .order('seq', { ascending: false })
+    .limit(limit * 3);
+  if (error || !data) return [];
+  const keyById = new Map(fields.map((f) => [f.id, f.field_key]));
+  return (data as { seq: number; transcript: string | null; recording_id: string | null }[])
+    .filter((r) => r.transcript?.trim() && (!recordingId || r.recording_id !== recordingId))
+    .slice(0, limit)
+    .reverse()
+    .map((r) => ({
+      speech: r.transcript!.trim().slice(0, 400),
+      set: Object.fromEntries(
+        values.filter((v) => v.source_seq === r.seq && keyById.has(v.field_id)).map((v) => [keyById.get(v.field_id)!, v.value]),
+      ),
+    }));
 }
 
 export async function getUtterances(sessionId: string): Promise<UtteranceRow[]> {

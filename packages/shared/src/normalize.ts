@@ -55,8 +55,29 @@ function similarity(a: string, b: string): number {
   return max === 0 ? 1 : 1 - levenshtein(a, b) / max;
 }
 
+/**
+ * "+" / "-" carry meaning in some options (blood groups: O+ vs O-), but normalizeText drops them, so
+ * "O negative" would look like "O+". Read the sign from the raw text: spoken words or the symbol.
+ */
+const POSITIVE = /\+|\bpositive\b|\bpos\b|\bplus\b|பாசிட்டிவ்|பாசிடிவ்/i;
+const NEGATIVE = /[−–]|-\s*$|-ve\b|\bnegative\b|\bneg\b|\bminus\b|நெகட்டிவ்|நெகடிவ்/i;
+const SIGN_WORDS = /\+ve\b|-ve\b|[+−–]|-\s*$|\b(positive|pos|plus|negative|neg|minus)\b|பாசிட்டிவ்|பாசிடிவ்|நெகட்டிவ்|நெகடிவ்/gi;
+
+function signOf(s: string): '+' | '-' | null {
+  const neg = NEGATIVE.test(s);
+  const pos = POSITIVE.test(s);
+  return neg && !pos ? '-' : pos && !neg ? '+' : null;
+}
+
 /** 0..1 similarity between something spoken and a candidate label/value. */
 export function fuzzyScore(spoken: string, candidate: string): number {
+  const sa = signOf(spoken);
+  const sb = signOf(candidate);
+  if (sa && sb) {
+    // Opposite signs never match (O negative is not O+); same sign and same letters is the option.
+    if (sa !== sb) return 0;
+    if (normalizeText(spoken.replace(SIGN_WORDS, ' ')) === normalizeText(candidate.replace(SIGN_WORDS, ' '))) return 0.97;
+  }
   const a = normalizeText(spoken);
   const b = normalizeText(candidate);
   if (!a || !b) return 0;

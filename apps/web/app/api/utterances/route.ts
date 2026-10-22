@@ -5,7 +5,7 @@ import { isEmptyTranscript } from '@/lib/agents/guardrails';
 import { transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
-import { assertPhoneCanWrite, getFieldRows, getSessionById, getValues, upsertValue } from '@/lib/sessions';
+import { assertPhoneCanWrite, getFieldRows, getSessionById, getValues, recentSpeech, upsertValue } from '@/lib/sessions';
 import { recordingTranscriptSoFar } from '@/lib/recordings';
 import { db } from '@/lib/supabase-admin';
 
@@ -87,7 +87,8 @@ export const POST = route(async (req) => {
     await db().from('utterances').update({ transcript }).eq('id', utteranceId);
 
     const keyById = new Map(fields.map((f) => [f.id, f.field_key]));
-    const current = Object.fromEntries((await getValues(session.id)).map((v) => [keyById.get(v.field_id)!, v.value]));
+    const values = await getValues(session.id);
+    const current = Object.fromEntries(values.map((v) => [keyById.get(v.field_id)!, v.value]));
     // A later piece that caught only silence (the user paused, then tapped stop): nothing to add.
     if (part > 0 && isEmptyTranscript(transcript)) {
       await finish({ status: 'done' });
@@ -108,7 +109,9 @@ export const POST = route(async (req) => {
         : transcript;
 
     const tMap0 = Date.now();
-    const outcome = await withRetry(() => mapTranscript({ fields, current, transcript: fullText, targetFieldKey: target }));
+    // What was said just before: corrections like "no, not Jahan, Jagan" point back to it.
+    const recent = target ? [] : await recentSpeech(session, seq, recordingId, fields, values);
+    const outcome = await withRetry(() => mapTranscript({ fields, current, transcript: fullText, targetFieldKey: target, recent }));
     console.log(
       `utterance seq=${seq} part=${part} stt=${tStt}ms map=${Date.now() - tMap0}ms values=${outcome.empty ? 0 : outcome.values.length} chars=${fullText.length}`,
     );
@@ -142,6 +145,9 @@ export const POST = route(async (req) => {
       ),
     );
     await finish({ status: 'done' });
+    // A spoken command ("start over", "send it"): kept on the utterance; the phone asks before acting.
+    // Before migration 0006 the column doesn't exist; the response still carries it.
+    if (outcome.command) await db().from('utterances').update({ command: outcome.command }).eq('id', utteranceId);
 
     return NextResponse.json({
       utterance_id: utteranceId,
@@ -150,6 +156,7 @@ export const POST = route(async (req) => {
       transcript,
       values: outcome.values,
       unmapped_speech: outcome.unmapped_speech,
+      command: outcome.command,
     } satisfies UtteranceResponse);
   } catch (e) {
     const provider = transcript === null ? 'Sarvam speech-to-text' : 'OpenAI mapping';

@@ -112,6 +112,7 @@ export const FieldAnalysis = z.object({
   depends_on: z.string().nullable(),
   step_index: z.number().int(),
   output_script: OutputScript,
+  label_ta: z.string().describe("Short Tamil translation of the label for the phone screen, e.g. \"தந்தை பெயர்\" for Father's name"),
 });
 export type FieldAnalysis = z.infer<typeof FieldAnalysis>;
 
@@ -138,10 +139,17 @@ export const MappedValue = z.object({
 });
 export type MappedValue = z.infer<typeof MappedValue>;
 
+/** Spoken commands: the phone always asks before acting on one. */
+export const VoiceCommand = z.enum(['start_over', 'send', 'whats_left']);
+export type VoiceCommand = z.infer<typeof VoiceCommand>;
+
 export const MappingResult = z.object({
   values: z.array(MappedValue),
   unmapped_speech: z.string().nullable(),
   missing_required: z.array(z.string()),
+  command: VoiceCommand.nullable().describe(
+    'Only when the whole speech is a command: "start over"/"clear everything" → start_over, "send it" → send, "what is left?" → whats_left. null otherwise.',
+  ),
 });
 export type MappingResult = z.infer<typeof MappingResult>;
 
@@ -238,6 +246,8 @@ export type SessionField = {
   depends_on: string | null;
   dynamic_options: boolean;
   choice_hint: ChoiceHint | null;
+  /** Tamil translation of the label (phone screens in Tamil). */
+  label_ta?: string | null;
 };
 
 export type SessionValue = {
@@ -323,6 +333,8 @@ export type UtteranceResponse = {
   transcript: string | null;
   values: MappedValue[];
   unmapped_speech: string | null;
+  /** A spoken command ("start over", "send it", "what is left?"): the phone asks before acting. */
+  command?: VoiceCommand | null;
   error?: string;
 };
 

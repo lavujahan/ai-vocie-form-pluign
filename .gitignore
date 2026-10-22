@@ -10,3 +10,6 @@ playwright-report
 .vercel
 next-env.d.ts
 *.tsbuildinfo
+
+# Mapping accuracy reports (pnpm eval:mapping)
+apps/web/eval-results

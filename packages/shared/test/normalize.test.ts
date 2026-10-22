@@ -92,3 +92,27 @@ describe('booleans and semantic normalization', () => {
     expect(normalizeValue('pincode', 'six double zero zero one two')).toBe('600012');
   });
 });
+
+describe('options whose sign matters (blood groups)', () => {
+  const groups = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'].map((g) => ({ value: g, label: g }));
+  const pick = (spoken: string, options = groups) => matchOption(spoken, options).option?.label ?? null;
+
+  it('never matches the opposite sign', () => {
+    expect(pick('O negative')).toBe('O-');
+    expect(pick('O positive')).toBe('O+');
+    expect(pick('AB negative')).toBe('AB-');
+    expect(pick('B -ve')).toBe('B-');
+    expect(pick('A +ve')).toBe('A+');
+    expect(pick('O நெகட்டிவ்')).toBe('O-');
+    // Only O+ on the list: "O negative" must not be taken as O+.
+    expect(fuzzyScore('O negative', 'O+')).toBe(0);
+    expect(fuzzyScore('O+', 'O Negative')).toBe(0);
+  });
+
+  it('matches spelled-out labels too, and leaves other options alone', () => {
+    const spelled = ['A Positive', 'A Negative', 'O Positive', 'O Negative'].map((l) => ({ value: l, label: l }));
+    expect(pick('O-', spelled)).toBe('O Negative');
+    expect(pick('a plus', spelled)).toBe('A Positive');
+    expect(fuzzyScore('Self-employed', 'Self employed')).toBeGreaterThan(0.9);
+  });
+});

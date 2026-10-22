@@ -117,15 +117,21 @@ export function widgetOf(el: HTMLElement): Widget | 'skip' | null {
   if (el.tagName === 'INPUT' && role === 'combobox') {
     const rs = reactSelectRoot(el);
     if (rs) {
+      const hidden = rs.querySelector<HTMLInputElement>('input[type="hidden"][name]');
+      // Multi-select, seen without opening it: chosen values show as chips, and react-select wraps a
+      // multi-select's hidden inputs in a <div> (a single one's is a direct child of the container).
+      // Otherwise (no `name`), the list is opened once when filling.
+      const multiple = !!rs.querySelector('[class*="multiValue"]') || (!!hidden && hidden.parentElement !== rs);
       return {
         kind: 'react-select',
         root: rs,
         trigger: el,
         input: el as HTMLInputElement,
-        valueEl: rs.querySelector<HTMLInputElement>('input[type="hidden"][name]'),
+        valueEl: hidden,
         labelEl: el,
-        multiple: false, // seen when the list opens (aria-multiselectable)
+        multiple,
         freeText: false,
+        probed: multiple,
       };
     }
     // A plain ARIA autocomplete input (e.g. address suggestions): typed text is kept if nothing matches.

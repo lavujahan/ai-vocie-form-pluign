@@ -1,5 +1,5 @@
 import type { InputGuardrail, OutputGuardrail } from '@openai/agents';
-import { MappingResult, normalizeText, type MappedValue } from '@vff/shared';
+import { MappingResult, normalizeText, type MappedValue, type VoiceCommand } from '@vff/shared';
 import { fieldLabel, validateForField, type AgentField } from './tools';
 
 export type MapperContext = { transcript: string; fieldKeys: Set<string> };
@@ -34,7 +34,12 @@ export const unknownKeysGuardrail: OutputGuardrail<typeof MappingResult> = {
 };
 
 export type SanitizedValue = MappedValue & { error: string | null };
-export type SanitizedMapping = { values: SanitizedValue[]; unmapped_speech: string | null; missing_required: string[] };
+export type SanitizedMapping = {
+  values: SanitizedValue[];
+  unmapped_speech: string | null;
+  missing_required: string[];
+  command: VoiceCommand | null;
+};
 
 /**
  * Server-side authority over the mapper's output:
@@ -68,7 +73,9 @@ export function sanitizeMapping(
     // those is more reliable than its one-shot answer (which can drop or swap digits). No word
     // lists here: the AI did the interpreting, code only concatenates.
     const joined = raw.number_parts?.length ? raw.number_parts.map((p) => p.digits.replace(/\D/g, '')).join('') : '';
-    const v = joined ? { ...raw, value: joined } : raw;
+    // Only for values that are all digits: joining would drop the letters of a code like a GST number.
+    const lettered = /[\p{L}]/u.test(raw.value ?? '');
+    const v = joined && !lettered ? { ...raw, value: joined } : raw;
     if (v.value === null) continue;
 
     const confidence = Math.min(1, Math.max(0, v.confidence));
@@ -95,9 +102,12 @@ export function sanitizeMapping(
     });
   }
 
+  const values = [...out.values()];
   return {
-    values: [...out.values()],
+    values,
     unmapped_speech: result.unmapped_speech?.trim() || null,
     missing_required: result.missing_required.filter((k) => byKey.has(k)),
+    // A command is the whole speech ("start over", "send it"): never alongside values, never in single-field mode.
+    command: !targetFieldKey && !values.length ? (result.command ?? null) : null,
   };
 }

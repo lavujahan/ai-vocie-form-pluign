@@ -17,6 +17,7 @@ For every field in the input (use the exact field_key; include every field once)
 - depends_on: the field_key of a parent field this one depends on (e.g. state → country), otherwise null.
 - step_index: 0 unless the form is clearly split into steps.
 - output_script: "ta" only if the label asks for Tamil (e.g. "Name in Tamil", "தமிழில் பெயர்"); otherwise "en".
+- label_ta: the label in simple, common Tamil for someone reading it on a phone ("Father's name" → "தந்தை பெயர்", "Mobile number" → "கைபேசி எண்", "Date of birth" → "பிறந்த தேதி", "Taluk" → "வட்டம்"). Tamil script only; keep it short; use the English word in Tamil letters when that is what people say ("ஆதார் எண்").
 
 Use get_field_context when a field's label is unclear.`;
 
@@ -66,6 +67,17 @@ function regexOk(src: string | null): string | null {
   }
 }
 
+/** A short Tamil label, or null: Tamil script required, Latin letters and odd symbols dropped, at most 60 characters. */
+export function cleanTamilLabel(s: string | null | undefined): string | null {
+  const t = (s ?? '')
+    .replace(/[^஀-௿0-9\s()/.,-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60)
+    .trim();
+  return /[஀-௿]/.test(t) ? t : null;
+}
+
 /** Keeps only known fields, drops broken regexes and dangling depends_on links. */
 export function sanitizeAnalysis(analysis: FormAnalysis, schema: FormSchema): FieldAnalysis[] {
   const keys = new Set(schema.fields.map((f) => f.field_key));
@@ -77,6 +89,7 @@ export function sanitizeAnalysis(analysis: FormAnalysis, schema: FormSchema): Fi
     out.push({
       ...f,
       clean_label: f.clean_label.trim().slice(0, 200),
+      label_ta: cleanTamilLabel(f.label_ta) ?? '',
       depends_on: f.depends_on && keys.has(f.depends_on) && f.depends_on !== f.field_key ? f.depends_on : null,
       validation: { ...f.validation, regex: regexOk(f.validation.regex) },
     });
@@ -95,22 +108,27 @@ export async function analyzeAndStore(sessionId: string, schema: FormSchema, opt
     const analysis = await analyzeForm(schema);
     const fields = sanitizeAnalysis(analysis, schema);
     const detectedRequired = new Map(schema.fields.map((f) => [f.field_key, f.required]));
+    const save = (f: FieldAnalysis, withTamil: boolean) =>
+      db()
+        .from('form_fields')
+        .update({
+          clean_label: f.clean_label,
+          semantic_type: f.semantic_type,
+          validation: f.validation,
+          required: f.required || detectedRequired.get(f.field_key) === true,
+          depends_on: f.depends_on,
+          ...(opts.partial ? {} : { step_index: f.step_index }),
+          output_script: f.output_script,
+          ...(withTamil && f.label_ta ? { label_ta: f.label_ta } : {}),
+        })
+        .eq('session_id', sessionId)
+        .eq('field_key', f.field_key);
     await Promise.all(
-      fields.map((f) =>
-        db()
-          .from('form_fields')
-          .update({
-            clean_label: f.clean_label,
-            semantic_type: f.semantic_type,
-            validation: f.validation,
-            required: f.required || detectedRequired.get(f.field_key) === true,
-            depends_on: f.depends_on,
-            ...(opts.partial ? {} : { step_index: f.step_index }),
-            output_script: f.output_script,
-          })
-          .eq('session_id', sessionId)
-          .eq('field_key', f.field_key),
-      ),
+      fields.map(async (f) => {
+        const res = await save(f, true);
+        // Migration 0006 (Tamil labels) not applied yet: save everything else.
+        if (res.error?.code === 'PGRST204') await save(f, false);
+      }),
     );
     if (opts.partial) return;
     const patch: Record<string, string> = { analysis_status: 'done' };
