@@ -33,6 +33,8 @@ export const FieldDescriptor = z.object({
   options: z.array(FieldOption).max(1000).default([]),
   /** True for a checkbox group (several boxes sharing one name). */
   multiple: z.boolean().default(false),
+  /** Dropdown whose options load later (empty or disabled when scanned, e.g. Taluk before District). */
+  dynamic_options: z.boolean().default(false),
   group_key: z.string().nullable().default(null),
   depends_on: z.string().nullable().default(null),
   step_index: z.number().int().min(0).default(0),
@@ -209,6 +211,16 @@ export type CreateSessionResponse = {
 
 export type SessionStatus = 'waiting' | 'paired' | 'filled' | 'expired';
 
+export type ChoiceReason = 'ambiguous' | 'no_match' | 'parent_changed' | 'not_loaded';
+
+/** Set on a dropdown field when the spoken value couldn't be matched to the loaded options: the phone shows a picker. */
+export type ChoiceHint = {
+  spoken: string;
+  /** Best candidates, most likely first (may be empty). */
+  top: string[];
+  reason: ChoiceReason;
+};
+
 export type SessionField = {
   id: string;
   field_key: string;
@@ -220,6 +232,10 @@ export type SessionField = {
   semantic_type: SemanticType | null;
   step_index: number;
   position: number;
+  /** Parent field this one's options depend on (District for Taluk). */
+  depends_on: string | null;
+  dynamic_options: boolean;
+  choice_hint: ChoiceHint | null;
 };
 
 export type SessionValue = {
@@ -294,6 +310,44 @@ export type UtteranceResponse = {
   error?: string;
 };
 
+export const ChoiceHintSchema = z.object({
+  spoken: z.string().max(500),
+  top: z.array(z.string().max(300)).max(10),
+  reason: z.enum(['ambiguous', 'no_match', 'parent_changed', 'not_loaded']),
+});
+
+/** Extension → server: dropdown options as loaded on the page, and picker hints for the phone. */
+export const UpdateFieldsRequest = z.object({
+  fields: z
+    .array(
+      z.object({
+        field_key: z.string(),
+        options: z.array(FieldOption).max(3000).optional(),
+        choice_hint: ChoiceHintSchema.nullable().optional(),
+      }),
+    )
+    .min(1)
+    .max(200),
+});
+export type UpdateFieldsRequest = z.infer<typeof UpdateFieldsRequest>;
+
+/** Extension → server: pick the option the speaker meant from the options loaded on the page. */
+export const ResolveOptionRequest = z.object({
+  session_code: z.string(),
+  field_key: z.string(),
+  spoken: z.string().min(1).max(500),
+  options: z.array(FieldOption).min(1).max(3000),
+});
+export type ResolveOptionRequest = z.infer<typeof ResolveOptionRequest>;
+
+export type ResolveOptionResponse = {
+  /** Exact label of the chosen option, or null when unsure. */
+  choice: string | null;
+  ambiguous: boolean;
+  /** Best candidates (labels), most likely first. */
+  top: string[];
+};
+
 // ---------- Extension messaging ----------
 
 /** field_key → value to put into the page. */
@@ -302,4 +356,8 @@ export type FillPayload = { values: Record<string, string | null> };
 export type FillReport = {
   filled: string[];
   skipped: { field_key: string; reason: string }[];
+  /** Dropdowns where the spoken value couldn't be matched; the phone shows a picker. */
+  unresolved?: { field_key: string; spoken: string; top: string[]; reason: ChoiceReason }[];
+  /** Options of dropdowns whose lists loaded during the fill (sent to the phone for editing). */
+  options?: Record<string, FieldOption[]>;
 };

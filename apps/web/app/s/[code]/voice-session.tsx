@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { AlertCircle, ArrowLeft, Check, ChevronRight, Loader2, Mic, Send, Square } from 'lucide-react';
-import { LOW_CONFIDENCE, type SessionField, type SessionValue } from '@vff/shared';
+import { LOW_CONFIDENCE, type ChoiceHint, type ChoiceReason, type SessionField, type SessionValue } from '@vff/shared';
 import { Button, Card, FieldRow, Pill, cx } from '@/components/ui';
 import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
@@ -18,13 +18,22 @@ type FieldStatus =
   | { kind: 'low'; value: SessionValue }
   | { kind: 'filled'; value: SessionValue }
   | { kind: 'missing' }
-  | { kind: 'empty' };
+  | { kind: 'empty' }
+  /** The computer couldn't match the spoken value to the dropdown's loaded options: pick one. */
+  | { kind: 'pick'; hint: ChoiceHint; value?: SessionValue };
 
 export function displayValue(f: SessionField, v: string | null | undefined): string {
   if (!v) return '';
   if (f.field_type === 'checkbox' && !f.multiple) return v === 'true' ? 'Yes' : v === 'false' ? 'No' : v;
   return v;
 }
+
+const HINT_TEXT: Record<ChoiceReason, string> = {
+  ambiguous: 'Which one did you mean?',
+  no_match: "That isn't in the list. Pick the right one, or say it again.",
+  parent_changed: "That doesn't fit the new choice above. Pick again, or say it again.",
+  not_loaded: "The list didn't load on the computer. Pick from the list, or say it again.",
+};
 
 function fmtTime(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -74,6 +83,7 @@ export function VoiceSession({ code }: { code: string }) {
       if (u.status === 'processing') return { kind: 'processing' };
       if (u.status === 'error') return { kind: 'error', utt: u };
     }
+    if (f.choice_hint) return { kind: 'pick', hint: f.choice_hint, value };
     if (value?.value) {
       return (value.confidence ?? 1) < LOW_CONFIDENCE ? { kind: 'low', value } : { kind: 'filled', value };
     }
@@ -315,6 +325,8 @@ function StatusMarker({ field, status }: { field: SessionField; status: FieldSta
       );
     case 'missing':
       return <Pill tone="warn">Say it</Pill>;
+    case 'pick':
+      return <Pill tone="warn">Pick one</Pill>;
     default:
       return <span className="text-muted">—</span>;
   }
@@ -361,7 +373,7 @@ function ReviewView({
             <div key={f.id} className="border-b border-line last:border-b-0">
               <FieldRow
                 label={f.label}
-                sub={'value' in st ? st.value.source_phrase : undefined}
+                sub={st.kind === 'pick' ? `You said “${st.hint.spoken}”` : 'value' in st ? st.value?.source_phrase : undefined}
                 onClick={() => {
                   if (st.kind === 'error' && st.utt.blob) onRetry(st.utt);
                   else setEditing(editing === f.field_key ? null : f.field_key);
@@ -372,7 +384,7 @@ function ReviewView({
               {editing === f.field_key && (
                 <ValueEditor
                   field={f}
-                  initial={'value' in st ? st.value.value : null}
+                  initial={'value' in st ? (st.value?.value ?? null) : null}
                   onCancel={() => setEditing(null)}
                   onSave={async (v) => {
                     const err = await onEdit(f.field_key, v);
@@ -490,6 +502,32 @@ function ValueEditor({
 
   return (
     <div className="space-y-2 pb-3">
+      {field.choice_hint && (
+        <div className="rounded-lg bg-warn-bg/60 px-3 py-2 text-sm">
+          <p className="text-warn-ink">
+            You said “{field.choice_hint.spoken}”. {HINT_TEXT[field.choice_hint.reason]}
+          </p>
+          {field.choice_hint.top.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {field.choice_hint.top.map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    setError(await onSave(label));
+                    setBusy(false);
+                  }}
+                  className="min-h-10 rounded-lg border border-line bg-card px-3 font-medium text-ink"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {input}
       {error && <p className="text-xs text-danger-ink">{error}</p>}
       {recording && <p className="text-xs font-medium text-danger-ink">Listening… tap the stop button when done.</p>}

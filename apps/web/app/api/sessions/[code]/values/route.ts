@@ -3,6 +3,7 @@ import { PatchValuesRequest, validateValue } from '@vff/shared';
 import { requirePhone } from '@/lib/auth';
 import { fail, route } from '@/lib/http';
 import { assertWritable, getFieldRows, getSessionByCode, upsertValue } from '@/lib/sessions';
+import { db } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 
@@ -46,6 +47,11 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
       utteranceId: null,
     });
     saved[item.field_key] = value;
+  }
+  // A value chosen on the phone answers any "choose on your phone" picker for that field.
+  const answered = Object.keys(saved);
+  if (answered.length) {
+    await db().from('form_fields').update({ choice_hint: null }).eq('session_id', session.id).in('field_key', answered);
   }
   return NextResponse.json({ saved, errors }, { status: Object.keys(errors).length && !Object.keys(saved).length ? 422 : 200 });
 });

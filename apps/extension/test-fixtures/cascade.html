@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Applicant address (cascade)</title>
+    <style>
+      body { font: 15px system-ui; max-width: 560px; margin: 32px auto; }
+      label { display: block; margin-top: 12px; }
+      select { width: 100%; padding: 6px; }
+    </style>
+  </head>
+  <body>
+    <form>
+      <h2>Applicant address</h2>
+      <label for="state">State</label>
+      <select id="state" name="state">
+        <option value="">Select state</option>
+        <option value="TN">Tamil Nadu</option>
+        <option value="KL">Kerala</option>
+      </select>
+      <label for="district">District</label>
+      <select id="district" name="district" disabled><option value="">Select district</option></select>
+      <label for="village">Revenue village</label>
+      <select id="village" name="village" disabled><option value="">Select village</option></select>
+    </form>
+    <script>
+      // Each list "comes from the server" 300–1500 ms after its parent changes; changing a parent resets children.
+      const DATA = {
+        TN: { Thiruvallur: ['Ponneri', 'Thulasampatti', 'Thulasampatti Pudur'], Salem: ['Omalur', 'Attur'] },
+        KL: { Ernakulam: ['Aluva', 'Kochi'] },
+      };
+      const $ = (id) => document.getElementById(id);
+      const delay = () => 300 + Math.random() * 1200;
+      const load = (sel, items) => {
+        sel.innerHTML = '<option value="">Select</option>' + items.map((i) => `<option value="${i.toLowerCase().replace(/\s/g, '_')}">${i}</option>`).join('');
+        sel.disabled = false;
+      };
+      const reset = (sel) => {
+        sel.innerHTML = '<option value="">Select</option>';
+        sel.disabled = true;
+      };
+      $('state').addEventListener('change', () => {
+        reset($('district'));
+        reset($('village'));
+        const st = $('state').value;
+        if (st) setTimeout(() => load($('district'), Object.keys(DATA[st])), delay());
+      });
+      $('district').addEventListener('change', () => {
+        reset($('village'));
+        const label = $('district').selectedOptions[0]?.textContent;
+        const st = $('state').value;
+        if (label && DATA[st]?.[label]) setTimeout(() => load($('village'), DATA[st][label]), delay());
+      });
+    </script>
+  </body>
+</html>

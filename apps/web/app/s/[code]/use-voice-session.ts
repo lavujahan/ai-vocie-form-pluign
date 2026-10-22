@@ -58,6 +58,9 @@ const rowToField = (r: FieldRowPayload, prev?: SessionField): SessionField => ({
   semantic_type: r.semantic_type,
   step_index: r.step_index,
   position: r.position,
+  depends_on: r.depends_on ?? null,
+  dynamic_options: r.dynamic_options ?? false,
+  choice_hint: r.choice_hint ?? null,
 });
 
 export type Phase = 'pairing' | 'ready' | 'error';

@@ -253,7 +253,8 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
       if (el.closest('[role="search"]') || el.closest('[data-vff-ignore]')) continue;
       const type = fieldTypeOf(el);
       if (!type) continue;
-      if ((el as HTMLInputElement).disabled || (el as HTMLInputElement).readOnly) continue;
+      // Disabled dropdowns are kept: in a cascade (District → Taluk) the child is disabled until its parent is chosen.
+      if (((el as HTMLInputElement).disabled && el.tagName !== 'SELECT') || (el as HTMLInputElement).readOnly) continue;
       const name = el.getAttribute('name') ?? '';
       if (SKIP_NAME.test(name) || SKIP_NAME.test(el.id)) continue;
       if (isHidden(el)) continue;
@@ -308,6 +309,8 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
           field_type: type,
           required: isRequired(el, label, raw),
           options: el.tagName === 'SELECT' ? selectOptions(el as HTMLSelectElement) : [],
+          dynamic_options:
+            el.tagName === 'SELECT' && ((el as HTMLSelectElement).disabled || selectOptions(el as HTMLSelectElement).length === 0),
           multiple: el.tagName === 'SELECT' ? (el as HTMLSelectElement).multiple : false,
           group_key: clean(fieldsetLegend) || null,
           min: input.min || null,

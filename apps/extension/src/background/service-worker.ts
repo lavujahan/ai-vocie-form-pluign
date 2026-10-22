@@ -2,8 +2,11 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from '@supaba
 import type {
   CreateSessionResponse,
   FillReport,
+  FieldOption,
   LoginResponse,
   PublicUser,
+  ResolveOptionResponse,
+  UpdateFieldsRequest,
   SessionField,
   SessionInfo,
   SessionSnapshot,
@@ -18,6 +21,7 @@ import type {
   FillResult,
   PopupRequest,
   PopupResponse,
+  ResolveOptionMessage,
   ScanResult,
   StateMessage,
 } from '../messages';
@@ -97,14 +101,48 @@ function mergeFill(prev: FillReport | null, next: FillReport): FillReport {
   return { filled: [...filled].filter((k) => !skipped.some((s) => s.field_key === k)), skipped };
 }
 
+const sameOptions = (a: FieldOption[], b: FieldOption[]) =>
+  a.length === b.length && a.every((o, i) => o.value === b[i].value && o.label === b[i].label);
+
+/**
+ * After a fill: upload dropdown options that loaded on the page (so the phone can show them) and
+ * "choose on your phone" hints for dropdowns the spoken value couldn't be matched to.
+ */
+async function reportDropdowns(report: FillResult) {
+  const s = state.session;
+  if (!s?.snapshot || !state.auth) return;
+  const byKey = new Map(s.snapshot.fields.map((f) => [f.field_key, f]));
+  const updates = new Map<string, UpdateFieldsRequest['fields'][number]>();
+  const upd = (k: string) => updates.get(k) ?? updates.set(k, { field_key: k }).get(k)!;
+  for (const [k, options] of Object.entries(report.options ?? {})) {
+    const f = byKey.get(k);
+    if (f && !sameOptions(f.options, options)) upd(k).options = options;
+  }
+  for (const u of report.unresolved ?? []) upd(u.field_key).choice_hint = { spoken: u.spoken, top: u.top, reason: u.reason };
+  for (const k of report.filled) if (byKey.get(k)?.choice_hint) upd(k).choice_hint = null;
+  if (!updates.size) return;
+  try {
+    await api(`/api/sessions/${s.session_code}/fields`, {
+      method: 'PATCH',
+      body: { fields: [...updates.values()] } satisfies UpdateFieldsRequest,
+      token: state.auth.token,
+    });
+  } catch (e) {
+    console.warn('could not report dropdowns', e);
+  }
+}
+
 async function fillIntoPage(only?: string[]) {
   const s = state.session;
   if (!s?.snapshot) return;
   const values = valuesForFill(s.snapshot, only);
   if (!Object.keys(values).length) return;
+  // Parent links from the Form Analyzer (District → Taluk) so dropdowns fill in order.
+  const edges = Object.fromEntries(s.snapshot.fields.filter((f) => f.depends_on).map((f) => [f.field_key, f.depends_on!]));
   try {
-    const report = await sendToTab<FillResult>(s.tab_id, { type: 'FILL', values, highlight: true });
+    const report = await sendToTab<FillResult>(s.tab_id, { type: 'FILL', values, highlight: true, edges });
     await commit({ lastFill: only ? mergeFill(state.lastFill, report) : report, canUndo: true });
+    await reportDropdowns(report);
   } catch (e) {
     console.warn('fill failed', e);
     await commit({ lastFill: { filled: [], skipped: Object.keys(values).map((k) => ({ field_key: k, reason: 'The form tab was closed or reloaded' })) } });
@@ -290,8 +328,26 @@ async function handle(req: PopupRequest): Promise<void> {
   }
 }
 
-chrome.runtime.onMessage.addListener((req: PopupRequest, sender, sendResponse) => {
-  if (sender.tab) return false; // only the popup talks to the worker
+chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage, sender, sendResponse) => {
+  // From the content script: which loaded dropdown option did the speaker mean? (AI, server-side)
+  if (sender.tab) {
+    if (req.type !== 'RESOLVE_OPTION') return false;
+    (async () => {
+      await ready;
+      const s = state.session;
+      if (!s || !state.auth || sender.tab?.id !== s.tab_id) return null;
+      try {
+        return await api<ResolveOptionResponse>('/api/resolve-option', {
+          body: { session_code: s.session_code, field_key: req.field_key, spoken: req.spoken, options: req.options },
+          token: state.auth.token,
+        });
+      } catch {
+        return null;
+      }
+    })().then(sendResponse);
+    return true;
+  }
+  if (req.type === 'RESOLVE_OPTION') return false;
   (async () => {
     await ready;
     try {

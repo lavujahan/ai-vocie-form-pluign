@@ -1,5 +1,6 @@
 import 'server-only';
 import type {
+  ChoiceHint,
   FieldOption,
   FieldType,
   OutputScript,
@@ -47,6 +48,8 @@ export type FieldRow = {
   validation: ValidationRules | null;
   output_script: OutputScript;
   position: number;
+  dynamic_options: boolean;
+  choice_hint: ChoiceHint | null;
 };
 
 const SESSION_COLUMNS =
@@ -82,6 +85,9 @@ export function toSessionField(f: FieldRow): SessionField {
     semantic_type: f.semantic_type,
     step_index: f.step_index,
     position: f.position,
+    depends_on: f.depends_on,
+    dynamic_options: f.dynamic_options ?? false,
+    choice_hint: f.choice_hint ?? null,
   };
 }
 

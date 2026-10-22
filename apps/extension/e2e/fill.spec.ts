@@ -97,3 +97,33 @@ for (const name of ['vanilla', 'react', 'vue'] as const) {
     await page.close();
   });
 }
+
+test('cascade: State → District → Village with lists loading after a delay', async () => {
+  const url = `${BASE}/cascade.html`;
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.waitForSelector('#state');
+
+  const { schema } = await toContent<{ schema: FormSchemaInput }>(url, { type: 'SCAN' });
+  const dyn = Object.fromEntries(schema.fields.map((f) => [f.field_key, f.dynamic_options]));
+  expect(dyn).toEqual({ state: false, district: true, village: true });
+
+  // "Tiruvallur" as spoken must resolve to the page's "Thiruvallur".
+  const report = await toContent<FillResult>(url, {
+    type: 'FILL',
+    values: { state: 'Tamil Nadu', district: 'Tiruvallur', village: 'Ponneri' },
+  });
+  expect(report.filled).toEqual(['state', 'district', 'village']);
+  await expect(page.locator('#district option:checked')).toHaveText('Thiruvallur');
+  await expect(page.locator('#village option:checked')).toHaveText('Ponneri');
+
+  // Changing the State later: the old District/Village no longer fit and are sent to the phone picker.
+  const changed = await toContent<FillResult>(url, { type: 'FILL', values: { state: 'Kerala' } });
+  await expect(page.locator('#state')).toHaveValue('KL');
+  await expect(page.locator('#district')).toHaveValue('');
+  expect(Object.fromEntries((changed.unresolved ?? []).map((u) => [u.field_key, u.reason]))).toEqual({
+    district: 'parent_changed',
+    village: 'parent_changed',
+  });
+  await page.close();
+});

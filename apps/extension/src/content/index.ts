@@ -1,8 +1,16 @@
-import type { ContentRequest, FillResult, ScanResult, UndoResult } from '../messages';
+import type { ContentRequest, FillResult, ResolveOptionMessage, ResolveOptionResult, ScanResult, UndoResult } from '../messages';
+import type { Resolver } from './cascade';
 import { detect, type Registry } from './detector';
 import { fillAll, undoAll } from './filler';
 
 let registry: Registry = new Map();
+
+/** Unclear dropdown matches go to the AI through the service worker (it holds the session and token). */
+const resolve: Resolver = async (field_key, spoken, options) => {
+  const msg: ResolveOptionMessage = { type: 'RESOLVE_OPTION', field_key, spoken, options };
+  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 20_000));
+  return Promise.race([chrome.runtime.sendMessage(msg) as Promise<ResolveOptionResult>, timeout]).catch(() => null);
+};
 
 const scan = () => {
   const r = detect(document);
@@ -21,13 +29,16 @@ chrome.runtime.onMessage.addListener((msg: ContentRequest, _sender, sendResponse
         if (!registry.size || [...registry.values()].some((e) => !e.el.isConnected)) scan();
         const report = await fillAll(msg.values, registry, {
           highlight: msg.highlight,
+          edges: msg.edges,
+          resolve,
           redetect: () => {
             scan();
             return registry;
           },
         });
         registry = report.registry;
-        return { filled: report.filled, skipped: report.skipped } satisfies FillResult;
+        const { registry: _r, ...result } = report;
+        return result satisfies FillResult;
       }
       case 'UNDO':
         return { restored: await undoAll() } satisfies UndoResult;

@@ -4,9 +4,11 @@ import {
   matchOption,
   normalizeBoolean,
   normalizeDate,
+  type ChoiceReason,
   type FieldOption,
   type FillReport,
 } from '@vff/shared';
+import { childrenOf, descendantsOf, fillSelect, isNativeSelect, liveSelect, memory, type Resolver, type SelectOutcome } from './cascade';
 import type { Registry, RegistryEntry } from './detector';
 
 const OPTION_MIN_SCORE = 0.75;
@@ -121,17 +123,6 @@ async function fillEntry(entry: RegistryEntry, value: string | null): Promise<st
     return null;
   }
 
-  if (el instanceof W.HTMLSelectElement) {
-    if (!v) {
-      setNativeValue(el, '');
-      return null;
-    }
-    const opt = pickOption(v, [...el.options].map((o) => ({ value: o.value, label: (o.textContent ?? '').trim() })));
-    if (!opt) return `No option matches "${v}"`;
-    setNativeValue(el, opt.value);
-    return null;
-  }
-
   if (el instanceof W.HTMLInputElement && el.type === 'checkbox') {
     const b = normalizeBoolean(v) ?? (v ? 'true' : 'false');
     setChecked(el, b === 'true');
@@ -234,6 +225,17 @@ export type FillOptions = {
   highlight?: boolean;
   /** Re-detect fields (for fields that appear after a parent is filled). */
   redetect?: () => Registry;
+  /** child field_key → parent field_key, from the Form Analyzer (District → Taluk). */
+  edges?: Record<string, string>;
+  /** AI option picker for unclear dropdown matches. */
+  resolve?: Resolver;
+};
+
+const UNRESOLVED_REASON: Record<ChoiceReason, string> = {
+  ambiguous: 'Several options match. Choose one on your phone',
+  no_match: 'No option matches. Choose one on your phone',
+  parent_changed: 'Not valid after the change above. Choose again on your phone',
+  not_loaded: "The options didn't load. Choose on your phone",
 };
 
 /** Fills values in DOM order. Keys missing from the registry are retried once after re-detecting. */
@@ -243,9 +245,65 @@ export async function fillAll(
   opts: FillOptions = {},
 ): Promise<FillReport & { registry: Registry }> {
   const settle = opts.settleMs ?? 60;
+  const edges = opts.edges ?? {};
   const report: FillReport = { filled: [], skipped: [] };
+  const unresolved = new Map<string, NonNullable<FillReport['unresolved']>[number]>();
+  const loadedOptions: Record<string, FieldOption[]> = {};
   let reg = registry;
   const pending = new Set(Object.keys(values));
+  for (const [k, v] of Object.entries(values)) memory.remembered.set(k, v);
+  /** Value for a field: from this fill, else the last one asked for (children re-filled after a parent changed). */
+  const valueFor = (k: string) => (k in values ? values[k] : (memory.remembered.get(k) ?? null));
+  /** Children queued because their parent changed. */
+  const recascade = new Map<string, ChoiceReason>();
+  /** Dropdowns we set, to check at the end that the page didn't reset them. */
+  const setSelects = new Map<string, string>();
+
+  const fillDropdown = async (key: string, entry: RegistryEntry & { el: HTMLSelectElement }): Promise<SelectOutcome> => {
+    const out = await fillSelect(key, entry, valueFor(key), {
+      reg,
+      edges,
+      resolve: opts.resolve,
+      setValue: setNativeValue,
+      reason: recascade.get(key),
+    });
+    const remove = <T extends { field_key: string }>(list: T[]) => list.filter((x) => x.field_key !== key);
+    report.filled = report.filled.filter((k) => k !== key);
+    report.skipped = remove(report.skipped);
+    unresolved.delete(key);
+    if (entry.descriptor.dynamic_options && out.status !== 'skipped' && out.options.length) loadedOptions[key] = out.options;
+    if (out.status === 'filled') {
+      report.filled.push(key);
+      setSelects.set(key, liveSelect(entry).value);
+      if (out.changed && opts.highlight) highlight(entry);
+      // Parent changed: re-check its direct children that aren't part of this fill. Grandchildren are
+      // re-checked in turn when each child is re-filled.
+      if (out.changed) {
+        for (const child of childrenOf(key, edges)) {
+          if (!(child in values) && memory.remembered.get(child) && !pending.has(child)) {
+            pending.add(child);
+            recascade.set(child, 'parent_changed');
+          }
+        }
+      }
+    } else if (out.status === 'unresolved') {
+      unresolved.set(key, out.unresolved);
+      report.skipped.push({ field_key: key, reason: UNRESOLVED_REASON[out.unresolved.reason] });
+      // A re-checked child that no longer fits: everything below it must be chosen again too.
+      if (recascade.has(key)) {
+        for (const d of descendantsOf(key, edges)) {
+          const spoken = memory.remembered.get(d);
+          if (!spoken || d in values || unresolved.has(d)) continue;
+          pending.delete(d);
+          unresolved.set(d, { field_key: d, spoken, top: [], reason: 'parent_changed' });
+          report.skipped.push({ field_key: d, reason: UNRESOLVED_REASON.parent_changed });
+        }
+      }
+    } else {
+      report.skipped.push({ field_key: key, reason: out.reason });
+    }
+    return out;
+  };
 
   for (let pass = 0; pass < 2 && pending.size; pass++) {
     if (pass === 1) {
@@ -256,13 +314,22 @@ export async function fillAll(
     for (const [key, entry] of reg) {
       if (!pending.has(key)) continue;
       pending.delete(key);
+      if (isNativeSelect(entry)) liveSelect(entry);
       if (!entry.el.isConnected) {
         report.skipped.push({ field_key: key, reason: 'Field is no longer on the page' });
         continue;
       }
       if (!undoStack.has(key)) undoStack.set(key, { entry, snap: snapshot(entry) });
+      if (isNativeSelect(entry)) {
+        try {
+          await fillDropdown(key, entry);
+        } catch (e) {
+          report.skipped.push({ field_key: key, reason: (e as Error).message });
+        }
+        continue;
+      }
       try {
-        const err = await fillEntry(entry, values[key]);
+        const err = await fillEntry(entry, valueFor(key));
         if (err) report.skipped.push({ field_key: key, reason: err });
         else {
           report.filled.push(key);
@@ -275,6 +342,19 @@ export async function fillAll(
     }
   }
   for (const key of pending) report.skipped.push({ field_key: key, reason: 'Field not found on the page' });
+
+  // Final check: a slow page can reset a dropdown after we moved on (its parent's options arrived
+  // late). Re-fill any dropdown that no longer holds what we set.
+  if (setSelects.size) {
+    await sleep(Math.max(settle, 300));
+    for (const [key, val] of setSelects) {
+      const entry = reg.get(key);
+      if (entry && isNativeSelect(entry) && liveSelect(entry).isConnected && liveSelect(entry).value !== val) await fillDropdown(key, entry);
+    }
+  }
+
+  if (unresolved.size) report.unresolved = [...unresolved.values()];
+  if (Object.keys(loadedOptions).length) report.options = loadedOptions;
   return { ...report, registry: reg };
 }
 

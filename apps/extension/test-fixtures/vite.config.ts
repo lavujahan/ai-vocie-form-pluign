@@ -16,6 +16,7 @@ export default defineConfig({
         vanilla: resolve(__dirname, 'vanilla.html'),
         react: resolve(__dirname, 'react.html'),
         vue: resolve(__dirname, 'vue.html'),
+        cascade: resolve(__dirname, 'cascade.html'),
       },
     },
   },

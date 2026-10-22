@@ -1,5 +1,7 @@
 import type {
   CreateSessionResponse,
+  FieldOption,
+  ResolveOptionResponse,
   FillReport,
   FormSchemaInput,
   PublicUser,
@@ -11,12 +13,24 @@ import type {
 export type ContentRequest =
   | { type: 'PING' }
   | { type: 'SCAN' }
-  | { type: 'FILL'; values: Record<string, string | null>; highlight?: boolean }
+  | {
+      type: 'FILL';
+      values: Record<string, string | null>;
+      highlight?: boolean;
+      /** child field_key → parent field_key (District → Taluk), from the Form Analyzer. */
+      edges?: Record<string, string>;
+    }
   | { type: 'UNDO' };
 
 export type ScanResult = { schema: FormSchemaInput };
 export type FillResult = FillReport;
 export type UndoResult = { restored: string[] };
+
+// ---------- content script → service worker ----------
+
+/** Ask the AI (via /api/resolve-option) which loaded option the speaker meant. */
+export type ResolveOptionMessage = { type: 'RESOLVE_OPTION'; field_key: string; spoken: string; options: FieldOption[] };
+export type ResolveOptionResult = ResolveOptionResponse | null;
 
 // ---------- popup ⇄ service worker ----------
 

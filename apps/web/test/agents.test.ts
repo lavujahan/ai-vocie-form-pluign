@@ -119,7 +119,7 @@ describe('sanitizeAnalysis', () => {
       form_title: null,
       html_snippet: '',
       fields: [
-        { field_key: 'a', label: 'A', field_type: 'text', required: false, options: [], multiple: false, group_key: null, depends_on: null, step_index: 0, min: null, max: null, pattern: null, placeholder: null, context: null },
+        { field_key: 'a', label: 'A', field_type: 'text', required: false, options: [], multiple: false, dynamic_options: false, group_key: null, depends_on: null, step_index: 0, min: null, max: null, pattern: null, placeholder: null, context: null },
       ],
     } satisfies FormSchema;
     const base = { clean_label: 'A', semantic_type: 'other', required: false, step_index: 0, output_script: 'en' } as const;

@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, then `0003_recording_parts.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql` and `0004_cascading_fields.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -99,6 +99,17 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
   2. **Join before mapping** (`lib/recordings.ts`): pieces share a `recording_id` and a `part` number (migration `0003`). For piece N, the server maps the joined transcript of pieces 0…N. A sentence or number cut across pieces ("mobile number 95432 | 49890") is read whole, and the later piece's higher seq replaces the earlier partial values.
 - **Interpretation is done by the AI.** The mapping agent interprets everything: Tanglish fillers, Tamil script, numbers listed piece by piece as `number_parts`, and option choice. Its only tool is `validate_value`, a format and option checker. The server re-checks every value and marks doubtful ones "Check this".
 - **Timings:** the Vercel logs show one line per recording: `utterance seq=… stt=…ms map=…ms values=…`.
+
+## Cascading dropdowns (State → District → Taluk → Village)
+
+The extension fills dependent dropdowns in order (`apps/extension/src/content/cascade.ts`):
+- **Detect:** dropdowns that are empty or disabled when scanned are marked `dynamic_options`.
+- **Fill in order:** the extension sets the parent, then waits (up to 8 s) for the child's list to load, then picks the spoken value from the real options.
+- **Learn the links:** which dropdown feeds which comes from the Form Analyzer's `depends_on`, or is learned by watching which dropdown reloads.
+- **Unclear match** (spelling variant, Tamil script, abbreviation): the **Option Resolver Agent** (OpenAI, `/api/resolve-option`) picks from the loaded options, or reports ambiguity.
+- **Still unresolved:** the extension uploads the loaded options and a hint (`PATCH /api/sessions/[code]/fields`). The phone row shows **"Pick one"** with "Did you mean…" buttons.
+- **Parent changed later:** children are re-checked. Values that no longer fit are cleared and sent to the phone picker, never left silently wrong.
+- **Safety check:** a final pass re-fills any dropdown the page reset after the extension moved on.
 
 ## Privacy
 
