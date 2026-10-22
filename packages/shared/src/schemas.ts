@@ -119,11 +119,20 @@ export const FormAnalysis = z.object({
 });
 export type FormAnalysis = z.infer<typeof FormAnalysis>;
 
+export const NumberPart = z.object({
+  heard: z.string().describe('One spoken piece, as transcribed: "rendu", "double two", "ஒன்பது", "98"'),
+  digits: z.string().describe('The digits for exactly that piece: "2", "22", "9", "98"'),
+});
+
 export const MappedValue = z.object({
   field_key: z.string(),
   value: z.string().nullable(),
   confidence: z.number().min(0).max(1),
   source_phrase: z.string().nullable(),
+  number_parts: z
+    .array(NumberPart)
+    .nullable()
+    .describe('For numbers spoken as words (phone, Aadhaar, PIN…): every spoken piece in order with its digits. null otherwise.'),
 });
 export type MappedValue = z.infer<typeof MappedValue>;
 

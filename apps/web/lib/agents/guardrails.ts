@@ -1,5 +1,5 @@
 import type { InputGuardrail, OutputGuardrail } from '@openai/agents';
-import { MappingResult, type MappedValue } from '@vff/shared';
+import { MappingResult, normalizeText, type MappedValue } from '@vff/shared';
 import { fieldLabel, validateForField, type AgentField } from './tools';
 
 export type MapperContext = { transcript: string; fieldKeys: Set<string> };
@@ -50,11 +50,25 @@ export function sanitizeMapping(
 ): SanitizedMapping {
   const byKey = new Map(fields.map((f) => [f.field_key, f]));
   const out = new Map<string, SanitizedValue>();
+  // Label words ("Name", "Gender", "Father name") are never values of free-text fields.
+  const labelWords = new Set<string>();
+  for (const f of fields) {
+    for (const part of [fieldLabel(f), f.label, ...fieldLabel(f).split('/')]) {
+      const n = normalizeText(part);
+      if (n) labelWords.add(n);
+    }
+  }
+  labelWords.add('name');
 
-  for (const v of result.values) {
-    const field = byKey.get(v.field_key);
+  for (const raw of result.values) {
+    const field = byKey.get(raw.field_key);
     if (!field) continue;
-    if (targetFieldKey && v.field_key !== targetFieldKey) continue;
+    if (targetFieldKey && raw.field_key !== targetFieldKey) continue;
+    // For numbers spoken as words the agent lists each piece it heard with its digits; joining
+    // those is more reliable than its one-shot answer (which can drop or swap digits). No word
+    // lists here: the AI did the interpreting, code only concatenates.
+    const joined = raw.number_parts?.length ? raw.number_parts.map((p) => p.digits.replace(/\D/g, '')).join('') : '';
+    const v = joined ? { ...raw, value: joined } : raw;
     if (v.value === null) continue;
 
     const confidence = Math.min(1, Math.max(0, v.confidence));
@@ -62,6 +76,8 @@ export function sanitizeMapping(
       out.set(v.field_key, { ...v, value: null, confidence: 1, error: null });
       continue;
     }
+
+    if (!field.options.length && labelWords.has(normalizeText(v.value))) continue;
 
     const check = validateForField(byKey, v.field_key, v.value);
     if (!check.ok) {

@@ -2,7 +2,7 @@
  * Few-shot examples for the Field Mapping Agent: Tamil, English and Tanglish speech → English values.
  * Keys refer to the illustrative form below; the agent must use the real form's keys at runtime.
  */
-export const EXAMPLE_FORM = `full_name (Full name, text) · email (Email, email) · phone (Phone, tel) · dob (Date of birth, date) · gender (Gender, radio: Male | Female | Other) · marital (Marital status, select: Single | Married) · city (City, text) · address (Address, textarea) · name_ta (Name in Tamil, text, output_script=ta)`;
+export const EXAMPLE_FORM = `full_name (Full name, text) · father_name (Father name, text) · email (Email, email) · phone (Phone, tel) · dob (Date of birth, date) · gender (Gender, radio: Male | Female | Other) · marital (Marital status, select: Single | Married) · city (City, text) · address (Address, textarea) · name_ta (Name in Tamil, text, output_script=ta)`;
 
 export const FEW_SHOT: { speech: string; current?: string; output: string }[] = [
   {
@@ -13,7 +13,7 @@ export const FEW_SHOT: { speech: string; current?: string; output: string }[] = 
   {
     speech: 'என் பெயர் ரமேஷ் குமார். போன் நம்பர் ஒன்பது எட்டு ஏழு ஆறு ஐந்து நான்கு மூன்று இரண்டு ஒன்று பூஜ்ஜியம்',
     output:
-      '{"values":[{"field_key":"full_name","value":"Ramesh Kumar","confidence":0.95,"source_phrase":"என் பெயர் ரமேஷ் குமார்"},{"field_key":"name_ta","value":"ரமேஷ் குமார்","confidence":0.9,"source_phrase":"ரமேஷ் குமார்"},{"field_key":"phone","value":"9876543210","confidence":0.9,"source_phrase":"ஒன்பது எட்டு ஏழு ஆறு ஐந்து நான்கு மூன்று இரண்டு ஒன்று பூஜ்ஜியம்"}],"unmapped_speech":null,"missing_required":[]}',
+      '{"values":[{"field_key":"full_name","value":"Ramesh Kumar","confidence":0.95,"source_phrase":"என் பெயர் ரமேஷ் குமார்"},{"field_key":"name_ta","value":"ரமேஷ் குமார்","confidence":0.9,"source_phrase":"ரமேஷ் குமார்"},{"field_key":"phone","value":"9876543210","confidence":0.9,"source_phrase":"ஒன்பது எட்டு ஏழு ஆறு ஐந்து நான்கு மூன்று இரண்டு ஒன்று பூஜ்ஜியம்","number_parts":[{"heard":"ஒன்பது","digits":"9"},{"heard":"எட்டு","digits":"8"},{"heard":"ஏழு","digits":"7"},{"heard":"ஆறு","digits":"6"},{"heard":"ஐந்து","digits":"5"},{"heard":"நான்கு","digits":"4"},{"heard":"மூன்று","digits":"3"},{"heard":"இரண்டு","digits":"2"},{"heard":"ஒன்று","digits":"1"},{"heard":"பூஜ்ஜியம்","digits":"0"}]}],"unmapped_speech":null,"missing_required":[]}',
   },
   {
     speech: 'naan aan, kalyanam aachu, piranthathu 15 ஆம் தேதி மார்ச் 1990',
@@ -21,9 +21,14 @@ export const FEW_SHOT: { speech: string; current?: string; output: string }[] = 
       '{"values":[{"field_key":"gender","value":"Male","confidence":0.9,"source_phrase":"naan aan"},{"field_key":"marital","value":"Married","confidence":0.9,"source_phrase":"kalyanam aachu"},{"field_key":"dob","value":"1990-03-15","confidence":0.95,"source_phrase":"15 ஆம் தேதி மார்ச் 1990"}],"unmapped_speech":null,"missing_required":[]}',
   },
   {
+    speech: 'Name vandhu Jahan, gender male, ஃபாதர்ஸ் நேம் ஜகதீசன், marital status single nu podunga',
+    output:
+      '{"values":[{"field_key":"full_name","value":"Jahan","confidence":0.9,"source_phrase":"Name vandhu Jahan"},{"field_key":"gender","value":"Male","confidence":0.95,"source_phrase":"gender male"},{"field_key":"father_name","value":"Jagadheesan","confidence":0.9,"source_phrase":"ஃபாதர்ஸ் நேம் ஜகதீசன்"},{"field_key":"marital","value":"Single","confidence":0.9,"source_phrase":"marital status single"}],"unmapped_speech":null,"missing_required":[]}',
+  },
+  {
     speech: 'phone number double nine eight four triple zero one two three',
     output:
-      '{"values":[{"field_key":"phone","value":"9984000123","confidence":0.9,"source_phrase":"double nine eight four triple zero one two three"}],"unmapped_speech":null,"missing_required":[]}',
+      '{"values":[{"field_key":"phone","value":"9984000123","confidence":0.9,"source_phrase":"double nine eight four triple zero one two three","number_parts":[{"heard":"double nine","digits":"99"},{"heard":"eight","digits":"8"},{"heard":"four","digits":"4"},{"heard":"triple zero","digits":"000"},{"heard":"one","digits":"1"},{"heard":"two","digits":"2"},{"heard":"three","digits":"3"}]}],"unmapped_speech":null,"missing_required":[]}',
   },
   {
     speech: 'change the email to ramesh dot k at yahoo dot com, and clear the city',
@@ -38,6 +43,7 @@ export const FEW_SHOT: { speech: string; current?: string; output: string }[] = 
   },
 ];
 
+// number_parts is omitted above where it is null, to keep the examples short.
 export function renderFewShot(): string {
   return FEW_SHOT.map(
     (e, i) =>

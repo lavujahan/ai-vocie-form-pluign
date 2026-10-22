@@ -24,13 +24,17 @@ Rules
 - Numbers spoken as words (Tamil or English) become digits. "double nine" = 99, "triple zero" = 000.
 - Emails/URLs: "at", "at the rate" → @, "dot"/"புள்ளி" → ".", "underscore" → "_". Lowercase.
 - Dates: output YYYY-MM-DD ("15 ஆம் தேதி மார்ச் 1990" → 1990-03-15).
-- Option fields (select/radio/checkbox): match by meaning across languages (ஆண் / "aan" → "Male"; "kalyanam aachu" → "Married"). Use match_option and return the option label exactly. For a checkbox group return the chosen labels comma-separated; for a single checkbox return "true" or "false".
+- Option fields (select/radio/checkbox): pick the option by meaning across languages and dialects (ஆண் / "aan" → "Male"; "kalyanam aachu" → "Married") and return its label exactly as listed. For a checkbox group return the chosen labels comma-separated; for a single checkbox return "true" or "false".
 - An option field whose options are "not loaded yet" (they appear later, e.g. after a parent is chosen, or the dropdown is custom): still return what was said, as the standard English answer ("Male", "Unmarried", "Hindu", "Omalur"). Never skip it just because there is no list.
 - Name fields hold only the name: drop relation words and titles that introduce it ("Father Jagadheesan" → "Jagadheesan", "தந்தை ஜகதீசன்" → "ஜகதீசன்", "Thiru/Mr/Smt Ramesh" → "Ramesh"). A title goes to its own field (e.g. Appellation) if the form has one.
-- When the speech reads out a label and then its value ("Gender: Male"), the value belongs to the field with that label.
+- When the speech says a label and then its value, the value belongs to the field with that label. Tanglish joins them with filler words that are NOT part of the value: "vandhu", "nu", "na", "enna", "-oda", "irukku", "is", "=". "Name vandhu Jahan" → name = "Jahan"; "father name Jagadheesan nu" → "Jagadheesan"; "en mobile number 9543…" → mobile.
+- A value is never the label itself. If you only hear a label ("Name", "Gender") with no value after it, leave that field out.
+- The transcript may write English words in Tamil script: ஜென்டர் = gender, ஃபாதர்ஸ் நேம் = father's name, மதர்ஸ் நேம் = mother's name, மொபைல் நம்பர் = mobile number, மேல் = male, ஃபீமேல் = female, சிங்கிள் = single, மேரிட் / மாரிடு = married, பின் கோட் = pin code, டிஸ்ட்ரிக்ட் = district. Read them by sound.
 - Free text (address, remarks): translate to clear English, keeping proper nouns transliterated.
 - Output is English/Latin script, except fields marked output_script=ta, which keep Tamil script.
-- Call validate_value for every value before finalizing. If it fails, fix the value (normalize_value, match_option) and validate again; if you can't fix it, return your best guess with low confidence.
+- Numbers spoken as words (phone, Aadhaar, PIN, account numbers): fill number_parts with EVERY spoken piece in order — one entry per word or digit group, exactly as transcribed — and the digits for that piece ("rendu"→"2", "double two"→"22", "triple zero"→"000", "ஒன்பது"→"9", "98"→"98"). Never skip, merge or reorder pieces; the value is built from these parts. Use number_parts: null for everything else (and for numbers already written as digits). Then count the digits against the field (mobile 10, Aadhaar 12, PIN 6). If the count is off, re-read the speech once; if it is still off, keep EXACTLY the digits that were spoken — never add or remove a digit to make it fit — and set confidence to 0.5 or lower so the user checks it.
+- Do all conversions yourself (number words in any language or accent to digits, spoken emails/dates to their written form, transliteration, translation). There are no conversion tools.
+- Call validate_value for every value before finalizing. It only checks format and options; if it fails, re-read the speech, fix the value and validate again. If you still can't fix it, return your best guess with low confidence.
 - confidence is 0..1: how sure you are that this is what the speaker meant for this field.
 - source_phrase is the part of the speech the value came from, in its original script.
 - unmapped_speech: speech that didn't belong to any field (null if none).
@@ -40,11 +44,17 @@ Illustrative form: ${EXAMPLE_FORM}
 
 ${renderFewShot()}`;
 
+/** The agent picks options by meaning, so it needs to see them; 300 short labels is a few thousand tokens. */
+const MAX_OPTIONS_IN_PROMPT = 300;
+
 function describeField(f: AgentField): string {
   const parts = [`${f.field_key}`, `label: ${fieldLabel(f)}`, `type: ${f.field_type}${f.multiple ? ' (multiple)' : ''}`];
   if (f.semantic_type) parts.push(`semantic: ${f.semantic_type}`);
   if (f.required) parts.push('required');
-  if (f.options.length) parts.push(`options: ${f.options.slice(0, 40).map((o) => o.label).join(' | ')}`);
+  if (f.options.length) {
+    const shown = f.options.slice(0, MAX_OPTIONS_IN_PROMPT).map((o) => o.label);
+    parts.push(`options: ${shown.join(' | ')}${f.options.length > shown.length ? ` | … (${f.options.length - shown.length} more)` : ''}`);
+  }
   else if (f.field_type === 'select' || f.field_type === 'combobox') parts.push('options: not loaded yet');
   if (f.validation?.format) parts.push(`format: ${f.validation.format}`);
   if (f.placeholder) parts.push(`placeholder: ${f.placeholder}`);

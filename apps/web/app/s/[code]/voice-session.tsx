@@ -98,10 +98,24 @@ export function VoiceSession({ code }: { code: string }) {
     if (await recorder.start({ seq, target: t })) setRecordingTarget(t);
   }
 
-  function respeak(fieldKey: string) {
-    setMode('field');
-    setTarget(fieldKey);
-    setView('record');
+  /** Mic inside the review list: records straight into one field without leaving the page. */
+  async function micFor(fieldKey: string) {
+    if (recorder.state === 'recording') {
+      recorder.stop();
+      setRecordingTarget(null);
+      return;
+    }
+    const seq = s.takeSeq();
+    if (await recorder.start({ seq, target: fieldKey })) setRecordingTarget(fieldKey);
+  }
+
+  function showView(v: View) {
+    if (recorder.state === 'recording') {
+      recorder.stop();
+      setRecordingTarget(null);
+    }
+    setView(v);
+    window.scrollTo(0, 0);
   }
 
   if (s.phase === 'pairing') {
@@ -136,9 +150,11 @@ export function VoiceSession({ code }: { code: string }) {
           fields={s.fields}
           statusOf={statusOf}
           sent={s.session?.status === 'filled'}
-          onBack={() => setView('record')}
+          onBack={() => showView('record')}
           onEdit={s.editValue}
-          onRespeak={respeak}
+          onMic={micFor}
+          recordingKey={recording ? recordingTarget : null}
+          elapsed={recorder.elapsed}
           onRetry={s.retry}
           onSend={s.complete}
         />
@@ -243,7 +259,7 @@ export function VoiceSession({ code }: { code: string }) {
         </Card>
       )}
 
-      <Button className="mt-3 w-full" onClick={() => setView('review')}>
+      <Button className="mt-3 w-full" onClick={() => showView('review')}>
         Check before sending · {filledCount}/{s.fields.length}
         <ChevronRight size={16} />
       </Button>
@@ -293,7 +309,9 @@ function ReviewView({
   sent,
   onBack,
   onEdit,
-  onRespeak,
+  onMic,
+  recordingKey,
+  elapsed,
   onRetry,
   onSend,
 }: {
@@ -302,7 +320,9 @@ function ReviewView({
   sent: boolean;
   onBack: () => void;
   onEdit: (key: string, value: string | null) => Promise<string | null>;
-  onRespeak: (key: string) => void;
+  onMic: (key: string) => void;
+  recordingKey: string | null;
+  elapsed: number;
   onRetry: (u: LocalUtterance) => void;
   onSend: () => Promise<boolean>;
 }) {
@@ -342,7 +362,14 @@ function ReviewView({
                     if (!err) setEditing(null);
                     return err;
                   }}
-                  onRespeak={() => onRespeak(f.field_key)}
+                  recording={recordingKey === f.field_key}
+                  elapsed={elapsed}
+                  onMic={() => {
+                    const stopping = recordingKey === f.field_key;
+                    onMic(f.field_key);
+                    // After speaking, close the editor: the row shows a spinner, then the new value.
+                    if (stopping) setEditing(null);
+                  }}
                 />
               )}
             </div>
@@ -379,13 +406,17 @@ function ValueEditor({
   initial,
   onSave,
   onCancel,
-  onRespeak,
+  onMic,
+  recording,
+  elapsed,
 }: {
   field: SessionField;
   initial: string | null;
   onSave: (v: string | null) => Promise<string | null>;
   onCancel: () => void;
-  onRespeak: () => void;
+  onMic: () => void;
+  recording: boolean;
+  elapsed: number;
 }) {
   const [value, setValue] = useState(initial ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -444,6 +475,7 @@ function ValueEditor({
     <div className="space-y-2 pb-3">
       {input}
       {error && <p className="text-xs text-danger-ink">{error}</p>}
+      {recording && <p className="text-xs font-medium text-danger-ink">Listening… tap the stop button when done.</p>}
       <div className="flex gap-2">
         <Button
           className="flex-1"
@@ -456,8 +488,18 @@ function ValueEditor({
         >
           Save
         </Button>
-        <Button onClick={onRespeak} aria-label="Re-speak">
-          <Mic size={16} />
+        <Button
+          onClick={onMic}
+          aria-label={recording ? 'Stop recording' : `Speak ${field.label}`}
+          className={recording ? 'border-danger text-danger-ink' : ''}
+        >
+          {recording ? (
+            <>
+              <Square size={13} fill="currentColor" /> {fmtTime(elapsed)}
+            </>
+          ) : (
+            <Mic size={16} />
+          )}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
           Cancel

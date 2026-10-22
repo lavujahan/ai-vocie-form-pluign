@@ -4,16 +4,14 @@ import type { FormSchema } from '@vff/shared';
 import { mapTranscript, buildMapperPrompt } from '@/lib/agents/fieldMapper';
 import { sanitizeAnalysis } from '@/lib/agents/formAnalyzer';
 import { isEmptyTranscript, sanitizeMapping } from '@/lib/agents/guardrails';
-import { matchOptionForField, validateForField, type AgentField } from '@/lib/agents/tools';
+import { mapperTools, validateForField, type AgentField } from '@/lib/agents/tools';
 import { EVAL_FORM } from '../scripts/eval-fixtures';
 
 const fields = new Map(EVAL_FORM.map((f) => [f.field_key, f]));
 
 describe('agent tools', () => {
-  it('match_option resolves across languages', () => {
-    expect(matchOptionForField(fields, 'gender', 'ஆண்')).toMatchObject({ best: 'Male' });
-    expect(matchOptionForField(fields, 'state', 'tamilnadu')).toMatchObject({ best: 'Tamil Nadu' });
-    expect(matchOptionForField(fields, 'nope', 'x')).toHaveProperty('error');
+  it('the mapper only gets a checker tool, no speech-interpreting helpers', () => {
+    expect(mapperTools(EVAL_FORM).map((t) => t.name)).toEqual(['validate_value']);
   });
   it('validate_value normalizes and rejects', () => {
     expect(validateForField(fields, 'dob', '15/03/1990')).toEqual({ ok: true, value: '1990-03-15' });
@@ -27,12 +25,12 @@ describe('sanitizeMapping (output guardrail)', () => {
     const r = sanitizeMapping(
       {
         values: [
-          { field_key: 'full_name', value: 'Ramesh Kumar', confidence: 0.9, source_phrase: 'Ramesh Kumar' },
-          { field_key: 'invented', value: 'x', confidence: 0.9, source_phrase: null },
-          { field_key: 'email', value: null, confidence: 0.1, source_phrase: null },
-          { field_key: 'city', value: '', confidence: 0.9, source_phrase: 'clear the city' },
-          { field_key: 'marital', value: 'Widowed', confidence: 0.9, source_phrase: null },
-          { field_key: 'phone', value: '9876543210', confidence: 2, source_phrase: null },
+          { field_key: 'full_name', value: 'Ramesh Kumar', confidence: 0.9, source_phrase: 'Ramesh Kumar', number_parts: null },
+          { field_key: 'invented', value: 'x', confidence: 0.9, source_phrase: null, number_parts: null },
+          { field_key: 'email', value: null, confidence: 0.1, source_phrase: null, number_parts: null },
+          { field_key: 'city', value: '', confidence: 0.9, source_phrase: 'clear the city', number_parts: null },
+          { field_key: 'marital', value: 'Widowed', confidence: 0.9, source_phrase: null, number_parts: null },
+          { field_key: 'phone', value: '9876543210', confidence: 2, source_phrase: null, number_parts: null },
         ],
         unmapped_speech: '  ',
         missing_required: ['email', 'ghost'],
@@ -50,12 +48,43 @@ describe('sanitizeMapping (output guardrail)', () => {
     expect(r.missing_required).toEqual(['email']);
   });
 
+  it('builds spoken numbers from the parts the agent heard, not its one-shot answer', () => {
+    const r = sanitizeMapping(
+      {
+        values: [
+          {
+            field_key: 'phone',
+            value: '954324908', // one-shot answer dropped a digit
+            confidence: 0.9,
+            source_phrase: 'onbadhu anju naalu moonu rendu naalu onbadhu ettu poojyam double zero',
+            number_parts: [
+              { heard: 'onbadhu', digits: '9' },
+              { heard: 'anju', digits: '5' },
+              { heard: 'naalu', digits: '4' },
+              { heard: 'moonu', digits: '3' },
+              { heard: 'rendu', digits: '2' },
+              { heard: 'naalu', digits: '4' },
+              { heard: 'onbadhu', digits: '9' },
+              { heard: 'ettu', digits: '8' },
+              { heard: 'double zero', digits: '00' },
+            ],
+          },
+        ],
+        unmapped_speech: null,
+        missing_required: [],
+      },
+      EVAL_FORM,
+      null,
+    );
+    expect(r.values[0].value).toBe('95432498' + '00');
+  });
+
   it('only keeps the target field in field-by-field mode', () => {
     const r = sanitizeMapping(
       {
         values: [
-          { field_key: 'full_name', value: 'Ramesh', confidence: 0.9, source_phrase: null },
-          { field_key: 'city', value: 'Chennai', confidence: 0.9, source_phrase: null },
+          { field_key: 'full_name', value: 'Ramesh', confidence: 0.9, source_phrase: null, number_parts: null },
+          { field_key: 'city', value: 'Chennai', confidence: 0.9, source_phrase: null, number_parts: null },
         ],
         unmapped_speech: null,
         missing_required: [],
@@ -68,13 +97,13 @@ describe('sanitizeMapping (output guardrail)', () => {
 
   it('lowers confidence when Tamil script leaks into an English field', () => {
     const r = sanitizeMapping(
-      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null }], unmapped_speech: null, missing_required: [] },
+      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [] },
       EVAL_FORM,
       null,
     );
     expect(r.values[0].confidence).toBeLessThanOrEqual(0.5);
     const ta = sanitizeMapping(
-      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null }], unmapped_speech: null, missing_required: [] },
+      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [] },
       EVAL_FORM,
       null,
     );
@@ -113,8 +142,8 @@ describe('Field Mapping Agent (scripted model)', () => {
   it('runs tools and returns sanitized values', async () => {
     const final = {
       values: [
-        { field_key: 'full_name', value: 'Ramesh Kumar', confidence: 0.95, source_phrase: 'en peru Ramesh Kumar' },
-        { field_key: 'gender', value: 'Male', confidence: 0.9, source_phrase: 'aan' },
+        { field_key: 'full_name', value: 'Ramesh Kumar', confidence: 0.95, source_phrase: 'en peru Ramesh Kumar', number_parts: null },
+        { field_key: 'gender', value: 'Male', confidence: 0.9, source_phrase: 'aan', number_parts: null },
       ],
       unmapped_speech: null,
       missing_required: ['email', 'phone'],

@@ -122,6 +122,11 @@ async function refreshSnapshot() {
     const snap = await api<SessionSnapshot>(`/api/sessions/${s.session_code}`, { token: state.auth.token });
     const before = s.snapshot;
     await commit({ session: { ...s, form_name: snap.session.form_name, snapshot: snap } });
+    // The phone pressed "Send to desktop" while we weren't listening.
+    if (snap.session.status === 'filled' && before?.session.status !== 'filled') {
+      await sentFromPhone();
+      return;
+    }
     // Values that changed while we were disconnected.
     if (state.autoFill && before) {
       const old = valuesForFill(before);
@@ -132,6 +137,12 @@ async function refreshSnapshot() {
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) await commit({ auth: null, session: null });
   }
+}
+
+/** "Send to desktop" on the phone: fill everything now and keep filling later changes. */
+async function sentFromPhone() {
+  await commit({ autoFill: true });
+  await fillIntoPage();
 }
 
 function patchSnapshot(fn: (snap: SessionSnapshot) => SessionSnapshot) {
@@ -190,8 +201,10 @@ async function ensureRealtime() {
     })
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_sessions', filter: `id=eq.${s.session_id}` }, async (p) => {
       const row = p.new as SessionInfo;
+      const wasFilled = state.session?.snapshot?.session.status === 'filled';
       patchSnapshot((snap) => ({ ...snap, session: { ...snap.session, form_name: row.form_name, status: row.status } }));
       await commit();
+      if (row.status === 'filled' && !wasFilled) await sentFromPhone();
     });
 
   rt = { client, channel, sessionId: s.session_id };
@@ -306,6 +319,8 @@ chrome.runtime.onConnect.addListener((port) => {
   ready.then(async () => {
     await ensureRealtime();
     port.postMessage({ type: 'STATE', state: publicState() } satisfies StateMessage);
+    // Opening the popup always shows the latest values, even if a live event was missed.
+    await refreshSnapshot();
   });
 });
 
