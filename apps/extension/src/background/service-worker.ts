@@ -1,7 +1,6 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import type {
   CreateSessionResponse,
-  FillReport,
   FieldOption,
   LoginResponse,
   PublicUser,
@@ -14,55 +13,76 @@ import type {
   UtteranceRow,
 } from '@vff/shared';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
-import type {
-  ActiveSession,
-  ContentRequest,
-  ExtState,
-  FillResult,
-  PopupRequest,
-  PopupResponse,
-  ResolveOptionMessage,
-  ScanResult,
-  StateMessage,
+import {
+  MOVED_REASON,
+  siteOf,
+  type ActiveSession,
+  type ContentRequest,
+  type ExtState,
+  type FillResult,
+  type PopupRequest,
+  type PopupResponse,
+  type ResolveOptionMessage,
+  type ScanResult,
+  type StateMessage,
 } from '../messages';
 import { api, ApiError } from './api';
+import { assertRoom, endTab, mergeFill, migrate, otherSessions, patchTab, startTab, tabOfSession, type TabState, type Tabs } from './tabs';
 
 // ---------- state (mirrored to chrome.storage.session so it survives worker restarts) ----------
+// One form session per tab: several forms can be filled at once, each paired with its own phone.
 
 type Auth = { token: string; expires_at: string; user: PublicUser };
-type Persisted = { auth: Auth | null; session: ActiveSession | null; autoFill: boolean; lastFill: FillReport | null; canUndo: boolean };
+type Persisted = { auth: Auth | null; tabs: Tabs };
 
-let state: Persisted = { auth: null, session: null, autoFill: false, lastFill: null, canUndo: false };
-let live = false;
-const ports = new Set<chrome.runtime.Port>();
+let state: Persisted = { auth: null, tabs: {} };
+/** Open popups, and the tab each one was opened on. */
+const ports = new Map<chrome.runtime.Port, number | undefined>();
 
 const ready = (async () => {
-  const stored = (await chrome.storage.session.get('state')).state as Persisted | undefined;
-  if (stored) state = stored;
-  if (state.auth && new Date(state.auth.expires_at) <= new Date()) state = { ...state, auth: null, session: null };
+  state = migrate<Auth>((await chrome.storage.session.get('state')).state);
+  if (state.auth && new Date(state.auth.expires_at) <= new Date()) state = { auth: null, tabs: {} };
+  // Drop sessions whose tab was closed while the worker was not running.
+  for (const id of Object.keys(state.tabs)) {
+    const alive = await chrome.tabs.get(Number(id)).then(
+      () => true,
+      () => false,
+    );
+    if (!alive) state = { ...state, tabs: endTab(state.tabs, Number(id)) };
+  }
   await ensureRealtime();
 })();
 
-function publicState(): ExtState {
+const tabOf = (tabId: number | undefined): TabState | undefined => (tabId === undefined ? undefined : state.tabs[tabId]);
+
+function publicState(tabId: number | undefined): ExtState {
+  const t = tabOf(tabId);
   return {
     auth: state.auth ? { user: state.auth.user, expires_at: state.auth.expires_at } : null,
-    session: state.session,
-    autoFill: state.autoFill,
-    live,
-    lastFill: state.lastFill,
-    canUndo: state.canUndo,
+    session: t?.session ?? null,
+    autoFill: t?.autoFill ?? false,
+    live: !!t && !!channels.get(t.session.session_id)?.live,
+    lastFill: t?.lastFill ?? null,
+    canUndo: t?.canUndo ?? false,
+    otherSessions: otherSessions(state.tabs, t ? tabId : undefined),
   };
 }
 
-async function commit(patch: Partial<Persisted> = {}) {
+async function save(patch: Partial<Persisted> = {}) {
   state = { ...state, ...patch };
   await chrome.storage.session.set({ state });
   broadcast();
 }
 
+const setTab = (tabId: number, patch: Partial<TabState>) => save({ tabs: patchTab(state.tabs, tabId, patch) });
+
 function broadcast() {
-  const msg: StateMessage = { type: 'STATE', state: publicState() };
-  for (const p of ports) p.postMessage(msg);
+  for (const [port, tabId] of ports) port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
+}
+
+async function logout() {
+  stopRealtime();
+  await save({ auth: null, tabs: {} });
 }
 
 // ---------- content script ----------
@@ -80,6 +100,11 @@ async function sendToTab<T>(tabId: number, msg: ContentRequest): Promise<T> {
   }
 }
 
+async function activeTabId(): Promise<number | undefined> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tab?.id;
+}
+
 // ---------- snapshot helpers ----------
 
 const fieldKeyById = (snap: SessionSnapshot) => new Map(snap.fields.map((f) => [f.id, f.field_key]));
@@ -94,13 +119,6 @@ function valuesForFill(snap: SessionSnapshot, only?: string[]): Record<string, s
   return out;
 }
 
-function mergeFill(prev: FillReport | null, next: FillReport): FillReport {
-  if (!prev) return next;
-  const filled = new Set([...prev.filled, ...next.filled]);
-  const skipped = [...prev.skipped.filter((s) => !next.filled.includes(s.field_key) && !next.skipped.some((n) => n.field_key === s.field_key)), ...next.skipped];
-  return { filled: [...filled].filter((k) => !skipped.some((s) => s.field_key === k)), skipped };
-}
-
 const sameOptions = (a: FieldOption[], b: FieldOption[]) =>
   a.length === b.length && a.every((o, i) => o.value === b[i].value && o.label === b[i].label);
 
@@ -108,9 +126,8 @@ const sameOptions = (a: FieldOption[], b: FieldOption[]) =>
  * After a fill: upload dropdown options that loaded on the page (so the phone can show them) and
  * "choose on your phone" hints for dropdowns the spoken value couldn't be matched to.
  */
-async function reportDropdowns(report: FillResult) {
-  const s = state.session;
-  if (!s?.snapshot || !state.auth) return;
+async function reportDropdowns(s: ActiveSession, report: FillResult) {
+  if (!s.snapshot || !state.auth) return;
   const byKey = new Map(s.snapshot.fields.map((f) => [f.field_key, f]));
   const updates = new Map<string, UpdateFieldsRequest['fields'][number]>();
   const upd = (k: string) => updates.get(k) ?? updates.set(k, { field_key: k }).get(k)!;
@@ -132,163 +149,206 @@ async function reportDropdowns(report: FillResult) {
   }
 }
 
-async function fillIntoPage(only?: string[]) {
-  const s = state.session;
+async function fillIntoPage(tabId: number, only?: string[]) {
+  const s = tabOf(tabId)?.session;
   if (!s?.snapshot) return;
   const values = valuesForFill(s.snapshot, only);
   if (!Object.keys(values).length) return;
   // Parent links from the Form Analyzer (District → Taluk) so dropdowns fill in order.
   const edges = Object.fromEntries(s.snapshot.fields.filter((f) => f.depends_on).map((f) => [f.field_key, f.depends_on!]));
   try {
-    const report = await sendToTab<FillResult>(s.tab_id, { type: 'FILL', values, highlight: true, edges });
-    await commit({ lastFill: only ? mergeFill(state.lastFill, report) : report, canUndo: true });
-    await reportDropdowns(report);
+    const report = await sendToTab<FillResult>(tabId, { type: 'FILL', values, highlight: true, edges, site: s.page_site });
+    const moved = !report.filled.length && report.skipped.some((x) => x.reason === MOVED_REASON);
+    const lastFill = only ? mergeFill(tabOf(tabId)?.lastFill ?? null, report) : report;
+    // Moved to another site: stop auto-filling there until the user scans again.
+    await setTab(tabId, moved ? { lastFill, autoFill: false, canUndo: false } : { lastFill, canUndo: true });
+    if (!moved) await reportDropdowns(s, report);
   } catch (e) {
     console.warn('fill failed', e);
-    await commit({ lastFill: { filled: [], skipped: Object.keys(values).map((k) => ({ field_key: k, reason: 'The form tab was closed or reloaded' })) } });
+    await setTab(tabId, {
+      lastFill: { filled: [], skipped: Object.keys(values).map((k) => ({ field_key: k, reason: 'The form tab was closed or reloaded' })) },
+    });
   }
 }
 
-// ---------- Realtime ----------
+// ---------- Realtime: one socket, one channel per tab session ----------
 
-let rt: { client: SupabaseClient; channel: RealtimeChannel; sessionId: string } | null = null;
+type Channel = { channel: RealtimeChannel; live: boolean };
+let rt: { client: SupabaseClient; token: string; authed: Promise<void> } | null = null;
+const channels = new Map<string, Channel>();
 
-async function refreshSnapshot() {
-  const s = state.session;
+async function refreshSnapshot(tabId: number) {
+  const s = tabOf(tabId)?.session;
   if (!s || !state.auth) return;
   try {
     const snap = await api<SessionSnapshot>(`/api/sessions/${s.session_code}`, { token: state.auth.token });
-    const before = s.snapshot;
-    await commit({ session: { ...s, form_name: snap.session.form_name, snapshot: snap } });
+    const cur = tabOf(tabId)?.session;
+    if (cur?.session_id !== s.session_id) return; // ended or rescanned meanwhile
+    const before = cur.snapshot;
+    await setTab(tabId, { session: { ...cur, form_name: snap.session.form_name, snapshot: snap } });
     // The phone pressed "Send to desktop" while we weren't listening.
     if (snap.session.status === 'filled' && before?.session.status !== 'filled') {
-      await sentFromPhone();
+      await sentFromPhone(tabId);
       return;
     }
     // Values that changed while we were disconnected.
-    if (state.autoFill && before) {
+    if (tabOf(tabId)?.autoFill && before) {
       const old = valuesForFill(before);
       const now = valuesForFill(snap);
       const changed = Object.keys(now).filter((k) => old[k] !== now[k]);
-      if (changed.length) await fillIntoPage(changed);
+      if (changed.length) await fillIntoPage(tabId, changed);
     }
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) await commit({ auth: null, session: null });
+    if (e instanceof ApiError && e.status === 401) await logout();
+    // Purged on the server (sessions live about 40 minutes): this tab has nothing to fill any more.
+    else if (e instanceof ApiError && e.status === 404 && tabOf(tabId)?.session.session_id === s.session_id) {
+      await save({ tabs: endTab(state.tabs, tabId) });
+      await ensureRealtime();
+    }
   }
 }
 
 /** "Send to desktop" on the phone: fill everything now and keep filling later changes. */
-async function sentFromPhone() {
-  await commit({ autoFill: true });
-  await fillIntoPage();
+async function sentFromPhone(tabId: number) {
+  await setTab(tabId, { autoFill: true });
+  await fillIntoPage(tabId);
 }
 
-function patchSnapshot(fn: (snap: SessionSnapshot) => SessionSnapshot) {
-  const s = state.session;
+function patchSnapshot(tabId: number, fn: (snap: SessionSnapshot) => SessionSnapshot) {
+  const s = tabOf(tabId)?.session;
   if (!s?.snapshot) return null;
   const snapshot = fn(s.snapshot);
-  state = { ...state, session: { ...s, snapshot, form_name: snapshot.session.form_name || s.form_name } };
+  state = { ...state, tabs: patchTab(state.tabs, tabId, { session: { ...s, snapshot, form_name: snapshot.session.form_name || s.form_name } }) };
   return snapshot;
 }
 
-async function ensureRealtime() {
-  const s = state.session;
-  if (!s || !state.auth || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
-  if (rt?.sessionId === s.session_id) return;
+function realtimeClient(token: string) {
+  if (rt?.token === token) return rt;
   stopRealtime();
-
-  const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  const client = createClient(SUPABASE_URL!, SUPABASE_ANON_KEY!, {
     accessToken: async () => state.auth?.token ?? null,
     // Websocket traffic every 20s keeps the MV3 service worker alive (Chrome 116+).
     realtime: { heartbeatIntervalMs: 20_000 },
   });
-  const filter = `session_id=eq.${s.session_id}`;
-  const channel = client
-    .channel(`ext:${s.session_id}`)
+  // Put the token on the socket before joining. Otherwise the join races the async accessToken
+  // callback, Realtime stores the subscription as `anon`, and RLS silently drops every event.
+  const authed = client.realtime.setAuth(token).catch((e) => console.warn('realtime auth failed', e));
+  rt = { client, token, authed };
+  return rt;
+}
+
+/** Subscribes every tab session that has no channel yet, and drops channels of ended sessions. */
+async function ensureRealtime() {
+  const wanted = new Set(Object.values(state.tabs).map((t) => t.session.session_id));
+  if (!state.auth || !SUPABASE_URL || !SUPABASE_ANON_KEY || !wanted.size) return stopRealtime();
+  const r = realtimeClient(state.auth.token);
+  for (const [id, c] of channels) {
+    if (wanted.has(id)) continue;
+    channels.delete(id);
+    void r.client.removeChannel(c.channel);
+  }
+  for (const id of wanted) if (!channels.has(id)) subscribe(r, id);
+}
+
+function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
+  const filter = `session_id=eq.${sessionId}`;
+  /** The tab this session belongs to (looked up per event: the tab may have been rescanned). */
+  const tab = () => tabOfSession(state.tabs, sessionId);
+
+  const channel = r.client
+    .channel(`ext:${sessionId}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'field_values', filter }, async (p) => {
       const row = p.new as SessionValue | undefined;
-      if (!row?.field_id) return;
-      const snap = patchSnapshot((snap) => {
+      const tabId = tab();
+      if (!row?.field_id || tabId === null) return;
+      const snap = patchSnapshot(tabId, (snap) => {
         const cur = snap.values.find((v) => v.field_id === row.field_id);
         if (cur && cur.source_seq > row.source_seq) return snap;
         return { ...snap, values: [...snap.values.filter((v) => v.field_id !== row.field_id), row] };
       });
-      await commit();
+      await save();
       // Latest wins on the page too: re-fill a field when a newer value arrives.
       const key = snap && fieldKeyById(snap).get(row.field_id);
-      if (state.autoFill && key) await fillIntoPage([key]);
+      if (tabOf(tabId)?.autoFill && key) await fillIntoPage(tabId, [key]);
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'utterances', filter }, async (p) => {
       const row = p.new as UtteranceRow | undefined;
-      if (!row?.seq) return;
-      patchSnapshot((snap) => ({
+      const tabId = tab();
+      if (!row?.seq || tabId === null) return;
+      patchSnapshot(tabId, (snap) => ({
         ...snap,
         utterances: [row, ...snap.utterances.filter((u) => u.seq !== row.seq)].sort((a, b) => b.seq - a.seq).slice(0, 50),
       }));
-      await commit();
+      await save();
     })
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_fields', filter }, async (p) => {
       const row = p.new as SessionField & { clean_label: string | null; label: string };
-      patchSnapshot((snap) => ({
+      const tabId = tab();
+      if (tabId === null) return;
+      patchSnapshot(tabId, (snap) => ({
         ...snap,
         fields: snap.fields.map((f) =>
           f.id === row.id ? { ...f, label: row.clean_label || row.label || f.label, required: row.required, semantic_type: row.semantic_type } : f,
         ),
       }));
-      await commit();
+      await save();
     })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_sessions', filter: `id=eq.${s.session_id}` }, async (p) => {
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_sessions', filter: `id=eq.${sessionId}` }, async (p) => {
       const row = p.new as SessionInfo;
-      const wasFilled = state.session?.snapshot?.session.status === 'filled';
-      patchSnapshot((snap) => ({ ...snap, session: { ...snap.session, form_name: row.form_name, status: row.status } }));
-      await commit();
-      if (row.status === 'filled' && !wasFilled) await sentFromPhone();
+      const tabId = tab();
+      if (tabId === null) return;
+      const wasFilled = tabOf(tabId)?.session.snapshot?.session.status === 'filled';
+      patchSnapshot(tabId, (snap) => ({ ...snap, session: { ...snap.session, form_name: row.form_name, status: row.status } }));
+      await save();
+      if (row.status === 'filled' && !wasFilled) await sentFromPhone(tabId);
     });
 
-  rt = { client, channel, sessionId: s.session_id };
-  // Put the token on the socket before joining. Otherwise the join races the async accessToken
-  // callback, Realtime stores the subscription as `anon`, and RLS silently drops every event.
-  await client.realtime.setAuth(state.auth.token);
-  if (rt?.channel !== channel) return; // stopped or replaced meanwhile
-  channel.subscribe(async (status) => {
-    live = status === 'SUBSCRIBED';
-    broadcast();
-    if (live) await refreshSnapshot();
+  const entry: Channel = { channel, live: false };
+  channels.set(sessionId, entry);
+  void r.authed.then(() => {
+    if (channels.get(sessionId) !== entry) return; // ended or stopped meanwhile
+    channel.subscribe(async (status) => {
+      entry.live = status === 'SUBSCRIBED';
+      broadcast();
+      const tabId = tab();
+      if (entry.live && tabId !== null) await refreshSnapshot(tabId);
+    });
   });
 }
 
 function stopRealtime() {
+  channels.clear();
   if (!rt) return;
-  rt.client.removeAllChannels();
+  void rt.client.removeAllChannels();
   rt = null;
-  live = false;
 }
 
 // ---------- popup requests ----------
 
-async function handle(req: PopupRequest): Promise<void> {
+async function handle(req: PopupRequest, tabId: number | undefined): Promise<void> {
   switch (req.type) {
     case 'GET_STATE':
       await ensureRealtime();
       // Fallback while Realtime is down: the popup polls and we fetch a fresh snapshot.
-      if (!live) await refreshSnapshot();
+      if (tabId !== undefined && tabOf(tabId) && !channels.get(tabOf(tabId)!.session.session_id)?.live) await refreshSnapshot(tabId);
       return;
 
     case 'LOGIN': {
       const r = await api<LoginResponse>('/api/auth/login', { body: { phone: req.phone, pin: req.pin } });
-      await commit({ auth: { token: r.token, expires_at: r.expires_at, user: r.user } });
+      await save({ auth: { token: r.token, expires_at: r.expires_at, user: r.user } });
+      await ensureRealtime();
       return;
     }
 
     case 'LOGOUT':
-      stopRealtime();
-      await commit({ auth: null, session: null, autoFill: false, lastFill: null, canUndo: false });
+      await logout();
       return;
 
     case 'START_SESSION': {
       if (!state.auth) throw new Error('Please sign in');
-      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const tab = tabId === undefined ? null : await chrome.tabs.get(tabId).catch(() => null);
       if (!tab?.id || !/^(https?|file):/.test(tab.url ?? '')) throw new Error('Open a web page with a form first');
+      assertRoom(state.tabs, tab.id);
       let scan: ScanResult;
       try {
         scan = await sendToTab<ScanResult>(tab.id, { type: 'SCAN' });
@@ -297,32 +357,35 @@ async function handle(req: PopupRequest): Promise<void> {
       }
       if (!scan?.schema?.fields?.length) throw new Error('No form fields found on this page');
       const created = await api<CreateSessionResponse>('/api/sessions', { body: scan.schema, token: state.auth.token });
-      stopRealtime();
-      await commit({
-        session: { ...created, tab_id: tab.id, field_count: scan.schema.fields.length, snapshot: null },
-        autoFill: false,
-        lastFill: null,
-        canUndo: false,
-      });
-      await refreshSnapshot();
+      // Only this tab's session is replaced; forms in other tabs keep going.
+      const session: ActiveSession = {
+        ...created,
+        tab_id: tab.id,
+        field_count: scan.schema.fields.length,
+        page_site: siteOf(scan.schema.page_url),
+        snapshot: null,
+      };
+      await save({ tabs: startTab(state.tabs, tab.id, session) });
       await ensureRealtime();
+      await refreshSnapshot(tab.id);
       return;
     }
 
     case 'END_SESSION':
-      stopRealtime();
-      await commit({ session: null, autoFill: false, lastFill: null, canUndo: false });
+      if (tabId !== undefined) await save({ tabs: endTab(state.tabs, tabId) });
+      await ensureRealtime();
       return;
 
     case 'FILL':
-      await commit({ autoFill: true });
-      await fillIntoPage();
+      if (tabId === undefined || !tabOf(tabId)) return;
+      await setTab(tabId, { autoFill: true });
+      await fillIntoPage(tabId);
       return;
 
     case 'UNDO': {
-      const s = state.session;
-      if (s) await sendToTab(s.tab_id, { type: 'UNDO' }).catch(() => null);
-      await commit({ autoFill: false, canUndo: false, lastFill: null });
+      if (tabId === undefined || !tabOf(tabId)) return;
+      await sendToTab(tabId, { type: 'UNDO' }).catch(() => null);
+      await setTab(tabId, { autoFill: false, canUndo: false, lastFill: null });
       return;
     }
   }
@@ -334,8 +397,8 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage, 
     if (req.type !== 'RESOLVE_OPTION') return false;
     (async () => {
       await ready;
-      const s = state.session;
-      if (!s || !state.auth || sender.tab?.id !== s.tab_id) return null;
+      const s = tabOf(sender.tab?.id)?.session;
+      if (!s || !state.auth) return null;
       try {
         return await api<ResolveOptionResponse>('/api/resolve-option', {
           body: { session_code: s.session_code, field_key: req.field_key, spoken: req.spoken, options: req.options },
@@ -350,38 +413,41 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage, 
   if (req.type === 'RESOLVE_OPTION') return false;
   (async () => {
     await ready;
+    const tabId = req.tab_id ?? (await activeTabId());
     try {
-      await handle(req);
-      return { ok: true, state: publicState() } satisfies PopupResponse;
+      await handle(req, tabId);
+      return { ok: true, state: publicState(tabId) } satisfies PopupResponse;
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401 && req.type !== 'LOGIN') {
-        stopRealtime();
-        await commit({ auth: null, session: null });
-      }
+      if (e instanceof ApiError && e.status === 401 && req.type !== 'LOGIN') await logout();
       const error =
         e instanceof ApiError && e.body.attempts_left !== undefined
           ? `${e.message}. ${e.body.attempts_left} ${e.body.attempts_left === 1 ? 'try' : 'tries'} left.`
           : (e as Error).message;
-      return { ok: false, error, state: publicState() } satisfies PopupResponse;
+      return { ok: false, error, state: publicState(tabId) } satisfies PopupResponse;
     }
   })().then(sendResponse);
   return true;
 });
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'popup') return;
-  ports.add(port);
+  // Named "popup:<tabId>" by the popup, so each popup gets the state of its own tab.
+  if (!port.name.startsWith('popup')) return;
+  const id = Number(port.name.split(':')[1]);
+  const tabId = Number.isInteger(id) && id > 0 ? id : undefined;
+  ports.set(port, tabId);
   port.onDisconnect.addListener(() => ports.delete(port));
   ready.then(async () => {
     await ensureRealtime();
-    port.postMessage({ type: 'STATE', state: publicState() } satisfies StateMessage);
+    port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
     // Opening the popup always shows the latest values, even if a live event was missed.
-    await refreshSnapshot();
+    if (tabId !== undefined) await refreshSnapshot(tabId);
   });
 });
 
-// The form tab closed: the session can't fill anything any more.
+// A form tab closed: its session can't fill anything any more. Other tabs are unaffected.
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await ready;
-  if (state.session?.tab_id === tabId) await commit({ autoFill: false });
+  if (!tabOf(tabId)) return;
+  await save({ tabs: endTab(state.tabs, tabId) });
+  await ensureRealtime();
 });

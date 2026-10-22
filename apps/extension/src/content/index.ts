@@ -1,4 +1,13 @@
-import type { ContentRequest, FillResult, ResolveOptionMessage, ResolveOptionResult, ScanResult, UndoResult } from '../messages';
+import {
+  MOVED_REASON,
+  siteOf,
+  type ContentRequest,
+  type FillResult,
+  type ResolveOptionMessage,
+  type ResolveOptionResult,
+  type ScanResult,
+  type UndoResult,
+} from '../messages';
 import type { Resolver } from './cascade';
 import { detect, type Registry } from './detector';
 import { fillAll, undoAll } from './filler';
@@ -26,6 +35,10 @@ chrome.runtime.onMessage.addListener((msg: ContentRequest, _sender, sendResponse
       case 'SCAN':
         return { schema: scan() } satisfies ScanResult;
       case 'FILL': {
+        // The tab moved to another site since it was scanned: never type this form's values here.
+        if (msg.site && msg.site !== siteOf(location.href)) {
+          return { filled: [], skipped: Object.keys(msg.values).map((field_key) => ({ field_key, reason: MOVED_REASON })) } satisfies FillResult;
+        }
         if (!registry.size || [...registry.values()].some((e) => !e.el.isConnected)) scan();
         const report = await fillAll(msg.values, registry, {
           highlight: msg.highlight,

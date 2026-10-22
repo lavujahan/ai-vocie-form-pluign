@@ -111,6 +111,17 @@ The extension fills dependent dropdowns in order (`apps/extension/src/content/ca
 - **Parent changed later:** children are re-checked. Values that no longer fit are cleared and sent to the phone picker, never left silently wrong.
 - **Safety check:** a final pass re-fills any dropdown the page reset after the extension moved on.
 
+## Several forms at once (one per tab)
+
+One signed-in user can fill several forms at once, for example two CAN registrations in two tabs:
+- **Per-tab sessions.** Each tab has its own session, QR code, phone and values.
+- **The popup follows the tab.** It always shows the session of the tab it was opened on. Scanning in one tab never touches another.
+- **One connection.** The service worker keeps one Realtime socket with a channel per session (`apps/extension/src/background/tabs.ts`).
+- **Closing a tab** ends only that tab's session.
+- **Moved tabs are safe.** A tab that has moved to a different site is never filled with the old form's values.
+- **Limit:** 5 active forms per browser.
+- **Sign out** ends all of them.
+
 ## Privacy
 
 - Audio is never stored. It is only held in memory while one request runs.

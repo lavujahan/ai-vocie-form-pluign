@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium, expect, test, type BrowserContext, type Worker } from '@playwright/test';
 import type { FormSchemaInput } from '@vff/shared';
-import type { FillResult } from '../src/messages';
+import { MOVED_REASON, type FillResult } from '../src/messages';
 
 // Loads the built, unpacked extension (run `pnpm build` first; `pnpm e2e` does both)
 // and drives the real content script through the service worker, like the popup does.
@@ -97,6 +97,39 @@ for (const name of ['vanilla', 'react', 'vue'] as const) {
     await page.close();
   });
 }
+
+test('two tabs fill independently, and a tab on another site refuses to fill', async () => {
+  const first = await context.newPage();
+  await first.goto(`${BASE}/vanilla.html`);
+  await first.waitForSelector('#full_name');
+  const second = await context.newPage();
+  await second.goto(`${BASE}/react.html`);
+  await second.waitForSelector('#full_name');
+
+  // Like the service worker: each session fills its own tab, by tab id (0 = older tab, 1 = newer).
+  const fillTab = (which: 0 | 1, msg: unknown) =>
+    sw.evaluate(
+      async ({ which, msg }) => {
+        const ids = (await chrome.tabs.query({})).map((t) => t.id!).sort((a, b) => a - b);
+        return chrome.tabs.sendMessage(ids[ids.length - 2 + which], msg);
+      },
+      { which, msg },
+    ) as Promise<FillResult>;
+
+  const site = BASE;
+  await fillTab(0, { type: 'FILL', values: { full_name: 'Applicant One' }, site });
+  await fillTab(1, { type: 'FILL', values: { full_name: 'Applicant Two' }, site });
+  await expect(first.locator('#full_name')).toHaveValue('Applicant One');
+  await expect(second.locator('#full_name')).toHaveValue('Applicant Two');
+
+  // The session was scanned on another site: the page must not be filled.
+  const refused = await fillTab(0, { type: 'FILL', values: { full_name: 'Wrong' }, site: 'https://elsewhere.example' });
+  expect(refused.filled).toEqual([]);
+  expect(refused.skipped[0].reason).toBe(MOVED_REASON);
+  await expect(first.locator('#full_name')).toHaveValue('Applicant One');
+  await first.close();
+  await second.close();
+});
 
 test('cascade: State → District → Village with lists loading after a delay', async () => {
   const url = `${BASE}/cascade.html`;

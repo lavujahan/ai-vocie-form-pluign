@@ -1,21 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { ClipboardList, Clock, Loader2, Mic, Smartphone } from 'lucide-react';
 import { LOCK_MINUTES, LOW_CONFIDENCE, MAX_PIN_ATTEMPTS, type SessionField } from '@vff/shared';
 import type { ExtState, PopupRequest, PopupResponse, StateMessage } from '../messages';
 import { Button, Card, FieldRow, Input, LinkButton, Pill } from './ui';
 
+/** State of the form session in the tab this popup was opened on (each tab has its own). */
 function useExtState() {
   const [state, setState] = useState<ExtState | null>(null);
+  const tabId = useRef<number | undefined>(undefined);
   useEffect(() => {
-    const port = chrome.runtime.connect({ name: 'popup' });
-    port.onMessage.addListener((m: StateMessage) => m.type === 'STATE' && setState(m.state));
-    return () => port.disconnect();
+    let port: chrome.runtime.Port | null = null;
+    let closed = false;
+    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+      if (closed) return;
+      tabId.current = tab?.id;
+      port = chrome.runtime.connect({ name: `popup:${tab?.id ?? ''}` });
+      port.onMessage.addListener((m: StateMessage) => m.type === 'STATE' && setState(m.state));
+    });
+    return () => {
+      closed = true;
+      port?.disconnect();
+    };
   }, []);
 
   /** Sends a request; resolves to an error message or null. */
   const send = async (req: PopupRequest): Promise<string | null> => {
-    const res = (await chrome.runtime.sendMessage(req)) as PopupResponse;
+    const res = (await chrome.runtime.sendMessage({ ...req, tab_id: tabId.current })) as PopupResponse;
     setState(res.state);
     return res.ok ? null : res.error;
   };
@@ -49,7 +60,16 @@ export function App() {
   } else {
     body = <PairedCard state={state} send={send} />;
   }
-  return <main className="bg-page p-3">{body}</main>;
+  return (
+    <main className="bg-page p-3">
+      {body}
+      {!!state?.auth && state.otherSessions > 0 && (
+        <p className="mt-2 text-center text-xs text-muted">
+          {state.otherSessions === 1 ? '1 other tab has' : `${state.otherSessions} other tabs have`} a form in progress
+        </p>
+      )}
+    </main>
+  );
 }
 
 type Send = (req: PopupRequest) => Promise<string | null>;
