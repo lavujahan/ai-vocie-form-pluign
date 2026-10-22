@@ -1,16 +1,9 @@
-import { Agent, InputGuardrailTripwireTriggered, run, setTracingDisabled, type Model } from '@openai/agents';
 import { MappingResult } from '@vff/shared';
+import { sarvamChat, type ChatFn } from '../sarvam/chat';
 import { EXAMPLE_FORM, renderFewShot } from './examples.ta-en';
-import {
-  emptyTranscriptGuardrail,
-  sanitizeMapping,
-  unknownKeysGuardrail,
-  type MapperContext,
-  type SanitizedMapping,
-} from './guardrails';
+import { isEmptyTranscript, mostlyUnknownKeys, sanitizeMapping, type SanitizedMapping } from './guardrails';
+import { AgentError, runAgent } from './runAgent';
 import { fieldLabel, mapperTools, type AgentField } from './tools';
-
-setTracingDisabled(process.env.NODE_ENV === 'production');
 
 export const MAPPER_INSTRUCTIONS = `You fill web forms from a person's speech.
 The speech may be Tamil, English or Tanglish (code-mixed, Tamil words in Latin letters). The form needs English values.
@@ -87,27 +80,22 @@ export type MapInput = {
 
 export type MapOutcome = (SanitizedMapping & { empty: false }) | { empty: true };
 
-export async function mapTranscript(input: MapInput, opts: { model?: Model | string } = {}): Promise<MapOutcome> {
+/** Field Mapping Agent (Sarvam `sarvam-105b`): speech → field values. `chat` is injectable for tests. */
+export async function mapTranscript(input: MapInput, opts: { chat?: ChatFn } = {}): Promise<MapOutcome> {
+  if (isEmptyTranscript(input.transcript)) return { empty: true };
   const fields = input.targetFieldKey ? input.fields.filter((f) => f.field_key === input.targetFieldKey) : input.fields;
-  const agent = new Agent<MapperContext, typeof MappingResult>({
-    name: 'Field Mapping Agent',
-    instructions: MAPPER_INSTRUCTIONS,
-    model: opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o',
-    outputType: MappingResult,
-    tools: mapperTools(fields),
-    inputGuardrails: [emptyTranscriptGuardrail],
-    outputGuardrails: [unknownKeysGuardrail],
-  });
 
-  try {
-    const result = await run(agent, buildMapperPrompt(input), {
-      context: { transcript: input.transcript, fieldKeys: new Set(fields.map((f) => f.field_key)) },
-      maxTurns: 10,
-    });
-    if (!result.finalOutput) throw new Error('Mapping agent returned no output');
-    return { empty: false, ...sanitizeMapping(result.finalOutput, fields, input.targetFieldKey) };
-  } catch (e) {
-    if (e instanceof InputGuardrailTripwireTriggered) return { empty: true };
-    throw e;
+  const result = await runAgent({
+    name: 'field_mapping',
+    instructions: MAPPER_INSTRUCTIONS,
+    input: buildMapperPrompt(input),
+    output: MappingResult,
+    tools: mapperTools(fields),
+    chat: opts.chat ?? sarvamChat(),
+    maxTurns: 10,
+  });
+  if (mostlyUnknownKeys(result, new Set(fields.map((f) => f.field_key)))) {
+    throw new AgentError('Field mapping returned keys that are not on this form');
   }
+  return { empty: false, ...sanitizeMapping(result, fields, input.targetFieldKey) };
 }

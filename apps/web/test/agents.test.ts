@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assistantMessage, functionCall, ScriptedModel } from '@openai/agents/testing';
+import type { ChatFn, ChatReply, ChatRequest } from '@/lib/sarvam/chat';
 import type { FormSchema } from '@vff/shared';
 import { mapTranscript, buildMapperPrompt } from '@/lib/agents/fieldMapper';
 import { sanitizeAnalysis } from '@/lib/agents/formAnalyzer';
@@ -138,6 +138,18 @@ describe('sanitizeAnalysis', () => {
   });
 });
 
+/** A fake Sarvam chat: returns the scripted replies in order and records every request. */
+function scriptedChat(replies: ChatReply[]) {
+  const calls: ChatRequest[] = [];
+  const chat: ChatFn = async (req) => {
+    calls.push(structuredClone(req));
+    const r = replies.shift();
+    if (!r) throw new Error('unexpected model call');
+    return r;
+  };
+  return { chat, calls, remaining: () => replies.length };
+}
+
 describe('Field Mapping Agent (scripted model)', () => {
   it('runs tools and returns sanitized values', async () => {
     const final = {
@@ -148,13 +160,17 @@ describe('Field Mapping Agent (scripted model)', () => {
       unmapped_speech: null,
       missing_required: ['email', 'phone'],
     };
-    const model = new ScriptedModel([
-      [functionCall('validate_value', { field_key: 'gender', value: 'aan' }, { callId: 'c1' })],
-      [assistantMessage(JSON.stringify(final))],
+    const model = scriptedChat([
+      {
+        content: null,
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'validate_value', arguments: JSON.stringify({ field_key: 'gender', value: 'aan' }) } }],
+      },
+      // Fenced JSON is tolerated.
+      { content: '```json\n' + JSON.stringify(final) + '\n```' },
     ]);
     const out = await mapTranscript(
       { fields: EVAL_FORM, current: {}, transcript: 'en peru Ramesh Kumar, naan aan', targetFieldKey: null },
-      { model },
+      { chat: model.chat },
     );
     expect(out.empty).toBe(false);
     if (out.empty) return;
@@ -162,14 +178,49 @@ describe('Field Mapping Agent (scripted model)', () => {
       ['full_name', 'Ramesh Kumar'],
       ['gender', 'Male'],
     ]);
-    // The tool result was fed back to the model on the second call.
-    expect(JSON.stringify(model.lastCall?.request.input)).toContain('Male');
-    model.assertComplete();
+    // The tool result was fed back to the model on the second call; both calls asked for the JSON schema.
+    const second = model.calls[1];
+    expect(second.messages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'c1' });
+    expect(JSON.stringify(second.messages.at(-1))).toContain('Male');
+    expect(second.tools?.map((t) => t.function.name)).toEqual(['validate_value']);
+    expect(second.response_format?.type).toBe('json_schema');
+    expect(model.remaining()).toBe(0);
+  });
+
+  it('asks again once when the reply is not valid JSON, then gives up', async () => {
+    const good = { values: [], unmapped_speech: null, missing_required: [] };
+    const retry = scriptedChat([{ content: 'Sure! Here you go.' }, { content: JSON.stringify(good) }]);
+    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello there', targetFieldKey: null }, { chat: retry.chat });
+    expect(out).toMatchObject({ empty: false, values: [] });
+    expect(retry.calls[1].messages.at(-1)).toMatchObject({ role: 'user' });
+
+    const bad = scriptedChat([{ content: 'nope' }, { content: 'still nope' }]);
+    await expect(
+      mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello there', targetFieldKey: null }, { chat: bad.chat }),
+    ).rejects.toThrow(/invalid output/);
+  });
+
+  it('rejects output that is mostly field keys from another form', async () => {
+    const model = scriptedChat([
+      {
+        content: JSON.stringify({
+          values: [
+            { field_key: 'ghost1', value: 'x', confidence: 1, source_phrase: null, number_parts: null },
+            { field_key: 'ghost2', value: 'y', confidence: 1, source_phrase: null, number_parts: null },
+          ],
+          unmapped_speech: null,
+          missing_required: [],
+        }),
+      },
+    ]);
+    await expect(
+      mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'something', targetFieldKey: null }, { chat: model.chat }),
+    ).rejects.toThrow(/not on this form/);
   });
 
   it('skips the model entirely for an empty transcript', async () => {
-    const model = new ScriptedModel([]);
-    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: ' . ', targetFieldKey: null }, { model });
+    const model = scriptedChat([]);
+    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: ' . ', targetFieldKey: null }, { chat: model.chat });
     expect(out).toEqual({ empty: true });
     expect(model.calls).toHaveLength(0);
   });

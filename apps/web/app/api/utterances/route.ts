@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { UtteranceResponse } from '@vff/shared';
 import { mapTranscript } from '@/lib/agents/fieldMapper';
-import { transcribe } from '@/lib/agents/transcribe';
+import { transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
 import { assertWritable, getFieldRows, getSessionById, getValues, upsertValue } from '@/lib/sessions';

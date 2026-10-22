@@ -5,6 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'];
 /** Recordings shorter than this are treated as accidental taps. */
 const MIN_MS = 400;
+/**
+ * Sarvam's speech-to-text takes clips under 30 s, so a long recording is cut into pieces of this
+ * length with no gap. Each piece is sent as its own utterance (with its own seq).
+ */
+export const SEGMENT_MS = 28_000;
 
 export type RecorderState = 'idle' | 'recording' | 'unsupported' | 'denied';
 
@@ -18,7 +23,8 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
   const streamRef = useRef<MediaStream | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const startedAt = useRef(0);
-  const tagRef = useRef<unknown>(null);
+  const splitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nextTagRef = useRef<(() => unknown) | null>(null);
   const onRecordedRef = useRef(onRecorded);
   onRecordedRef.current = onRecorded;
 
@@ -26,7 +32,10 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
     if (typeof window !== 'undefined' && (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined')) {
       setState('unsupported');
     }
-    return () => streamRef.current?.getTracks().forEach((t) => t.stop());
+    return () => {
+      if (splitTimer.current) clearTimeout(splitTimer.current);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
   }, []);
 
   useEffect(() => {
@@ -35,7 +44,31 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
     return () => clearInterval(t);
   }, [state]);
 
-  const start = useCallback(async (tag: unknown) => {
+  /** Records one segment; after SEGMENT_MS it hands off to the next segment seamlessly. */
+  const beginSegment = useCallback((tag: unknown) => {
+    const mimeType = MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m));
+    const rec = new MediaRecorder(streamRef.current!, mimeType ? { mimeType } : undefined);
+    const chunks: Blob[] = [];
+    const segStart = Date.now();
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onstop = () => {
+      const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
+      if (Date.now() - segStart >= MIN_MS && blob.size > 0) onRecordedRef.current(blob, { tag });
+    };
+    recRef.current = rec;
+    rec.start();
+    splitTimer.current = setTimeout(() => {
+      if (recRef.current !== rec) return;
+      const next = nextTagRef.current ? nextTagRef.current() : tag;
+      rec.stop();
+      beginSegment(next);
+    }, SEGMENT_MS);
+  }, []);
+
+  /**
+   * `nextTag` is called for each extra segment of a long recording (e.g. to take a new seq).
+   */
+  const start = useCallback(async (tag: unknown, opts: { nextTag?: () => unknown } = {}) => {
     try {
       if (!streamRef.current || streamRef.current.getTracks().every((t) => t.readyState === 'ended')) {
         streamRef.current = await navigator.mediaDevices.getUserMedia({
@@ -46,25 +79,16 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
       setState('denied');
       return false;
     }
-    const mimeType = MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m));
-    const rec = new MediaRecorder(streamRef.current, mimeType ? { mimeType } : undefined);
-    const chunks: Blob[] = [];
-    tagRef.current = tag;
-    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    rec.onstop = () => {
-      const duration = Date.now() - startedAt.current;
-      const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
-      if (duration >= MIN_MS && blob.size > 0) onRecordedRef.current(blob, { tag: tagRef.current });
-    };
-    recRef.current = rec;
-    startedAt.current = Date.now();
+    nextTagRef.current = opts.nextTag ?? null;
+    startedAt.current = Date.now(); // the timer shows the whole recording, across segments
     setElapsed(0);
-    rec.start();
+    beginSegment(tag);
     setState('recording');
     return true;
-  }, []);
+  }, [beginSegment]);
 
   const stop = useCallback(() => {
+    if (splitTimer.current) clearTimeout(splitTimer.current);
     if (recRef.current?.state === 'recording') recRef.current.stop();
     recRef.current = null;
     setState('idle');

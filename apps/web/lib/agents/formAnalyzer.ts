@@ -1,8 +1,7 @@
-import { Agent, run, setTracingDisabled, type Model } from '@openai/agents';
 import { FormAnalysis, type FieldAnalysis, type FormSchema } from '@vff/shared';
+import { sarvamChat, type ChatFn } from '../sarvam/chat';
+import { runAgent } from './runAgent';
 import { analyzerTools } from './tools';
-
-setTracingDisabled(process.env.NODE_ENV === 'production');
 
 export const ANALYZER_INSTRUCTIONS = `You analyze a web form detected on a page so that another agent can fill it from speech.
 
@@ -43,17 +42,17 @@ function describeSchema(schema: FormSchema): string {
     .join('\n\n');
 }
 
-export async function analyzeForm(schema: FormSchema, opts: { model?: Model | string } = {}): Promise<FormAnalysis> {
-  const agent = new Agent({
-    name: 'Form Analyzer Agent',
+/** Form Analyzer Agent (Sarvam `sarvam-105b`). `chat` is injectable for tests. */
+export async function analyzeForm(schema: FormSchema, opts: { chat?: ChatFn } = {}): Promise<FormAnalysis> {
+  return runAgent({
+    name: 'form_analysis',
     instructions: ANALYZER_INSTRUCTIONS,
-    model: opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o',
-    outputType: FormAnalysis,
+    input: describeSchema(schema),
+    output: FormAnalysis,
     tools: analyzerTools(schema.fields),
+    chat: opts.chat ?? sarvamChat(),
+    maxTurns: 6,
   });
-  const result = await run(agent, describeSchema(schema), { maxTurns: 6 });
-  if (!result.finalOutput) throw new Error('Form analyzer returned no output');
-  return result.finalOutput;
 }
 
 function regexOk(src: string | null): string | null {

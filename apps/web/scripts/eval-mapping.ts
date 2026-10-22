@@ -1,14 +1,14 @@
 /**
  * Runs the Field Mapping Agent against the Tamil / English / Tanglish fixtures with the real API.
- *   pnpm eval:mapping            (needs OPENAI_API_KEY in apps/web/.env.local)
+ *   pnpm eval:mapping            (needs SARVAM_API_KEY in apps/web/.env.local)
  * Not part of CI: it costs tokens and model output varies.
  */
 import { normalizeText } from '@vff/shared';
 import { mapTranscript } from '../lib/agents/fieldMapper';
 import { EVAL_CASES, EVAL_FORM } from './eval-fixtures';
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error('OPENAI_API_KEY is not set');
+if (!process.env.SARVAM_API_KEY) {
+  console.error('SARVAM_API_KEY is not set');
   process.exit(1);
 }
 

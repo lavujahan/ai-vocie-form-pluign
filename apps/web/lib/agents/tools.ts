@@ -1,5 +1,5 @@
-import { tool } from '@openai/agents';
 import { z } from 'zod';
+import { defineTool, type AgentTool } from './runAgent';
 import {
   validateValue,
   type SemanticType,
@@ -48,10 +48,10 @@ export function validateForField(fields: Map<string, AgentField>, fieldKey: stri
  * The Field Mapping Agent interprets speech itself (language, digits, emails, dates, option choice).
  * Its only tool is a checker, which behaves the same whoever is speaking.
  */
-export function mapperTools(fieldList: AgentField[]) {
+export function mapperTools(fieldList: AgentField[]): AgentTool[] {
   const fields = new Map(fieldList.map((f) => [f.field_key, f]));
   return [
-    tool({
+    defineTool({
       name: 'validate_value',
       description:
         'Check a candidate value against the field type, options and validation rules. Returns {ok, value} with the normalized value, or {ok:false, error}. Call this for every value before finalizing.',
@@ -61,10 +61,10 @@ export function mapperTools(fieldList: AgentField[]) {
   ];
 }
 
-export function analyzerTools(fieldList: FieldDescriptor[]) {
+export function analyzerTools(fieldList: FieldDescriptor[]): AgentTool[] {
   const fields = new Map(fieldList.map((f) => [f.field_key, f]));
   return [
-    tool({
+    defineTool({
       name: 'get_field_context',
       description: 'Get the full details of one field: label, placeholder, pattern, min/max, all options and nearby text.',
       parameters: z.object({ field_key: z.string() }),

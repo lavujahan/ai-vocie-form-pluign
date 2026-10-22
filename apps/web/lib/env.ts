@@ -17,14 +17,8 @@ export const env = {
   get jwtSecret() {
     return required('SUPABASE_JWT_SECRET');
   },
-  get openaiKey() {
-    return required('OPENAI_API_KEY');
-  },
-  get agentModel() {
-    return process.env.AGENT_MODEL || 'gpt-4o';
-  },
-  get transcribeModel() {
-    return process.env.TRANSCRIBE_MODEL || 'gpt-4o-transcribe';
+  get sarvamKey() {
+    return required('SARVAM_API_KEY');
   },
   get publicBaseUrl() {
     return (process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');

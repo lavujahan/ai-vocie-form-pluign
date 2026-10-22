@@ -58,7 +58,7 @@ export type FormSchemaInput = z.input<typeof FormSchema>;
 
 // ---------- AI layer ----------
 // Agent output types use only required / nullable properties so they work with
-// OpenAI structured outputs in strict mode.
+// strict JSON-schema structured output.
 
 export const SemanticType = z.enum([
   'full_name',

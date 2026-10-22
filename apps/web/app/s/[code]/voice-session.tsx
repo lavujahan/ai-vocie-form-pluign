@@ -95,7 +95,8 @@ export function VoiceSession({ code }: { code: string }) {
     if (mode === 'field' && !t) return;
     if (t !== target) setTarget(t);
     const seq = s.takeSeq(); // seq = when the user spoke, not when processing finishes
-    if (await recorder.start({ seq, target: t })) setRecordingTarget(t);
+    // Long recordings are sent in ~28 s pieces, each with the next seq.
+    if (await recorder.start({ seq, target: t }, { nextTag: () => ({ seq: s.takeSeq(), target: t }) })) setRecordingTarget(t);
   }
 
   /** Mic inside the review list: records straight into one field without leaving the page. */
@@ -106,7 +107,9 @@ export function VoiceSession({ code }: { code: string }) {
       return;
     }
     const seq = s.takeSeq();
-    if (await recorder.start({ seq, target: fieldKey })) setRecordingTarget(fieldKey);
+    if (await recorder.start({ seq, target: fieldKey }, { nextTag: () => ({ seq: s.takeSeq(), target: fieldKey }) })) {
+      setRecordingTarget(fieldKey);
+    }
   }
 
   function showView(v: View) {
