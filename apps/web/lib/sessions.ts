@@ -1,6 +1,7 @@
 import 'server-only';
 import type {
   ChoiceHint,
+  FieldDescriptor,
   FieldOption,
   FieldType,
   OutputScript,
@@ -73,6 +74,53 @@ async function selectSession(column: 'id' | 'session_code', value: string): Prom
 
 export const getSessionByCode = (code: string) => selectSession('session_code', code);
 export const getSessionById = (id: string) => selectSession('id', id);
+
+/** form_fields rows for detected fields, placed from `startPosition` (and in `stepIndex` when given). */
+export function fieldRows(sessionId: string, fields: FieldDescriptor[], startPosition = 0, stepIndex?: number) {
+  return fields.map((f, i) => ({
+    session_id: sessionId,
+    field_key: f.field_key,
+    label: f.label,
+    field_type: f.field_type,
+    required: f.required,
+    options: f.options,
+    multiple: f.multiple,
+    dynamic_options: f.dynamic_options,
+    group_key: f.group_key,
+    depends_on: f.depends_on,
+    step_index: stepIndex ?? f.step_index,
+    min: f.min,
+    max: f.max,
+    pattern: f.pattern,
+    placeholder: f.placeholder,
+    context: f.context,
+    position: startPosition + i,
+  }));
+}
+
+/** Inserts field rows and returns them. Works before migration 0004 too (without `dynamic_options`). */
+export async function insertFieldRows(rows: ReturnType<typeof fieldRows>): Promise<FieldRow[]> {
+  let res = await db().from('form_fields').insert(rows).select('*');
+  if (res.error?.code === 'PGRST204') {
+    res = await db()
+      .from('form_fields')
+      .insert(rows.map(({ dynamic_options: _d, ...r }) => r))
+      .select('*');
+  }
+  return must(res) as FieldRow[];
+}
+
+/** Fields the session doesn't have yet, with where they go: after the last field, in the next step. */
+export function newFieldsPlacement(existing: Pick<FieldRow, 'field_key' | 'position' | 'step_index'>[], fields: FieldDescriptor[]) {
+  const have = new Set(existing.map((f) => f.field_key));
+  const seen = new Set<string>();
+  const fresh = fields.filter((f) => !have.has(f.field_key) && !seen.has(f.field_key) && seen.add(f.field_key));
+  return {
+    fresh,
+    startPosition: Math.max(-1, ...existing.map((f) => f.position)) + 1,
+    stepIndex: Math.max(0, ...existing.map((f) => f.step_index ?? 0)) + 1,
+  };
+}
 
 export async function getFieldRows(sessionId: string): Promise<FieldRow[]> {
   return must(

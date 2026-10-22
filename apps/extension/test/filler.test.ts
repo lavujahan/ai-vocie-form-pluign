@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import { detect } from '../src/content/detector';
-import { fillAll, undoAll } from '../src/content/filler';
+import { fillAll, NOT_ON_PAGE, undoAll } from '../src/content/filler';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -66,7 +66,7 @@ describe('fillAll', () => {
     expect($<HTMLInputElement>('#terms').checked).toBe(true);
     expect($<HTMLTextAreaElement>('#addr').value).toBe('12 Gandhi Street');
     expect($('#bio').textContent).toBe('Hello');
-    expect(report.skipped).toEqual([{ field_key: 'missing', reason: 'Field not found on the page' }]);
+    expect(report.skipped).toEqual([{ field_key: 'missing', reason: NOT_ON_PAGE }]);
 
     // Latest-wins re-fill, then a non-matching option.
     const again = await fillAll({ gender: 'Male', state: 'Goa' }, registry, { settleMs: 0 });

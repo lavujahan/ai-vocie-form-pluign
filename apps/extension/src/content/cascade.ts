@@ -106,6 +106,34 @@ export function chooseLocally(spoken: string, options: FieldOption[]) {
   return { option: m.option && m.score >= 0.75 ? m.option : null, confident, top: m.top.filter((t) => t.score >= 0.5).map((t) => t.option.label) };
 }
 
+/**
+ * Picks the option the speaker meant from the options on the page: a clear local match, else the AI
+ * resolver. Without a resolver (tests), a reasonably close local match is accepted. Shared by native
+ * dropdowns and custom ones (react-select, MUI, select2…).
+ */
+export async function pickOption(
+  key: string,
+  spoken: string,
+  options: FieldOption[],
+  resolve?: Resolver,
+  reasonIfNone?: ChoiceReason,
+): Promise<{ option: FieldOption | null; top: string[]; reason: ChoiceReason }> {
+  const local = chooseLocally(spoken, options);
+  let option = local.confident ? local.option : null;
+  let top = local.top;
+  let reason: ChoiceReason = reasonIfNone ?? (local.option ? 'ambiguous' : 'no_match');
+  if (!option && resolve && options.length) {
+    const r = await resolve(key, spoken, options).catch(() => null);
+    if (r?.choice) option = options.find((o) => o.label === r.choice) ?? null;
+    if (r && !option) {
+      top = r.top.length ? r.top : top;
+      reason = reasonIfNone ?? (r.ambiguous ? 'ambiguous' : 'no_match');
+    }
+  }
+  if (!option && !resolve && local.option) option = local.option;
+  return { option, top: top.slice(0, 5), reason };
+}
+
 /** Parent of a field: from the Form Analyzer (`edges`) or learned on this page. */
 export function parentOf(key: string, edges: Record<string, string>): string | null {
   return edges[key] ?? memory.learned.get(key) ?? null;
@@ -213,27 +241,13 @@ export async function fillSelect(
 
   let el = liveSelect(entry);
   const options = liveOptions(el);
-  const local = chooseLocally(v, options);
-  let option = local.confident ? local.option : null;
-  let top = local.top;
-  let reason: ChoiceReason = ctx.reason ?? (local.option ? 'ambiguous' : 'no_match');
-
-  if (!option && ctx.resolve) {
-    const r = await ctx.resolve(key, v, options).catch(() => null);
-    if (r?.choice) option = options.find((o) => o.label === r.choice) ?? null;
-    if (r && !option) {
-      top = r.top.length ? r.top : top;
-      reason = ctx.reason ?? (r.ambiguous ? 'ambiguous' : 'no_match');
-    }
-  }
-  // No resolver available (e.g. tests): accept the best local match if it is reasonably close.
-  if (!option && !ctx.resolve && local.option) option = local.option;
+  const { option, top, reason } = await pickOption(key, v, options, ctx.resolve, ctx.reason);
 
   el = liveSelect(entry); // the AI call takes a moment; the page may have re-rendered meanwhile
   if (!option) {
     // A child whose old value doesn't fit its new parent: never leave a stale choice in place.
     if (ctx.reason === 'parent_changed' && el.value !== '' && [...el.options].some((o) => o.value === '')) ctx.setValue(el, '');
-    return { status: 'unresolved', options, unresolved: { field_key: key, spoken: v, top: top.slice(0, 5), reason } };
+    return { status: 'unresolved', options, unresolved: { field_key: key, spoken: v, top, reason } };
   }
 
   if (el.value === option.value) return { status: 'filled', changed: false, options };

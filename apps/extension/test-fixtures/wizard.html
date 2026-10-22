@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Scholarship application (multi-step)</title>
+    <style>
+      body { font: 15px system-ui; max-width: 560px; margin: 32px auto; }
+      label { display: block; margin-top: 12px; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <form id="wizard" onsubmit="return false">
+      <h2>Scholarship application</h2>
+      <!-- Step 1 is visible; step 2 appears after Next. -->
+      <section id="step1">
+        <h3>Step 1: Applicant</h3>
+        <label for="full_name">Full name</label>
+        <input id="full_name" name="full_name" />
+        <label for="mobile">Mobile number</label>
+        <input id="mobile" name="mobile" type="tel" />
+        <label><input id="other_address" name="other_address" type="checkbox" /> Communication address is different</label>
+        <!-- Shown only when the checkbox is ticked (a dependent field). -->
+        <div id="comm_wrap" class="hidden">
+          <label for="comm_address">Communication address</label>
+          <textarea id="comm_address" name="comm_address"></textarea>
+        </div>
+        <button id="next" type="button">Next</button>
+      </section>
+
+      <section id="step2" class="hidden">
+        <h3>Step 2: Family income</h3>
+        <label for="occupation">Parent's occupation</label>
+        <select id="occupation" name="occupation">
+          <option value="">Select</option>
+          <option value="farmer">Farmer</option>
+          <option value="labour">Daily wage labour</option>
+          <option value="other">Other</option>
+        </select>
+        <div id="occ_other_wrap" class="hidden">
+          <label for="occupation_other">Specify occupation</label>
+          <input id="occupation_other" name="occupation_other" />
+        </div>
+        <label for="income">Annual family income</label>
+        <input id="income" name="income" type="number" />
+        <p><a id="to_page2" href="wizard-2.html">Continue to bank details</a></p>
+      </section>
+    </form>
+    <script>
+      const show = (id, on) => document.getElementById(id).classList.toggle('hidden', !on);
+      document.getElementById('other_address').addEventListener('change', (e) => show('comm_wrap', e.target.checked));
+      document.getElementById('next').addEventListener('click', () => {
+        show('step1', false);
+        show('step2', true);
+      });
+      document.getElementById('occupation').addEventListener('change', (e) => show('occ_other_wrap', e.target.value === 'other'));
+    </script>
+  </body>
+</html>

@@ -347,6 +347,9 @@ export const UpdateFieldsRequest = z.object({
 });
 export type UpdateFieldsRequest = z.infer<typeof UpdateFieldsRequest>;
 
+/** Server → extension: fields added to a session after the first scan (a wizard's next step, a revealed field). */
+export type AddFieldsResponse = { fields: SessionField[] };
+
 /** Phone → server: Start over. `seq` is the phone's next seq, so anything said before it loses. */
 export const ResetRequest = z.object({
   seq: z.number().int().min(1),

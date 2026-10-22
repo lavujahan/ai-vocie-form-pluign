@@ -122,6 +122,39 @@ One signed-in user can fill several forms at once, for example two CAN registrat
 - **Limit:** 5 active forms per browser.
 - **Sign out** ends all of them.
 
+## Custom dropdowns (react-select, MUI, choices.js, select2)
+
+Dropdowns that aren't real `<select>`s are filled the way a person would fill them. The code is in `apps/extension/src/content/combobox.ts`, and every widget uses the same steps:
+1. Open the dropdown.
+2. Type to filter.
+3. Wait for the options; they may load from a server.
+4. Pick one locally, or ask the **Option Resolver Agent**.
+5. Click the option.
+6. Check that the choice took.
+
+Also handled:
+- **Different spellings:** if the widget's own search hides the right option ("Omaloor" vs "Omalur"), the full list is checked as well.
+- **Multi-select** (comma-separated values) and clearing (Start over, Undo) work.
+- **Unclear matches** go to the phone's **Pick one** list, as for cascading dropdowns.
+
+Detection uses generic accessibility markup first (`role=combobox` / `listbox` / `option`), with fallbacks for:
+- react-select
+- MUI Autocomplete and Select
+- choices.js
+- select2, including select2 loading options from a server
+- AntD (best effort, not tested)
+
+Test page: `test-fixtures/dropdowns.html`.
+
+## Fields that appear later (multi-step forms, dependent fields)
+
+While a form session is active, the extension watches the page (`apps/extension/src/content/watch.ts`).
+- **Fields that appear later are added to the session.** That covers a wizard's next step, the form's next page on the same site, and a field shown by a checkbox or by choosing "Other". It uses `POST /api/sessions/[code]/fields`, and the Form Analyzer reads only the new fields.
+- **The phone shows them right away:** "3 new fields on the computer (step 2)", under a **Step 2** heading.
+- **Values wait for their field.** A value spoken for a field that isn't on the page yet shows as "Waiting: this field isn't on the page yet" in the popup. It fills as soon as the field appears.
+
+Test page: `test-fixtures/wizard.html`.
+
 ## Start over and the desktop tab (migration `0005`)
 
 **Timings**
@@ -164,8 +197,6 @@ The extension reports the form tab's state to the phone (`PATCH /api/sessions/[c
 ## Not in this MVP
 
 These are planned for later:
-- cascading dropdowns (State → District → Village) and custom dropdown adapters (react-select, select2, MUI)
-- multi-step forms
 - form memory
 - cross-origin iframes
 - PWA manifest

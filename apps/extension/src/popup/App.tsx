@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { ClipboardList, Clock, Loader2, Mic, Smartphone } from 'lucide-react';
 import { LOCK_MINUTES, LOW_CONFIDENCE, MAX_PIN_ATTEMPTS, type SessionField } from '@vff/shared';
-import type { ExtState, PopupRequest, PopupResponse, StateMessage } from '../messages';
+import { NOT_ON_PAGE, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
 import { Button, Card, FieldRow, Input, LinkButton, Pill } from './ui';
 
 /** State of the form session in the tab this popup was opened on (each tab has its own). */
@@ -278,7 +278,18 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
           else if (f.required) content = <Pill tone="warn">Missing</Pill>;
           else content = <span className="text-muted">—</span>;
           return (
-            <FieldRow key={f.id} label={f.label} sub={reason ? <span className="text-danger-ink">Not filled: {reason}</span> : undefined}>
+            <FieldRow
+              key={f.id}
+              label={f.label}
+              sub={
+                !reason ? undefined : reason === NOT_ON_PAGE ? (
+                  // Fills by itself when the field appears (next step, or shown by another answer).
+                  <span className="text-muted">{reason}</span>
+                ) : (
+                  <span className="text-danger-ink">Not filled: {reason}</span>
+                )
+              }
+            >
               {content}
             </FieldRow>
           );

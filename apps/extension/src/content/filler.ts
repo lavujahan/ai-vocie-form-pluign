@@ -9,11 +9,15 @@ import {
   type FillReport,
 } from '@vff/shared';
 import { childrenOf, descendantsOf, fillSelect, isNativeSelect, liveSelect, memory, type Resolver, type SelectOutcome } from './cascade';
+import { clearWidget, fillCombobox, selectedLabels, type Widget } from './combobox';
 import type { Registry, RegistryEntry } from './detector';
+import { NOT_ON_PAGE } from '../messages';
+import { fire, setValueNatively, win } from './dom';
 
 const OPTION_MIN_SCORE = 0.75;
 
 type Snapshot =
+  | { kind: 'widget'; labels: string[] }
   | { kind: 'value'; value: string }
   | { kind: 'checked'; states: boolean[] }
   | { kind: 'aria'; checked: string | null }
@@ -24,25 +28,13 @@ const undoStack = new Map<string, { entry: RegistryEntry; snap: Snapshot }>();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function win(el: Element): Window & typeof globalThis {
-  return (el.ownerDocument.defaultView ?? window) as Window & typeof globalThis;
-}
-
-function fire(el: Element, type: string) {
-  const W = win(el);
-  el.dispatchEvent(new W.Event(type, { bubbles: true, composed: true }));
-}
-
 /**
  * Sets .value through the prototype's native setter so frameworks that track the
  * instance value (React) notice the change, then fires the events they listen to.
  */
 export function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
-  const proto = Object.getPrototypeOf(el);
-  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
   el.focus?.();
-  if (setter) setter.call(el, value);
-  else el.value = value;
+  setValueNatively(el, value);
   fire(el, 'input');
   fire(el, 'change');
   el.blur?.();
@@ -58,6 +50,7 @@ function pickOption(spoken: string, options: FieldOption[]): FieldOption | null 
 
 function snapshot(entry: RegistryEntry): Snapshot {
   const el = entry.el;
+  if (entry.widget) return { kind: 'widget', labels: selectedLabels(entry.widget) };
   if (entry.group) return { kind: 'checked', states: entry.group.map((g) => g.el.checked) };
   if (el instanceof win(el).HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
     return { kind: 'checked', states: [el.checked] };
@@ -178,13 +171,18 @@ async function fillEntry(entry: RegistryEntry, value: string | null): Promise<st
     return null;
   }
 
-  if (role === 'combobox') return 'Custom dropdowns are not supported yet';
   return 'Unsupported field';
 }
 
 async function restore(entry: RegistryEntry, snap: Snapshot) {
   const el = entry.el;
   switch (snap.kind) {
+    case 'widget': {
+      const w = entry.widget as Widget;
+      await clearWidget(w);
+      if (snap.labels.length) await fillCombobox('', entry as RegistryEntry & { widget: Widget }, snap.labels.join(', '));
+      break;
+    }
     case 'checked': {
       const inputs = entry.group ? entry.group.map((g) => g.el) : [el as HTMLInputElement];
       await setGroup(inputs, (i) => snap.states[i]);
@@ -231,6 +229,8 @@ export type FillOptions = {
   resolve?: Resolver;
 };
 
+export { NOT_ON_PAGE };
+
 const UNRESOLVED_REASON: Record<ChoiceReason, string> = {
   ambiguous: 'Several options match. Choose one on your phone',
   no_match: 'No option matches. Choose one on your phone',
@@ -259,14 +259,16 @@ export async function fillAll(
   /** Dropdowns we set, to check at the end that the page didn't reset them. */
   const setSelects = new Map<string, string>();
 
-  const fillDropdown = async (key: string, entry: RegistryEntry & { el: HTMLSelectElement }): Promise<SelectOutcome> => {
-    const out = await fillSelect(key, entry, valueFor(key), {
-      reg,
-      edges,
-      resolve: opts.resolve,
-      setValue: setNativeValue,
-      reason: recascade.get(key),
-    });
+  const fillDropdown = async (key: string, entry: RegistryEntry): Promise<SelectOutcome> => {
+    const out = entry.widget
+      ? await fillCombobox(key, entry as RegistryEntry & { widget: Widget }, valueFor(key), { resolve: opts.resolve, reason: recascade.get(key) })
+      : await fillSelect(key, entry as RegistryEntry & { el: HTMLSelectElement }, valueFor(key), {
+          reg,
+          edges,
+          resolve: opts.resolve,
+          setValue: setNativeValue,
+          reason: recascade.get(key),
+        });
     const remove = <T extends { field_key: string }>(list: T[]) => list.filter((x) => x.field_key !== key);
     report.filled = report.filled.filter((k) => k !== key);
     report.skipped = remove(report.skipped);
@@ -274,7 +276,7 @@ export async function fillAll(
     if (entry.descriptor.dynamic_options && out.status !== 'skipped' && out.options.length) loadedOptions[key] = out.options;
     if (out.status === 'filled') {
       report.filled.push(key);
-      setSelects.set(key, liveSelect(entry).value);
+      if (isNativeSelect(entry)) setSelects.set(key, liveSelect(entry).value);
       if (out.changed && opts.highlight) highlight(entry);
       // Parent changed: re-check its direct children that aren't part of this fill. Grandchildren are
       // re-checked in turn when each child is re-filled.
@@ -316,11 +318,11 @@ export async function fillAll(
       pending.delete(key);
       if (isNativeSelect(entry)) liveSelect(entry);
       if (!entry.el.isConnected) {
-        report.skipped.push({ field_key: key, reason: 'Field is no longer on the page' });
+        report.skipped.push({ field_key: key, reason: NOT_ON_PAGE });
         continue;
       }
       if (!undoStack.has(key)) undoStack.set(key, { entry, snap: snapshot(entry) });
-      if (isNativeSelect(entry)) {
+      if (isNativeSelect(entry) || entry.widget) {
         try {
           await fillDropdown(key, entry);
         } catch (e) {
@@ -341,7 +343,7 @@ export async function fillAll(
       if (settle) await sleep(settle);
     }
   }
-  for (const key of pending) report.skipped.push({ field_key: key, reason: 'Field not found on the page' });
+  for (const key of pending) report.skipped.push({ field_key: key, reason: NOT_ON_PAGE });
 
   // Final check: a slow page can reset a dropdown after we moved on (its parent's options arrived
   // late). Re-fill any dropdown that no longer holds what we set.

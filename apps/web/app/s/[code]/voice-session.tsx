@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, Check, ChevronRight, Copy, Loader2, Mic, MonitorX, RotateCcw, Send, Square, WifiOff } from 'lucide-react';
 import {
   LOW_CONFIDENCE,
@@ -112,6 +112,18 @@ export function VoiceSession({ code }: { code: string }) {
     .sort((a, b) => b.seq - a.seq)[0]?.transcript;
   const filledCount = s.fields.filter((f) => s.valueByKey.get(f.field_key)?.value).length;
   const recordingNow = recorder.state === 'recording';
+  const steps = useMemo(() => stepStarts(s.fields), [s.fields]);
+
+  // Fields that appeared on the computer later (the form's next step, or shown by an answer).
+  const fieldCount = useRef(0);
+  useEffect(() => {
+    const added = s.fields.length - fieldCount.current;
+    if (fieldCount.current > 0 && added > 0) {
+      const step = steps.get(s.fields[s.fields.length - 1].id);
+      setNotice(`${added} new ${added === 1 ? 'field' : 'fields'} on the computer${step ? ` (step ${step})` : ''}.`);
+    }
+    fieldCount.current = s.fields.length;
+  }, [s.fields, steps]);
 
   // Reloading or leaving now would lose the recording, or pieces that are still uploading.
   useEffect(() => {
@@ -365,18 +377,20 @@ export function VoiceSession({ code }: { code: string }) {
       {mode === 'field' && (
         <Card className="mt-3 py-1">
           {s.fields.map((f) => (
-            <FieldRow
-              key={f.id}
-              label={f.label}
-              active={f.field_key === target}
-              onClick={() => {
-                const st = statusOf(f);
-                if (st.kind === 'error' && st.utt.blob) s.retry(st.utt);
-                else if (!recording) setTarget(f.field_key);
-              }}
-            >
-              <StatusMarker field={f} status={statusOf(f)} />
-            </FieldRow>
+            <Fragment key={f.id}>
+              <StepDivider step={steps.get(f.id)} />
+              <FieldRow
+                label={f.label}
+                active={f.field_key === target}
+                onClick={() => {
+                  const st = statusOf(f);
+                  if (st.kind === 'error' && st.utt.blob) s.retry(st.utt);
+                  else if (!recording) setTarget(f.field_key);
+                }}
+              >
+                <StatusMarker field={f} status={statusOf(f)} />
+              </FieldRow>
+            </Fragment>
           ))}
         </Card>
       )}
@@ -393,6 +407,25 @@ export function VoiceSession({ code }: { code: string }) {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return <main className="mx-auto min-h-dvh max-w-md px-4 py-4">{children}</main>;
+}
+
+/**
+ * Where each step starts: field id → step number (1, 2, …), only when the form has several steps
+ * (fields added later, e.g. a wizard's next page, form the next step).
+ */
+function stepStarts(fields: SessionField[]): Map<string, number> {
+  const out = new Map<string, number>();
+  const distinct = [...new Set(fields.map((f) => f.step_index ?? 0))].sort((a, b) => a - b);
+  if (distinct.length < 2) return out;
+  fields.forEach((f, i) => {
+    if (i === 0 || (fields[i - 1].step_index ?? 0) !== (f.step_index ?? 0)) out.set(f.id, distinct.indexOf(f.step_index ?? 0) + 1);
+  });
+  return out;
+}
+
+function StepDivider({ step }: { step: number | undefined }) {
+  if (!step) return null;
+  return <p className="pt-3 pb-1 text-xs font-semibold tracking-wide text-muted uppercase">Step {step}</p>;
 }
 
 function hostOf(url: string | undefined): string {
@@ -565,6 +598,7 @@ function ReviewView({
   const [confirmMissing, setConfirmMissing] = useState(false);
   const [sends, setSends] = useState(0);
   const ack = useDesktopAck(sent, report, sends);
+  const steps = useMemo(() => stepStarts(fields), [fields]);
 
   const missing = fields.filter((f) => ['missing', 'pick'].includes(statusOf(f).kind)).length;
   // Sent, but the computer didn't fill (asleep, or the form page changed): allow sending again.
@@ -591,6 +625,7 @@ function ReviewView({
           const st = statusOf(f);
           return (
             <div key={f.id} className="border-b border-line last:border-b-0">
+              <StepDivider step={steps.get(f.id)} />
               <FieldRow
                 label={f.label}
                 sub={st.kind === 'pick' ? `You said “${st.hint.spoken}”` : 'value' in st ? st.value?.source_phrase : undefined}

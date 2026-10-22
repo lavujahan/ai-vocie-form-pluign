@@ -1,4 +1,6 @@
 import type { FieldDescriptorInput, FieldOption, FieldType, FormSchemaInput } from '@vff/shared';
+import { staticOptions, widgetOf, type Widget } from './combobox';
+import { clean, cssEscape, isHidden } from './dom';
 
 /** A detected field and the live element(s) behind it. */
 export type RegistryEntry = {
@@ -7,6 +9,8 @@ export type RegistryEntry = {
   el: HTMLElement;
   /** All radios / checkboxes of a group, with their option. */
   group?: { el: HTMLInputElement; option: FieldOption }[];
+  /** Custom dropdown (react-select, MUI, choices.js, select2…): filled through its own UI. */
+  widget?: Widget;
 };
 export type Registry = Map<string, RegistryEntry>;
 
@@ -19,32 +23,11 @@ const CANDIDATES = [
   '[role="combobox"]',
   '[role="radio"]',
   '[role="checkbox"]',
+  'button[aria-haspopup="listbox"]',
 ].join(',');
 
 const SKIP_INPUT_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'file', 'password', 'search', 'range', 'color']);
 const SKIP_NAME = /csrf|xsrf|token|captcha|honeypot|recaptcha|authenticity/i;
-
-/** CSS.escape with a fallback for environments without it (jsdom). */
-const cssEscape = (s: string) =>
-  typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(s) : s.replace(/([^\w-])/g, '\\$1');
-
-const clean = (s: string | null | undefined) =>
-  (s ?? '')
-    .replace(/\s+/g, ' ')
-    .replace(/\s*[*:]+\s*$/, '')
-    .replace(/^\s*[*]\s*/, '')
-    .trim();
-
-/** Visibility without layout (works in jsdom too): hidden attr, display/visibility, aria-hidden ancestors. */
-function isHidden(el: Element): boolean {
-  for (let n: Element | null = el; n; n = n.parentElement) {
-    if (n.hasAttribute('hidden') || n.getAttribute('aria-hidden') === 'true') return true;
-    const view: Window | null = n.ownerDocument.defaultView;
-    const style = view?.getComputedStyle(n);
-    if (style && (style.display === 'none' || style.visibility === 'hidden')) return true;
-  }
-  return false;
-}
 
 /** Text of an element without the text of form controls inside it (e.g. a <label> wrapping a <select>). */
 function textWithoutControls(el: Element): string {
@@ -246,11 +229,23 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
     return n ? `${k}#${n + 1}` : k;
   };
   const seenGroups = new Set<string>();
+  /** Custom dropdowns found so far: their inner inputs / hidden selects are part of them. */
+  const widgets: Widget[] = [];
+  const inWidget = (el: Element) => widgets.some((w) => w.root.contains(el) || w.valueEl === el);
 
   for (const root of collectRoots(doc)) {
     const els = [...root.querySelectorAll<HTMLElement>(CANDIDATES)];
     for (const el of els) {
       if (el.closest('[role="search"]') || el.closest('[data-vff-ignore]')) continue;
+      if (inWidget(el)) continue;
+      const widget = widgetOf(el);
+      if (widget === 'skip') continue;
+      if (widget) {
+        if (isHidden(widget.root)) continue;
+        widgets.push(widget);
+        registerWidget(widget);
+        continue;
+      }
       const type = fieldTypeOf(el);
       if (!type) continue;
       // Disabled dropdowns are kept: in a cascade (District → Taluk) the child is disabled until its parent is chosen.
@@ -258,9 +253,8 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
       const name = el.getAttribute('name') ?? '';
       if (SKIP_NAME.test(name) || SKIP_NAME.test(el.id)) continue;
       if (isHidden(el)) continue;
-      // Contenteditable children of an editable region, and inputs inside custom comboboxes, are covered by their parent.
+      // Contenteditable children of an editable region are covered by their parent.
       if (type === 'contenteditable' && el.parentElement?.closest('[contenteditable=""],[contenteditable="true"]')) continue;
-      if (el.tagName !== 'INPUT' && el.getAttribute('role') === 'combobox' && el.querySelector('input')) continue;
 
       const form = el.closest('form');
       const formIdx = form ? [...doc.forms].indexOf(form) : -1;
@@ -321,6 +315,34 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
         },
       });
     }
+  }
+
+  /** A custom dropdown is a 'select' field to the server, the mapper and the phone. */
+  function registerWidget(w: Widget) {
+    const name = w.valueEl?.getAttribute('name') ?? '';
+    const key = uniqueKey(name || w.valueEl?.id || w.input?.id || w.trigger.id || w.root.id || `path:${domPath(w.root)}`);
+    const label = resolveLabel(w.labelEl);
+    const options = staticOptions(w);
+    registry.set(key, {
+      el: w.root,
+      widget: w,
+      descriptor: {
+        field_key: key,
+        label: label || key,
+        field_type: 'select',
+        required:
+          (w.valueEl as HTMLInputElement | null)?.required === true ||
+          [w.labelEl, w.input, w.trigger].some((n) => n?.getAttribute('aria-required') === 'true') ||
+          /\*\s*:?\s*$/.test(rawLabelText(w.labelEl)),
+        options,
+        // Lists that load when opened (or while typing) are read at fill time and sent to the phone.
+        dynamic_options: options.length === 0,
+        multiple: w.multiple,
+        group_key: clean(w.root.closest('fieldset')?.querySelector('legend')?.textContent) || null,
+        placeholder: w.input?.getAttribute('placeholder') || null,
+        context: contextText(w.labelEl),
+      },
+    });
   }
 
   const schema: FormSchemaInput = {

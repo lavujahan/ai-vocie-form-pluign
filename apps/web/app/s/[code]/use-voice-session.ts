@@ -208,6 +208,12 @@ export function useVoiceSession(code: string) {
         if (!row?.seq || hidden(row.seq)) return;
         setUtterances((prev) => new Map(prev).set(row.seq, { ...prev.get(row.seq), ...pickUtt(row) }));
       })
+      // Fields that appeared on the computer later (a wizard's next step, a field shown by an answer).
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'form_fields', filter }, (p) => {
+        const row = p.new as FieldRowPayload;
+        if (!row?.id) return;
+        setFields((prev) => (prev.some((f) => f.id === row.id) ? prev : [...prev, rowToField(row)].sort((a, b) => a.position - b.position)));
+      })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_fields', filter }, (p) => {
         const row = p.new as FieldRowPayload;
         setFields((prev) => prev.map((f) => (f.id === row.id ? rowToField(row, f) : f)));

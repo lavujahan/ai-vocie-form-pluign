@@ -1,5 +1,6 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import type {
+  AddFieldsResponse,
   CreateSessionResponse,
   DesktopUpdateRequest,
   FieldOption,
@@ -17,10 +18,12 @@ import type {
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
 import {
   MOVED_REASON,
+  NOT_ON_PAGE,
   siteOf,
   type ActiveSession,
   type ContentRequest,
   type ExtState,
+  type FieldsChangedMessage,
   type FillResult,
   type PageLoadedMessage,
   type PopupRequest,
@@ -108,7 +111,51 @@ async function endTabSession(tabId: number) {
   if (!t) return;
   await save({ tabs: endTab(state.tabs, tabId) });
   await ensureRealtime();
+  void chrome.tabs.sendMessage(tabId, { type: 'WATCH', off: true } satisfies ContentRequest).catch(() => null);
   await reportDesktop(t.session, { state: 'closed' });
+}
+
+/** Watches the form tab for fields that appear later (wizard steps, revealed fields, the form's next page). */
+async function watchTab(tabId: number, known?: string[]) {
+  const s = tabOf(tabId)?.session;
+  if (!s) return;
+  const keys = known ?? s.snapshot?.fields.map((f) => f.field_key) ?? [];
+  await sendToTab(tabId, { type: 'WATCH', known: keys }).catch((e) => console.warn('could not watch the form tab', e));
+}
+
+const byPosition = (a: SessionField, b: SessionField) => a.position - b.position;
+const withFields = (snap: SessionSnapshot, fields: SessionField[]): SessionSnapshot => ({
+  ...snap,
+  fields: [...snap.fields, ...fields.filter((f) => !snap.fields.some((x) => x.id === f.id))].sort(byPosition),
+});
+
+/**
+ * The page watcher saw a change: new fields are added to the session (the phone shows them), and
+ * values that were waiting for their field are filled now that it is on the page.
+ */
+async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
+  await ready;
+  const t = tabOf(tabId);
+  if (!t || !state.auth || (t.desktop ?? 'open') !== 'open') return;
+  if (change.schema.fields.length) {
+    try {
+      const res = await api<AddFieldsResponse>(`/api/sessions/${t.session.session_code}/fields`, {
+        body: change.schema,
+        token: state.auth.token,
+      });
+      if (res.fields.length) {
+        patchSnapshot(tabId, (snap) => withFields(snap, res.fields));
+        await save();
+      }
+    } catch (e) {
+      console.warn('could not add the new fields', e);
+    }
+  }
+  const cur = tabOf(tabId);
+  const waiting = (cur?.lastFill?.skipped ?? [])
+    .filter((x) => x.reason === NOT_ON_PAGE && change.present.includes(x.field_key))
+    .map((x) => x.field_key);
+  if (waiting.length && cur?.autoFill) await fillIntoPage(tabId, waiting);
 }
 
 // ---------- content script ----------
@@ -353,6 +400,28 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
       }));
       await save();
     })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'form_fields', filter }, async (p) => {
+      const row = p.new as SessionField & { clean_label: string | null };
+      const tabId = tab();
+      if (tabId === null || !row?.id) return;
+      const field: SessionField = {
+        id: row.id,
+        field_key: row.field_key,
+        label: row.clean_label || row.label,
+        field_type: row.field_type,
+        required: row.required,
+        options: row.options ?? [],
+        multiple: row.multiple,
+        semantic_type: row.semantic_type ?? null,
+        step_index: row.step_index,
+        position: row.position,
+        depends_on: row.depends_on ?? null,
+        dynamic_options: row.dynamic_options ?? false,
+        choice_hint: row.choice_hint ?? null,
+      };
+      patchSnapshot(tabId, (snap) => withFields(snap, [field]));
+      await save();
+    })
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_fields', filter }, async (p) => {
       const row = p.new as SessionField & { clean_label: string | null; label: string };
       const tabId = tab();
@@ -457,6 +526,7 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       await ensureRealtime();
       if (previous) void reportDesktop(previous, { state: 'closed' });
       await refreshSnapshot(tab.id);
+      void watchTab(tab.id, scan.schema.fields.map((f) => f.field_key));
       return;
     }
 
@@ -480,9 +550,13 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
   }
 }
 
-chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage | PageLoadedMessage, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage | PageLoadedMessage | FieldsChangedMessage, sender, sendResponse) => {
   if (sender.tab && req.type === 'PAGE_LOADED') {
     if (sender.frameId === 0 && sender.tab.id !== undefined) void pageLoaded(sender.tab.id, req.site);
+    return false;
+  }
+  if (sender.tab && req.type === 'FIELDS_CHANGED') {
+    if (sender.tab.id !== undefined) void fieldsChanged(sender.tab.id, req);
     return false;
   }
   // From the content script: which loaded dropdown option did the speaker mean? (AI, server-side)
@@ -503,7 +577,7 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage |
     })().then(sendResponse);
     return true;
   }
-  if (req.type === 'RESOLVE_OPTION' || req.type === 'PAGE_LOADED') return false;
+  if (req.type === 'RESOLVE_OPTION' || req.type === 'PAGE_LOADED' || req.type === 'FIELDS_CHANGED') return false;
   (async () => {
     await ready;
     const tabId = req.tab_id ?? (await activeTabId());
@@ -546,6 +620,8 @@ async function pageLoaded(tabId: number, site: string) {
   const t = tabOf(tabId);
   if (!t) return;
   const where = site === t.session.page_site ? 'open' : 'moved';
+  // Same site (the form's next page, or a postback): watch the new page for its fields.
+  if (where === 'open') void watchTab(tabId);
   if (where === (t.desktop ?? 'open')) return;
   await setTab(tabId, where === 'moved' ? { desktop: where, autoFill: false, canUndo: false } : { desktop: where });
   await reportDesktop(t.session, { state: where });

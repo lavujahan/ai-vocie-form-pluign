@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Applicant details (custom dropdowns)</title>
+    <style>
+      body { font: 15px system-ui; max-width: 560px; margin: 32px auto; }
+      label { display: block; margin-top: 16px; margin-bottom: 4px; }
+      .row { margin-top: 16px; }
+      select { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <h2>Applicant details</h2>
+    <!-- React widgets: react-select (single, multi, async), MUI Autocomplete, MUI Select -->
+    <div id="root"></div>
+
+    <!-- choices.js: the original <select> is hidden, the visible widget is built next to it -->
+    <label for="relationship">Relationship</label>
+    <select id="relationship" name="relationship">
+      <option value="">Choose relationship</option>
+      <option value="F">Father</option>
+      <option value="M">Mother</option>
+      <option value="H">Husband</option>
+      <option value="G">Guardian</option>
+    </select>
+
+    <!-- select2 with options in the <select> (works through the native select) -->
+    <label for="religion">Religion</label>
+    <select id="religion" name="religion">
+      <option value=""></option>
+      <option value="HI">Hindu</option>
+      <option value="MU">Muslim</option>
+      <option value="CH">Christian</option>
+      <option value="OT">Others</option>
+    </select>
+
+    <!-- select2 loading options from the "server" while typing (no options in the <select>) -->
+    <label for="village">Revenue village</label>
+    <select id="village" name="village"></select>
+
+    <pre id="state-echo" data-vff-ignore=""></pre>
+    <script type="module" src="./dropdowns-main.tsx"></script>
+  </body>
+</html>

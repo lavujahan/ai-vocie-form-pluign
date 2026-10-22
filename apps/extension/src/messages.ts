@@ -23,6 +23,9 @@ export function siteOf(url: string): string {
 /** Skip reason when the session's tab has moved on to a different site. */
 export const MOVED_REASON = 'This tab now shows a different site';
 
+/** Skip reason for a value whose field isn't on the page (yet): it is filled when the field appears. */
+export const NOT_ON_PAGE = "Waiting: this field isn't on the page yet";
+
 export type ContentRequest =
   | { type: 'PING' }
   | { type: 'SCAN' }
@@ -35,7 +38,9 @@ export type ContentRequest =
       /** The site the form was scanned on; the page refuses to fill if it is now somewhere else. */
       site?: string;
     }
-  | { type: 'UNDO' };
+  | { type: 'UNDO' }
+  /** Watch the page for fields that appear later (`known` = the session's field keys); `off` stops it. */
+  | { type: 'WATCH'; known?: string[]; off?: boolean };
 
 export type ScanResult = { schema: FormSchemaInput };
 export type FillResult = FillReport;
@@ -49,6 +54,12 @@ export type ResolveOptionResult = ResolveOptionResponse | null;
 
 /** Sent by the content script on every page load, so the worker knows if a form tab moved to another site. */
 export type PageLoadedMessage = { type: 'PAGE_LOADED'; site: string };
+
+/**
+ * From the page watcher: fields that appeared since the session's scan (`schema.fields`, may be empty)
+ * and every field key on the page now (`present`), so waiting values can be filled.
+ */
+export type FieldsChangedMessage = { type: 'FIELDS_CHANGED'; schema: FormSchemaInput; present: string[] };
 
 // ---------- popup ⇄ service worker ----------
 

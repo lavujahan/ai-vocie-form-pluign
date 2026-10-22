@@ -85,7 +85,11 @@ export function sanitizeAnalysis(analysis: FormAnalysis, schema: FormSchema): Fi
 }
 
 /** Runs after the session is created (Next.js `after()`); writes the analysis into form_fields. */
-export async function analyzeAndStore(sessionId: string, schema: FormSchema): Promise<void> {
+/**
+ * `partial`: only fields that appeared later (a wizard's next step, a revealed field). Their step was set
+ * when they were added, and the session's name and analysis status stay as the first analysis left them.
+ */
+export async function analyzeAndStore(sessionId: string, schema: FormSchema, opts: { partial?: boolean } = {}): Promise<void> {
   const { db } = await import('../supabase-admin');
   try {
     const analysis = await analyzeForm(schema);
@@ -101,18 +105,19 @@ export async function analyzeAndStore(sessionId: string, schema: FormSchema): Pr
             validation: f.validation,
             required: f.required || detectedRequired.get(f.field_key) === true,
             depends_on: f.depends_on,
-            step_index: f.step_index,
+            ...(opts.partial ? {} : { step_index: f.step_index }),
             output_script: f.output_script,
           })
           .eq('session_id', sessionId)
           .eq('field_key', f.field_key),
       ),
     );
+    if (opts.partial) return;
     const patch: Record<string, string> = { analysis_status: 'done' };
     if (analysis.form_purpose.trim()) patch.form_name = analysis.form_purpose.trim().slice(0, 120);
     await db().from('form_sessions').update(patch).eq('id', sessionId);
   } catch (e) {
     console.error('form analysis failed', e);
-    await db().from('form_sessions').update({ analysis_status: 'error' }).eq('id', sessionId);
+    if (!opts.partial) await db().from('form_sessions').update({ analysis_status: 'error' }).eq('id', sessionId);
   }
 }

@@ -154,6 +154,118 @@ test('Start over (phone and computer): empty values clear the form, cascading dr
   await page.close();
 });
 
+test('custom dropdowns: react-select, MUI, choices.js and select2 fill like a user picking', async () => {
+  test.setTimeout(90_000);
+  const url = `${BASE}/dropdowns.html`;
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.waitForSelector('#district-input');
+  await page.waitForSelector('.choices');
+  const echo = async () => JSON.parse((await page.locator('#state-echo').textContent()) ?? '{}');
+
+  const { schema } = await toContent<{ schema: FormSchemaInput }>(url, { type: 'SCAN' });
+  const byKey = Object.fromEntries(schema.fields.map((f) => [f.field_key, f]));
+  // Every widget is one dropdown field with its real label (no stray text fields for their inner inputs).
+  expect(Object.keys(byKey).sort()).toEqual(['community', 'district', 'gender', 'languages', 'relationship', 'religion', 'taluk', 'village']);
+  for (const f of schema.fields) expect(f.field_type).toBe('select');
+  expect(byKey.district.label).toBe('District');
+  expect(byKey.gender.label).toBe('Gender');
+  expect(byKey.village.label).toBe('Revenue village');
+  expect(byKey.relationship.options?.map((o) => o.label)).toEqual(['Father', 'Mother', 'Husband', 'Guardian']);
+  expect(byKey.taluk.dynamic_options).toBe(true);
+
+  const report = await toContent<FillResult>(url, {
+    type: 'FILL',
+    values: {
+      district: 'Salem',
+      languages: 'Tamil, English',
+      taluk: 'Omaloor', // the widget's own search finds nothing for this spelling: the full list is used
+      community: 'MBC',
+      gender: 'Female',
+      relationship: 'Guardian',
+      religion: 'Christian',
+      village: 'Thulasampatti Pudur',
+    },
+  });
+  expect(report.skipped).toEqual([]);
+  expect(await echo()).toMatchObject({
+    district: 'salem',
+    languages: ['tamil', 'english'],
+    taluk: 'omalur',
+    community: 'MBC',
+    gender: 'F',
+    relationship: 'G',
+    religion: 'CH',
+    village: 'V3',
+  });
+  // Lists that loaded while filling are reported, for the phone's "Pick one" picker.
+  expect(report.options?.taluk?.map((o) => o.label)).toContain('Omalur');
+
+  // Undo puts every widget back to empty.
+  await toContent(url, { type: 'UNDO' });
+  expect(await echo()).toMatchObject({ district: '', languages: [], taluk: '', community: '', gender: '', relationship: '', religion: '', village: '' });
+  await page.close();
+});
+
+test('multi-step form: fields that appear later are reported (next step, revealed field, next page)', async () => {
+  // Capture what the page watcher sends to the worker (the worker itself ignores tabs without a session).
+  await sw.evaluate(() => {
+    const g = globalThis as unknown as { __changes: unknown[]; __listening?: boolean };
+    g.__changes = [];
+    if (!g.__listening) {
+      chrome.runtime.onMessage.addListener((m: { type?: string }) => {
+        if (m?.type === 'FIELDS_CHANGED') g.__changes.push(m);
+      });
+      g.__listening = true;
+    }
+  });
+  type Change = { schema: FormSchemaInput; present: string[] };
+  const lastChange = () =>
+    sw.evaluate(() => (globalThis as unknown as { __changes: unknown[] }).__changes.at(-1)) as Promise<Change | undefined>;
+  const waitForChange = async (pred: (c: Change) => boolean) => {
+    await expect.poll(async () => {
+      const c = await lastChange();
+      return !!c && pred(c);
+    }, { timeout: 5000 }).toBe(true);
+    return (await lastChange())!;
+  };
+  const added = (c: Change) => c.schema.fields.map((f) => f.field_key);
+
+  const url = `${BASE}/wizard.html`;
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.waitForSelector('#full_name');
+  const { schema } = await toContent<{ schema: FormSchemaInput }>(url, { type: 'SCAN' });
+  const known = schema.fields.map((f) => f.field_key);
+  expect(known).toEqual(['full_name', 'mobile', 'other_address']);
+  await toContent(url, { type: 'WATCH', known });
+
+  // A checkbox reveals a dependent field.
+  await page.check('#other_address');
+  let c = await waitForChange((x) => added(x).includes('comm_address'));
+  expect(added(c)).toEqual(['comm_address']);
+
+  // Next: step 1 hides, step 2 shows.
+  await page.click('#next');
+  c = await waitForChange((x) => added(x).includes('occupation'));
+  expect(added(c)).toEqual(['occupation', 'income']);
+  expect(c.present).toEqual(['occupation', 'income']);
+
+  // Choosing "Other" shows "Specify occupation".
+  await page.selectOption('#occupation', 'other');
+  c = await waitForChange((x) => added(x).includes('occupation_other'));
+  expect(added(c)).toEqual(['occupation_other']);
+
+  // The form's next page (a full navigation on the same site): the worker sends WATCH again on load.
+  await page.click('#to_page2');
+  await page.waitForSelector('#bank_name');
+  await toContent(url, { type: 'WATCH', known: [...known, 'comm_address', 'occupation', 'income', 'occupation_other'] });
+  c = await waitForChange((x) => added(x).includes('bank_name'));
+  expect(added(c)).toEqual(['bank_name', 'ifsc', 'account_no']);
+  await toContent(url, { type: 'WATCH', off: true });
+  await page.close();
+});
+
 test('cascade: State → District → Village with lists loading after a delay', async () => {
   const url = `${BASE}/cascade.html`;
   const page = await context.newPage();

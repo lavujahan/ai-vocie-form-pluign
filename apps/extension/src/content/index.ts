@@ -2,6 +2,7 @@ import {
   MOVED_REASON,
   siteOf,
   type ContentRequest,
+  type FieldsChangedMessage,
   type FillResult,
   type PageLoadedMessage,
   type ResolveOptionMessage,
@@ -12,6 +13,7 @@ import {
 import type { Resolver } from './cascade';
 import { detect, type Registry } from './detector';
 import { fillAll, undoAll } from './filler';
+import { startWatch, stopWatch } from './watch';
 
 let registry: Registry = new Map();
 
@@ -64,6 +66,15 @@ chrome.runtime.onMessage.addListener((msg: ContentRequest, _sender, sendResponse
       }
       case 'UNDO':
         return { restored: await undoAll() } satisfies UndoResult;
+      case 'WATCH':
+        if (msg.off) stopWatch();
+        else {
+          startWatch(msg.known ?? [], scan, ({ schema, present }) => {
+            const change: FieldsChangedMessage = { type: 'FIELDS_CHANGED', schema, present };
+            void chrome.runtime.sendMessage(change).catch(() => null);
+          });
+        }
+        return { ok: true };
     }
   })()
     .then(sendResponse)

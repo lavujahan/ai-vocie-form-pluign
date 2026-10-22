@@ -5,6 +5,7 @@ import { analyzeAndStore } from '@/lib/agents/formAnalyzer';
 import { requireUser } from '@/lib/auth';
 import { env } from '@/lib/env';
 import { must, route } from '@/lib/http';
+import { fieldRows, insertFieldRows } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -46,31 +47,7 @@ export const POST = route(async (req) => {
       .single(),
   ) as { id: string };
 
-  const rows = schema.fields.map((f, position) => ({
-    session_id: session.id,
-    field_key: f.field_key,
-    label: f.label,
-    field_type: f.field_type,
-    required: f.required,
-    options: f.options,
-    multiple: f.multiple,
-    dynamic_options: f.dynamic_options,
-    group_key: f.group_key,
-    depends_on: f.depends_on,
-    step_index: f.step_index,
-    min: f.min,
-    max: f.max,
-    pattern: f.pattern,
-    placeholder: f.placeholder,
-    context: f.context,
-    position,
-  }));
-  let inserted = await db().from('form_fields').insert(rows);
-  // Migration 0004 (cascading dropdowns) not applied yet: save without the new column.
-  if (inserted.error?.code === 'PGRST204') {
-    inserted = await db().from('form_fields').insert(rows.map(({ dynamic_options: _d, ...r }) => r));
-  }
-  must(inserted);
+  await insertFieldRows(fieldRows(session.id, schema.fields));
 
   // The Form Analyzer takes a few seconds; the QR is shown right away and the
   // analysis lands in form_fields (and reaches clients through Realtime) when done.
