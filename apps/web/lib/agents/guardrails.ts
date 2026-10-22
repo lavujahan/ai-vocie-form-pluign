@@ -1,16 +1,37 @@
-import { normalizeText, type MappedValue, type MappingResult } from '@vff/shared';
+import type { InputGuardrail, OutputGuardrail } from '@openai/agents';
+import { MappingResult, normalizeText, type MappedValue } from '@vff/shared';
 import { fieldLabel, validateForField, type AgentField } from './tools';
 
-/** Input guardrail: no model call for a transcript with no real speech (silence, noise, one character). */
+export type MapperContext = { transcript: string; fieldKeys: Set<string> };
+
+/** True when the transcript has no real speech in it (silence, noise, a single character). */
 export function isEmptyTranscript(t: string): boolean {
   return (t.match(/[\p{L}\p{N}]/gu)?.length ?? 0) < 2;
 }
 
-/** Output guardrail: true if the model mostly invented field keys (it is mapping the wrong form). */
-export function mostlyUnknownKeys(result: MappingResult, fieldKeys: Set<string>): boolean {
-  const unknown = result.values.filter((v) => !fieldKeys.has(v.field_key));
-  return result.values.length > 0 && unknown.length > result.values.length / 2;
-}
+/** Input guardrail: never spend a model call on an empty transcript. */
+export const emptyTranscriptGuardrail: InputGuardrail = {
+  name: 'empty_transcript',
+  runInParallel: false,
+  execute: async ({ context }) => {
+    const { transcript } = context.context as MapperContext;
+    return { tripwireTriggered: isEmptyTranscript(transcript), outputInfo: { length: transcript.length } };
+  },
+};
+
+/** Output guardrail: trips if the model mostly invented field keys (it is mapping the wrong form). */
+export const unknownKeysGuardrail: OutputGuardrail<typeof MappingResult> = {
+  name: 'unknown_field_keys',
+  execute: async ({ agentOutput, context }) => {
+    const { fieldKeys } = context.context as MapperContext;
+    const values = agentOutput.values ?? [];
+    const unknown = values.filter((v) => !fieldKeys.has(v.field_key));
+    return {
+      tripwireTriggered: values.length > 0 && unknown.length > values.length / 2,
+      outputInfo: { unknown: unknown.map((v) => v.field_key) },
+    };
+  },
+};
 
 export type SanitizedValue = MappedValue & { error: string | null };
 export type SanitizedMapping = { values: SanitizedValue[]; unmapped_speech: string | null; missing_required: string[] };
