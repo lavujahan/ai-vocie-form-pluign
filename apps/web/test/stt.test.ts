@@ -36,6 +36,11 @@ describe('Sarvam speech-to-text request', () => {
     expect(form.get('language_code')).toBe('ta-IN');
     expect(form.get('keyterms')).toBeNull();
     expect((form.get('file') as File).name).toBe('utterance.webm');
+    // Sarvam rejects "audio/webm;codecs=opus"; the codec suffix must be stripped.
+    expect((form.get('file') as File).type).toBe('audio/webm');
+    const ios = buildSttForm(new Blob([new Uint8Array([1])], { type: 'audio/mp4;codecs=mp4a.40.2' }), fields);
+    expect((ios.get('file') as File).type).toBe('audio/mp4');
+    expect((ios.get('file') as File).name).toBe('utterance.mp4');
   });
 
   it('sends keyterms as one JSON array field on saaras:v4, and omits an empty mode', () => {

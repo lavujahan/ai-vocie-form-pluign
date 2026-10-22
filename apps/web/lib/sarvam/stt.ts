@@ -57,9 +57,11 @@ const EXT: Record<string, string> = {
 };
 
 export function buildSttForm(audio: Blob, fields: AgentField[], cfg: SttConfig = sttConfig()): FormData {
-  const type = audio.type.split(';')[0] || 'audio/webm';
+  // Browsers label recordings "audio/webm;codecs=opus"; Sarvam only accepts the bare type ("audio/webm").
+  const type = audio.type.split(';')[0].trim() || 'audio/webm';
+  const file = new Blob([audio], { type });
   const form = new FormData();
-  form.append('file', audio, `utterance.${EXT[type] ?? 'webm'}`);
+  form.append('file', file, `utterance.${EXT[type] ?? 'webm'}`);
   form.append('model', cfg.model);
   form.append('language_code', cfg.language);
   if (cfg.mode) form.append('mode', cfg.mode);
