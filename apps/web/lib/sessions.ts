@@ -13,6 +13,7 @@ import type {
   ValidationRules,
 } from '@vff/shared';
 import { fail, must } from './http';
+import { phoneWriteBlock } from './session-rules';
 import { db } from './supabase-admin';
 
 export type SessionRow = SessionInfo & {
@@ -52,20 +53,26 @@ export type FieldRow = {
   choice_hint: ChoiceHint | null;
 };
 
-const SESSION_COLUMNS =
+const BASE_COLUMNS =
   'id, user_id, session_code, status, form_name, page_url, page_origin, page_title, analysis_status, expires_at, paired_at, created_at';
+const SESSION_COLUMNS = `${BASE_COLUMNS}, reset_seq, reset_scope, desktop_state, desktop_report`;
 
-export async function getSessionByCode(code: string): Promise<SessionRow> {
-  const row = must(await db().from('form_sessions').select(SESSION_COLUMNS).eq('session_code', code).maybeSingle());
-  if (!row) throw fail(404, 'Session not found');
-  return row as SessionRow;
+/** Defaults for the migration-0005 columns (Start over, desktop tab state) on rows read without them. */
+export function withSessionDefaults(row: Record<string, unknown>): SessionRow {
+  return { reset_seq: 0, reset_scope: null, desktop_state: 'open', desktop_report: null, ...row } as SessionRow;
 }
 
-export async function getSessionById(id: string): Promise<SessionRow> {
-  const row = must(await db().from('form_sessions').select(SESSION_COLUMNS).eq('id', id).maybeSingle());
+/** Reads one session. Works before migration 0005 is applied too (its columns get their defaults). */
+async function selectSession(column: 'id' | 'session_code', value: string): Promise<SessionRow> {
+  let res = await db().from('form_sessions').select(SESSION_COLUMNS).eq(column, value).maybeSingle();
+  if (res.error?.code === '42703') res = await db().from('form_sessions').select(BASE_COLUMNS).eq(column, value).maybeSingle();
+  const row = must(res);
   if (!row) throw fail(404, 'Session not found');
-  return row as SessionRow;
+  return withSessionDefaults(row as Record<string, unknown>);
 }
+
+export const getSessionByCode = (code: string) => selectSession('session_code', code);
+export const getSessionById = (id: string) => selectSession('id', id);
 
 export async function getFieldRows(sessionId: string): Promise<FieldRow[]> {
   return must(
@@ -97,6 +104,10 @@ export const toSessionInfo = (s: SessionRow): SessionInfo => ({
   page_url: s.page_url,
   status: s.status,
   expires_at: s.expires_at,
+  reset_seq: s.reset_seq ?? 0,
+  reset_scope: s.reset_scope ?? null,
+  desktop_state: s.desktop_state ?? 'open',
+  desktop_report: s.desktop_report ?? null,
 });
 
 export async function getValues(sessionId: string): Promise<SessionValue[]> {
@@ -120,17 +131,30 @@ export async function getSnapshot(session: SessionRow): Promise<SessionSnapshot>
     getValues(session.id),
     getUtterances(session.id),
   ]);
-  return { session: toSessionInfo(session), fields: fields.map(toSessionField), values, utterances };
+  return {
+    session: toSessionInfo(session),
+    fields: fields.map(toSessionField),
+    values,
+    // Utterances from before a Start over are deleted by reset_session; also hide any that raced it.
+    utterances: utterances.filter((u) => u.seq > (session.reset_seq ?? 0)),
+  };
 }
 
-/** Next seq for the phone: one past anything spoken or edited so far. */
-export function nextSeq(values: SessionValue[], utterances: UtteranceRow[]): number {
-  return Math.max(0, ...values.map((v) => v.source_seq), ...utterances.map((u) => u.seq)) + 1;
+/** Next seq for the phone: one past anything spoken, edited or reset so far. */
+export function nextSeq(values: SessionValue[], utterances: UtteranceRow[], resetSeq = 0): number {
+  return Math.max(0, resetSeq, ...values.map((v) => v.source_seq), ...utterances.map((u) => u.seq)) + 1;
 }
 
 /** Sessions stay usable for the code TTL plus the phone JWT TTL; after that they are expired. */
 export function assertWritable(session: SessionRow) {
   if (session.status === 'expired') throw fail(410, 'This session has expired. Scan a new QR code.');
+}
+
+/** The phone may speak / edit / start over: not expired, desktop tab not closed, seq newer than the last reset. */
+export function assertPhoneCanWrite(session: SessionRow, seq?: number) {
+  assertWritable(session);
+  const block = phoneWriteBlock(session, seq);
+  if (block) throw fail(409, block, { code: session.desktop_state === 'closed' ? 'tab_closed' : 'cleared' });
 }
 
 export async function upsertValue(args: {

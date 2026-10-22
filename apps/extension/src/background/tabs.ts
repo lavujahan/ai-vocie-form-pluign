@@ -15,6 +15,10 @@ export type TabState = {
   autoFill: boolean;
   lastFill: FillReport | null;
   canUndo: boolean;
+  /** Where the tab is now: on the scanned form's site, or moved to another one (reported to the phone). */
+  desktop?: 'open' | 'moved';
+  /** One-off message for the popup, e.g. "Phone started over". */
+  notice?: string | null;
 };
 /** Keyed by tab id (a string once it has been through chrome.storage). */
 export type Tabs = Record<string, TabState>;

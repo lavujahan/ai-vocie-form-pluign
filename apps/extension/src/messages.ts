@@ -47,6 +47,9 @@ export type UndoResult = { restored: string[] };
 export type ResolveOptionMessage = { type: 'RESOLVE_OPTION'; field_key: string; spoken: string; options: FieldOption[] };
 export type ResolveOptionResult = ResolveOptionResponse | null;
 
+/** Sent by the content script on every page load, so the worker knows if a form tab moved to another site. */
+export type PageLoadedMessage = { type: 'PAGE_LOADED'; site: string };
+
 // ---------- popup ⇄ service worker ----------
 
 /** Each tab has its own form session; `tab_id` is the tab the popup was opened on. */
@@ -81,6 +84,8 @@ export type ExtState = {
   canUndo: boolean;
   /** Forms active in other tabs of this browser. */
   otherSessions: number;
+  /** One-off message for this tab, e.g. "Phone started over". */
+  notice: string | null;
 };
 
 export type StateMessage = { type: 'STATE'; state: ExtState };

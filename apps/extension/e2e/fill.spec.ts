@@ -131,6 +131,29 @@ test('two tabs fill independently, and a tab on another site refuses to fill', a
   await second.close();
 });
 
+test('Start over (phone and computer): empty values clear the form, cascading dropdowns included', async () => {
+  const url = `${BASE}/cascade.html`;
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.waitForSelector('#state');
+  await toContent(url, { type: 'SCAN' });
+  await toContent(url, { type: 'FILL', values: { state: 'Tamil Nadu', district: 'Thiruvallur', village: 'Ponneri' } });
+  await expect(page.locator('#village option:checked')).toHaveText('Ponneri');
+
+  // When there is nothing to undo (the page reloaded since the fill), the worker sends the filled
+  // fields as empty values.
+  const cleared = await toContent<FillResult>(url, { type: 'FILL', values: { state: null, district: null, village: null }, site: BASE });
+  expect(cleared.skipped).toEqual([]);
+  await expect(page.locator('#state')).toHaveValue('');
+  await expect(page.locator('#district')).toHaveValue('');
+  await expect(page.locator('#village')).toHaveValue('');
+
+  // A fresh fill afterwards (the next applicant) works as before.
+  await toContent(url, { type: 'FILL', values: { state: 'Tamil Nadu', district: 'Salem', village: 'Omalur' } });
+  await expect(page.locator('#village option:checked')).toHaveText('Omalur');
+  await page.close();
+});
+
 test('cascade: State → District → Village with lists loading after a delay', async () => {
   const url = `${BASE}/cascade.html`;
   const page = await context.newPage();

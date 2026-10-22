@@ -3,6 +3,7 @@ import {
   siteOf,
   type ContentRequest,
   type FillResult,
+  type PageLoadedMessage,
   type ResolveOptionMessage,
   type ResolveOptionResult,
   type ScanResult,
@@ -26,6 +27,14 @@ const scan = () => {
   registry = r.registry;
   return r.schema;
 };
+
+// Tell the worker where this tab is now: if it holds a form session for another site, the phone is told
+// the form tab moved (and stops sending); back on the form's site, the phone can send again.
+try {
+  void chrome.runtime.sendMessage({ type: 'PAGE_LOADED', site: siteOf(location.href) } satisfies PageLoadedMessage).catch(() => null);
+} catch {
+  /* extension reloaded: this old content script is orphaned */
+}
 
 chrome.runtime.onMessage.addListener((msg: ContentRequest, _sender, sendResponse) => {
   (async () => {

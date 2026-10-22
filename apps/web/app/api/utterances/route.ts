@@ -5,7 +5,7 @@ import { isEmptyTranscript } from '@/lib/agents/guardrails';
 import { transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
-import { assertWritable, getFieldRows, getSessionById, getValues, upsertValue } from '@/lib/sessions';
+import { assertPhoneCanWrite, getFieldRows, getSessionById, getValues, upsertValue } from '@/lib/sessions';
 import { recordingTranscriptSoFar } from '@/lib/recordings';
 import { db } from '@/lib/supabase-admin';
 
@@ -14,6 +14,23 @@ export const maxDuration = 120;
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const BUSY = 'Speech service is busy. Tap to retry in a minute.';
+
+/** Sarvam or OpenAI rate-limited or briefly down (HTTP 429 / 5xx): worth one more try. */
+function isTransient(e: unknown): boolean {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && (status === 429 || status >= 500);
+}
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isTransient(e)) throw e;
+    await new Promise((r) => setTimeout(r, 1000));
+    return fn();
+  }
+}
 
 /**
  * One utterance = one tap-to-stop recording. Utterances are processed independently and in parallel;
@@ -22,7 +39,6 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const POST = route(async (req) => {
   const claims = await requirePhone(req);
   const session = await getSessionById(claims.session_id);
-  assertWritable(session);
 
   const form = await req.formData();
   const audio = form.get('audio');
@@ -36,6 +52,8 @@ export const POST = route(async (req) => {
   if (!(audio instanceof Blob) || audio.size === 0) throw fail(400, 'Missing audio');
   if (audio.size > MAX_AUDIO_BYTES) throw fail(413, 'Recording is too long');
   if (!Number.isInteger(seq) || seq < 1) throw fail(400, 'Invalid seq');
+  // Desktop tab closed (nothing would be filled), or spoken before a Start over: don't spend AI on it.
+  assertPhoneCanWrite(session, seq);
 
   const fields = await getFieldRows(session.id);
   if (target && !fields.some((f) => f.field_key === target)) throw fail(400, 'Unknown target field');
@@ -63,7 +81,7 @@ export const POST = route(async (req) => {
   const t0 = Date.now();
   let tStt = 0;
   try {
-    transcript = await transcribe(audio, fields);
+    transcript = await withRetry(() => transcribe(audio, fields));
     tStt = Date.now() - t0;
     // Show the transcript on the phone/popup while mapping runs.
     await db().from('utterances').update({ transcript }).eq('id', utteranceId);
@@ -90,7 +108,7 @@ export const POST = route(async (req) => {
         : transcript;
 
     const tMap0 = Date.now();
-    const outcome = await mapTranscript({ fields, current, transcript: fullText, targetFieldKey: target });
+    const outcome = await withRetry(() => mapTranscript({ fields, current, transcript: fullText, targetFieldKey: target }));
     console.log(
       `utterance seq=${seq} part=${part} stt=${tStt}ms map=${Date.now() - tMap0}ms values=${outcome.empty ? 0 : outcome.values.length} chars=${fullText.length}`,
     );
@@ -134,8 +152,13 @@ export const POST = route(async (req) => {
       unmapped_speech: outcome.unmapped_speech,
     } satisfies UtteranceResponse);
   } catch (e) {
-    console.error(`utterance seq=${seq} failed after ${Date.now() - t0}ms (stt=${tStt}ms)`, e);
-    const message = transcript ? "Couldn't match that to the form. Tap to retry." : "Couldn't transcribe. Tap to retry.";
+    const provider = transcript === null ? 'Sarvam speech-to-text' : 'OpenAI mapping';
+    console.error(`utterance seq=${seq} failed in ${provider} after ${Date.now() - t0}ms (stt=${tStt}ms)`, e);
+    const message = isTransient(e)
+      ? BUSY
+      : transcript
+        ? "Couldn't match that to the form. Tap to retry."
+        : "Couldn't transcribe. Tap to retry.";
     await finish({ status: 'error', error: message });
     return NextResponse.json(
       { utterance_id: utteranceId, seq, status: 'error', transcript, values: [], unmapped_speech: null, error: message } satisfies UtteranceResponse,

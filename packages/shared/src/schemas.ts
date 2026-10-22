@@ -174,6 +174,8 @@ export type ApiError = {
   /** Remaining PIN attempts before lockout, when relevant. */
   attempts_left?: number;
   locked_until?: string;
+  /** Machine-readable reason, e.g. 'tab_closed' or 'cleared' (phone requests). */
+  code?: string;
 };
 
 export const CreateUserRequest = z.object({
@@ -264,12 +266,26 @@ export type UtteranceRow = {
   created_at: string;
 };
 
+/** 'phone' = Start over clears the phone's answers; 'both' = also clears the form on the computer. */
+export type ResetScope = 'phone' | 'both';
+
+/** The desktop form tab: still on the form's site, moved to another site, or closed. */
+export type DesktopState = 'open' | 'moved' | 'closed';
+
+/** The extension's last full fill (after Send to desktop / Fill form), shown on the phone. */
+export type DesktopReport = { filled: number; skipped: number; total: number; at: string };
+
 export type SessionInfo = {
   id: string;
   form_name: string;
   page_url: string;
   status: SessionStatus;
   expires_at: string;
+  /** Seq of the last Start over (0 = never). Values and utterances older than this are gone. */
+  reset_seq: number;
+  reset_scope: ResetScope | null;
+  desktop_state: DesktopState;
+  desktop_report: DesktopReport | null;
 };
 
 export type PairResponse = {
@@ -330,6 +346,28 @@ export const UpdateFieldsRequest = z.object({
     .max(200),
 });
 export type UpdateFieldsRequest = z.infer<typeof UpdateFieldsRequest>;
+
+/** Phone → server: Start over. `seq` is the phone's next seq, so anything said before it loses. */
+export const ResetRequest = z.object({
+  seq: z.number().int().min(1),
+  scope: z.enum(['phone', 'both']),
+});
+export type ResetRequest = z.infer<typeof ResetRequest>;
+
+/** Extension → server: the form tab's state, and/or the result of a full fill. */
+export const DesktopUpdateRequest = z
+  .object({
+    state: z.enum(['open', 'moved', 'closed']).optional(),
+    report: z
+      .object({
+        filled: z.number().int().min(0),
+        skipped: z.number().int().min(0),
+        total: z.number().int().min(0),
+      })
+      .optional(),
+  })
+  .refine((b) => b.state || b.report, 'Nothing to update');
+export type DesktopUpdateRequest = z.infer<typeof DesktopUpdateRequest>;
 
 /** Extension → server: pick the option the speaker meant from the options loaded on the page. */
 export const ResolveOptionRequest = z.object({

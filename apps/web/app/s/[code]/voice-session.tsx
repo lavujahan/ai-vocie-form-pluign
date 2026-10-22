@@ -1,8 +1,18 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { AlertCircle, ArrowLeft, Check, ChevronRight, Loader2, Mic, Send, Square } from 'lucide-react';
-import { LOW_CONFIDENCE, type ChoiceHint, type ChoiceReason, type SessionField, type SessionValue } from '@vff/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, ArrowLeft, Check, ChevronRight, Copy, Loader2, Mic, MonitorX, RotateCcw, Send, Square, WifiOff } from 'lucide-react';
+import {
+  LOW_CONFIDENCE,
+  type ChoiceHint,
+  type ChoiceReason,
+  type DesktopReport,
+  type DesktopState,
+  type ResetScope,
+  type SessionField,
+  type SessionValue,
+} from '@vff/shared';
+import { MSG } from '@/lib/session-rules';
 import { Button, Card, FieldRow, Pill, cx } from '@/components/ui';
 import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
@@ -45,6 +55,8 @@ export function VoiceSession({ code }: { code: string }) {
   const [view, setView] = useState<View>('record');
   const [target, setTarget] = useState<string | null>(null);
   const [recordingTarget, setRecordingTarget] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   /**
    * Tags for one recording: the first piece gets `seq`; each extra piece (long recordings are cut
@@ -99,6 +111,31 @@ export function VoiceSession({ code }: { code: string }) {
     .filter((u) => u.transcript)
     .sort((a, b) => b.seq - a.seq)[0]?.transcript;
   const filledCount = s.fields.filter((f) => s.valueByKey.get(f.field_key)?.value).length;
+  const recordingNow = recorder.state === 'recording';
+
+  // Reloading or leaving now would lose the recording, or pieces that are still uploading.
+  useEffect(() => {
+    if (!recordingNow && processing === 0) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = 'Recording in progress. Leave anyway?';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [recordingNow, processing]);
+
+  async function startOver(scope: ResetScope) {
+    if (recorder.state === 'recording') recorder.stop();
+    setRecordingTarget(null);
+    const err = await s.reset(scope);
+    if (err) return err;
+    setResetOpen(false);
+    setTarget(null);
+    setView('record');
+    setNotice(scope === 'both' ? 'Cleared here and on the computer. Ready for the next applicant.' : 'Answers cleared. Ready for the next applicant.');
+    window.scrollTo(0, 0);
+    return null;
+  }
 
   /** Next field (in form order) that still needs a value, after `from`. */
   const nextEmpty = (from: string | null) => {
@@ -167,16 +204,58 @@ export function VoiceSession({ code }: { code: string }) {
     );
   }
 
+  // The form tab on the computer was closed: this QR code is finished, nothing can be sent.
+  if (s.session?.desktop_state === 'closed') {
+    return (
+      <Shell>
+        <Card>
+          <h1 className="flex items-center gap-2 text-base font-semibold text-danger-ink">
+            <MonitorX size={18} /> Tab closed
+          </h1>
+          <p className="mt-2 text-sm text-muted">{MSG.tabClosed.replace(/^Tab closed\. /, '')}</p>
+        </Card>
+      </Shell>
+    );
+  }
+
   const recording = recorder.state === 'recording';
   const targetField = s.fields.find((f) => f.field_key === target);
+  const desktop = s.session?.desktop_state ?? 'open';
+
+  const banners = (
+    <>
+      <DesktopBanner state={desktop} />
+      {!s.online && (
+        <p className="mb-3 flex items-center gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
+          <WifiOff size={16} className="shrink-0" /> You&apos;re offline. Recordings are sent when you&apos;re back online.
+        </p>
+      )}
+      {notice && (
+        <button
+          onClick={() => setNotice(null)}
+          className="mb-3 flex w-full items-center gap-2 rounded-lg bg-live-bg px-3 py-2 text-left text-sm text-live-ink"
+        >
+          <Check size={16} className="shrink-0" /> {notice}
+        </button>
+      )}
+    </>
+  );
+
+  const startOverSheet = resetOpen && (
+    <StartOverSheet count={filledCount} onCancel={() => setResetOpen(false)} onConfirm={startOver} />
+  );
 
   if (view === 'review') {
     return (
       <Shell>
+        {banners}
+        {startOverSheet}
         <ReviewView
           fields={s.fields}
           statusOf={statusOf}
           sent={s.session?.status === 'filled'}
+          desktop={desktop}
+          report={s.session?.desktop_report ?? null}
           onBack={() => showView('record')}
           onEdit={s.editValue}
           onMic={micFor}
@@ -185,15 +264,22 @@ export function VoiceSession({ code }: { code: string }) {
           onRetry={s.retry}
           onSend={s.complete}
         />
+        {!resetOpen && <StartOverButton onClick={() => setResetOpen(true)} />}
       </Shell>
     );
   }
 
   return (
     <Shell>
+      {banners}
+      {startOverSheet}
       <Card>
         <div className="flex items-start justify-between gap-2">
-          <h1 className="text-base font-semibold">{s.session?.form_name || 'Form'}</h1>
+          <div className="min-w-0">
+            <h1 className="text-base font-semibold">{s.session?.form_name || 'Form'}</h1>
+            {/* With several forms open on the computer, the site helps check this is the right QR. */}
+            {hostOf(s.session?.page_url) && <p className="truncate text-xs text-muted">{hostOf(s.session?.page_url)}</p>}
+          </div>
           {processing > 0 && (
             <Pill tone="neutral">
               <Loader2 size={12} className="mr-1 animate-spin" /> {processing} processing
@@ -235,11 +321,11 @@ export function VoiceSession({ code }: { code: string }) {
             {recording ? <Square size={30} fill="currentColor" /> : <Mic size={36} />}
             {recording && <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />}
           </button>
-          <p className={cx('mt-3 text-sm', recording ? 'font-medium text-danger-ink' : 'text-muted')}>
+          <p className={cx('mt-3 text-center text-sm', recording ? 'font-medium text-danger-ink' : 'text-muted')}>
             {recorder.state === 'unsupported'
-              ? 'This browser can’t record audio. Open the link in Chrome or Safari over HTTPS.'
+              ? 'This browser can’t record audio. Open the link in Chrome (Android) or Safari (iPhone).'
               : recorder.state === 'denied'
-                ? 'Microphone access was blocked. Allow it in your browser settings.'
+                ? 'Microphone access was blocked.'
                 : recording
                   ? `Listening… ${fmtTime(recorder.elapsed)}`
                   : mode === 'field'
@@ -248,6 +334,15 @@ export function VoiceSession({ code }: { code: string }) {
                       : 'All fields have values'
                     : 'Tap to speak'}
           </p>
+          {recorder.state === 'unsupported' && <CopyLinkButton />}
+          {recorder.state === 'denied' && <MicHelp onRetry={toggleMic} />}
+          {!recording && recorder.notice && (
+            <p className="mt-2 rounded-lg bg-warn-bg px-3 py-2 text-center text-sm text-warn-ink">
+              {recorder.notice === 'interrupted'
+                ? 'Recording stopped (screen locked, call or app switch). What you said was sent. Tap the mic to continue.'
+                : 'Tap, speak, then tap again to stop.'}
+            </p>
+          )}
         </div>
 
         {latestTranscript && (
@@ -291,12 +386,117 @@ export function VoiceSession({ code }: { code: string }) {
         <ChevronRight size={16} />
       </Button>
       {!s.live && <p className="mt-2 text-center text-xs text-muted">Reconnecting…</p>}
+      {!resetOpen && <StartOverButton onClick={() => setResetOpen(true)} />}
     </Shell>
   );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
   return <main className="mx-auto min-h-dvh max-w-md px-4 py-4">{children}</main>;
+}
+
+function hostOf(url: string | undefined): string {
+  try {
+    return url ? new URL(url).host : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The form tab on the computer moved to another site: speaking is fine, sending isn't. */
+function DesktopBanner({ state }: { state: DesktopState }) {
+  if (state !== 'moved') return null;
+  return (
+    <p className="mb-3 flex items-start gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
+      <MonitorX size={16} className="mt-0.5 shrink-0" /> {MSG.tabMoved}
+    </p>
+  );
+}
+
+function StartOverButton({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="mt-4 text-center">
+      <button onClick={onClick} className="inline-flex min-h-10 items-center gap-1.5 px-3 text-sm text-muted hover:text-ink">
+        <RotateCcw size={14} /> Start over
+      </button>
+    </div>
+  );
+}
+
+/** Start over: the sheet itself is the confirmation (it says it can't be undone). */
+function StartOverSheet({
+  count,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  onCancel: () => void;
+  onConfirm: (scope: ResetScope) => Promise<string | null>;
+}) {
+  const [busy, setBusy] = useState<ResetScope | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (scope: ResetScope) => {
+    setBusy(scope);
+    setError(await onConfirm(scope));
+    setBusy(null);
+  };
+  return (
+    <Card className="mb-3 border-danger/40">
+      <h2 className="flex items-center gap-2 text-base font-semibold">
+        <RotateCcw size={16} /> Start over
+      </h2>
+      <p className="mt-1 text-sm text-muted">
+        Clear all {count} {count === 1 ? 'answer' : 'answers'}? This can&apos;t be undone.
+      </p>
+      <div className="mt-3 space-y-2">
+        <Button className="w-full" loading={busy === 'phone'} disabled={!!busy} onClick={() => run('phone')}>
+          Clear phone answers
+        </Button>
+        <Button className="w-full" loading={busy === 'both'} disabled={!!busy} onClick={() => run('both')}>
+          Clear phone and computer form
+        </Button>
+        <Button variant="ghost" className="w-full" disabled={!!busy} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+      {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
+    </Card>
+  );
+}
+
+/** In-app browsers (WhatsApp, Lens…) can't record: copy the link to open it in Chrome or Safari. */
+function CopyLinkButton() {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      className="mt-3"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          setCopied(true);
+        } catch {
+          window.prompt('Copy this link and open it in Chrome:', window.location.href);
+        }
+      }}
+    >
+      <Copy size={14} /> {copied ? 'Link copied. Paste it in Chrome' : 'Copy link'}
+    </Button>
+  );
+}
+
+function MicHelp({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="mt-2 w-full rounded-lg bg-subtle px-3 py-2 text-sm text-ink/90">
+      <p className="font-medium">To allow the microphone:</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted">
+        <li>Chrome (Android): tap the icon left of the address, then Permissions → Microphone → Allow.</li>
+        <li>Safari (iPhone): tap “aA” in the address bar, then Website Settings → Microphone → Allow.</li>
+      </ul>
+      <Button className="mt-2 w-full" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
 }
 
 function StatusMarker({ field, status }: { field: SessionField; status: FieldStatus }) {
@@ -336,6 +536,8 @@ function ReviewView({
   fields,
   statusOf,
   sent,
+  desktop,
+  report,
   onBack,
   onEdit,
   onMic,
@@ -347,16 +549,34 @@ function ReviewView({
   fields: SessionField[];
   statusOf: (f: SessionField) => FieldStatus;
   sent: boolean;
+  desktop: DesktopState;
+  report: DesktopReport | null;
   onBack: () => void;
   onEdit: (key: string, value: string | null) => Promise<string | null>;
   onMic: (key: string) => void;
   recordingKey: string | null;
   elapsed: number;
   onRetry: (u: LocalUtterance) => void;
-  onSend: () => Promise<boolean>;
+  onSend: () => Promise<string | null>;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [confirmMissing, setConfirmMissing] = useState(false);
+  const [sends, setSends] = useState(0);
+  const ack = useDesktopAck(sent, report, sends);
+
+  const missing = fields.filter((f) => ['missing', 'pick'].includes(statusOf(f).kind)).length;
+  // Sent, but the computer didn't fill (asleep, or the form page changed): allow sending again.
+  const canResend = ack.kind === 'timeout' || ack.kind === 'nothing';
+  const send = async () => {
+    setConfirmMissing(false);
+    setSending(true);
+    const err = await onSend();
+    setSendError(err);
+    if (!err) setSends((n) => n + 1);
+    setSending(false);
+  };
 
   return (
     <Card>
@@ -405,29 +625,115 @@ function ReviewView({
           );
         })}
       </div>
-      <p className="mt-3 text-xs text-muted">Tap any value to edit or re-speak it.</p>
-      <Button
-        className="mt-3 w-full"
-        loading={sending}
-        disabled={sent}
-        onClick={async () => {
-          setSending(true);
-          await onSend();
-          setSending(false);
-        }}
-      >
-        {sent ? (
-          <>
-            <Check size={16} /> Sent to desktop
-          </>
-        ) : (
-          <>
-            <Send size={16} /> Send to desktop
-          </>
-        )}
-      </Button>
+      <p className="mt-3 text-xs text-muted">Tap any value to edit or re-speak it. Captcha and OTP: type them on the computer.</p>
+      {confirmMissing ? (
+        <div className="mt-3 rounded-lg bg-warn-bg px-3 py-2">
+          <p className="text-sm text-warn-ink">
+            {missing} required {missing === 1 ? 'field is' : 'fields are'} empty. Send anyway?
+          </p>
+          <div className="mt-2 flex gap-2">
+            <Button className="flex-1" onClick={send}>
+              Send anyway
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirmMissing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          className="mt-3 w-full"
+          loading={sending}
+          disabled={desktop !== 'open' || (sent && !canResend)}
+          onClick={() => (missing && !sent ? setConfirmMissing(true) : send())}
+        >
+          {sent && !canResend ? (
+            <>
+              <Check size={16} /> Sent to desktop
+            </>
+          ) : (
+            <>
+              <Send size={16} /> {sent ? 'Send again' : 'Send to desktop'}
+            </>
+          )}
+        </Button>
+      )}
+      {desktop === 'moved' && <p className="mt-2 text-xs text-warn-ink">{MSG.tabMoved}</p>}
+      {sendError && <p className="mt-2 text-xs text-danger-ink">{sendError}</p>}
+      {sent && !sendError && <AckLine ack={ack} />}
     </Card>
   );
+}
+
+type Ack =
+  | { kind: 'none' }
+  | { kind: 'waiting' }
+  | { kind: 'timeout' }
+  | { kind: 'filled'; report: DesktopReport }
+  | { kind: 'nothing'; report: DesktopReport };
+
+const ACK_TIMEOUT_MS = 15_000;
+
+/**
+ * After "Send to desktop": the extension reports each full fill (desktop_report). A new report means the
+ * computer filled the form; none within 15 s means the browser is asleep, closed, or the extension is off.
+ */
+function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: number): Ack {
+  /** The report that was current when Send was pressed (undefined = not tracking, e.g. after a reload). */
+  const sentWith = useRef<string | null | undefined>(undefined);
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    setTimedOut(false);
+    if (!sent) {
+      sentWith.current = undefined;
+      return;
+    }
+    // Each press (first send or Send again) waits for a report newer than the one shown now. Already
+    // sent before this page loaded: any report counts.
+    if (sends > 0) sentWith.current = report?.at ?? null;
+    else if (sentWith.current === undefined) sentWith.current = null;
+    const t = setTimeout(() => setTimedOut(true), ACK_TIMEOUT_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sent, sends]);
+
+  if (!sent) return { kind: 'none' };
+  if (report && report.at !== sentWith.current) {
+    return report.filled === 0 && report.total > 0 ? { kind: 'nothing', report } : { kind: 'filled', report };
+  }
+  return timedOut ? { kind: 'timeout' } : { kind: 'waiting' };
+}
+
+function AckLine({ ack }: { ack: Ack }) {
+  switch (ack.kind) {
+    case 'waiting':
+      return (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
+          <Loader2 size={12} className="animate-spin" /> Filling on the computer…
+        </p>
+      );
+    case 'filled':
+      return (
+        <p className="mt-2 text-xs text-live-ink">
+          Filled on computer ✓ {ack.report.filled}/{ack.report.total}
+          {ack.report.skipped > 0 && <span className="text-warn-ink"> · {ack.report.skipped} not filled, check them there</span>}
+        </p>
+      );
+    case 'nothing':
+      return (
+        <p className="mt-2 text-xs text-danger-ink">
+          Nothing could be filled on the computer. The form page may have changed. Open it again on the computer, then Send again.
+        </p>
+      );
+    case 'timeout':
+      return (
+        <p className="mt-2 text-xs text-danger-ink">
+          The computer hasn&apos;t responded. Is the browser open with the form tab? Then Send again.
+        </p>
+      );
+    default:
+      return null;
+  }
 }
 
 function ValueEditor({

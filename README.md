@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql` and `0004_cascading_fields.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql` and `0005_session_reset.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -121,6 +121,38 @@ One signed-in user can fill several forms at once, for example two CAN registrat
 - **Moved tabs are safe.** A tab that has moved to a different site is never filled with the old form's values.
 - **Limit:** 5 active forms per browser.
 - **Sign out** ends all of them.
+
+## Start over and the desktop tab (migration `0005`)
+
+**Timings**
+- The QR code must be scanned within 10 minutes and works once.
+- After scanning, the phone link lasts 30 minutes.
+- Reloading the phone page in the same browser tab resumes with all answers. Only a recording still in progress is lost, and the page warns before leaving.
+
+**Start over** is a phone button that opens a sheet with two choices:
+- **Clear phone answers:** clears the answers on the phone. The computer's form is left as it is, and auto-fill stops.
+- **Clear phone and computer form:** also clears the computer's form. The extension uses Undo, or, if the page reloaded since the fill, empties the fields it filled.
+
+How it works: `reset_session` writes `null` for every field at the phone's next seq, so recordings still in flight can't bring old answers back. It also deletes the previous applicant's transcripts. The same QR code is then used for the next applicant.
+
+**Desktop tab state**
+The extension reports the form tab's state to the phone (`PATCH /api/sessions/[code]/desktop`):
+
+| State | Phone shows | Allowed |
+| --- | --- | --- |
+| **moved** to another site | amber banner | Speaking is fine; Send to desktop is off until the tab is back on the form's site. |
+| **closed** (tab closed, "New form", sign out) | **"Tab closed"** card | Nothing; the server refuses (409) recordings, edits and Send for that QR code. |
+
+**Desktop acknowledgement:** after Send to desktop, the phone shows "Filled on computer ✓ 14/16". With no answer within 15 s, it shows "The computer hasn't responded", with **Send again**.
+
+**Other phone messages**
+- QR code already used vs expired.
+- In-app browsers (WhatsApp, Lens): **Copy link**.
+- Microphone blocked: step-by-step instructions.
+- Recording stopped by a screen lock or call: what was recorded is sent.
+- Offline: banner, plus automatic resend when back online.
+- Required fields still empty: confirmation before Send.
+- Sarvam or OpenAI busy (429/5xx): one server retry, then "Speech service is busy".
 
 ## Privacy
 

@@ -13,5 +13,5 @@ export const GET = route<Ctx>(async (req, { params }) => {
   const session = await getSessionByCode(code);
   await requireSessionAccess(req, session);
   const snapshot = await getSnapshot(session);
-  return NextResponse.json({ ...snapshot, next_seq: nextSeq(snapshot.values, snapshot.utterances) });
+  return NextResponse.json({ ...snapshot, next_seq: nextSeq(snapshot.values, snapshot.utterances, snapshot.session.reset_seq) });
 });

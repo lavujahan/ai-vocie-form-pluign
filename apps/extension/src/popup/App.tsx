@@ -294,7 +294,8 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
         </Button>
       </div>
       {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
-      {state.autoFill && !error && <p className="mt-2 text-xs text-muted">New answers from your phone fill in automatically.</p>}
+      {state.notice && !error && <p className="mt-2 text-xs text-accent-ink">{state.notice}</p>}
+      {state.autoFill && !error &&<p className="mt-2 text-xs text-muted">New answers from your phone fill in automatically.</p>}
       {snap.session.status === 'filled' && <p className="mt-1 text-xs text-live-ink">Your phone marked the form as done.</p>}
       <div className="mt-3 flex justify-between">
         <LinkButton onClick={() => send({ type: 'END_SESSION' })}>New form</LinkButton>

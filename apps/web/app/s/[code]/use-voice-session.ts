@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
   ApiError,
   PairResponse,
+  ResetScope,
   SessionField,
   SessionInfo,
   SessionSnapshot,
@@ -74,23 +75,42 @@ export function useVoiceSession(code: string) {
   const [utterances, setUtterances] = useState<Map<number, LocalUtterance>>(new Map());
   const [live, setLive] = useState(false);
 
+  const [online, setOnline] = useState(true);
+
   const tokenRef = useRef<Stored | null>(null);
   const seqRef = useRef(1);
   /** Seqs replaced by a retry; late Realtime events for them are ignored. */
   const dismissedRef = useRef(new Set<number>());
+  /** Seq of the last Start over: anything spoken before it is gone (late responses are ignored). */
+  const resetSeqRef = useRef(0);
+  const hidden = (seq: number) => seq <= resetSeqRef.current || dismissedRef.current.has(seq);
 
-  const applySnapshot = useCallback((snap: SessionSnapshot) => {
-    setSession(snap.session);
-    setFields(snap.fields);
-    setValues(new Map(snap.values.map((v) => [v.field_id, v])));
-    setUtterances((prev) => {
-      const next = new Map(prev);
-      for (const u of snap.utterances) {
-        if (!dismissedRef.current.has(u.seq)) next.set(u.seq, { ...next.get(u.seq), ...pickUtt(u) });
-      }
-      return next;
-    });
+  /** A Start over happened (here, or seen in the session row): drop everything spoken before it. */
+  const applyReset = useCallback((resetSeq: number) => {
+    if (resetSeq <= resetSeqRef.current) return;
+    resetSeqRef.current = resetSeq;
+    seqRef.current = Math.max(seqRef.current, resetSeq + 1);
+    setUtterances((prev) => new Map([...prev].filter(([seq]) => seq > resetSeq)));
+    setValues((prev) => new Map([...prev].filter(([, v]) => v.source_seq >= resetSeq)));
   }, []);
+
+  const applySnapshot = useCallback(
+    (snap: SessionSnapshot) => {
+      applyReset(snap.session.reset_seq ?? 0);
+      setSession(snap.session);
+      setFields(snap.fields);
+      setValues(new Map(snap.values.map((v) => [v.field_id, v])));
+      setUtterances((prev) => {
+        const next = new Map(prev);
+        for (const u of snap.utterances) {
+          if (!hidden(u.seq)) next.set(u.seq, { ...next.get(u.seq), ...pickUtt(u) });
+        }
+        return next;
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [applyReset],
+  );
 
   const authFetch = useCallback(
     async (url: string, init: RequestInit = {}) => {
@@ -102,6 +122,11 @@ export function useVoiceSession(code: string) {
         const body = (await res.json().catch(() => ({}))) as ApiError;
         setFatal(body.error || 'This session has ended. Scan a new QR code.');
         setPhase('error');
+      } else if (res.status === 409) {
+        // The desktop form tab was closed or moved meanwhile: show it even if the Realtime event was missed.
+        const body = (await res.clone().json().catch(() => ({}))) as ApiError;
+        if (body.code === 'tab_closed') setSession((s) => (s ? { ...s, desktop_state: 'closed' } : s));
+        if (body.code === 'tab_moved') setSession((s) => (s ? { ...s, desktop_state: 'moved' } : s));
       }
       return res;
     },
@@ -180,7 +205,7 @@ export function useVoiceSession(code: string) {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'utterances', filter }, (p) => {
         const row = p.new as UtteranceRow | undefined;
-        if (!row?.seq || dismissedRef.current.has(row.seq)) return;
+        if (!row?.seq || hidden(row.seq)) return;
         setUtterances((prev) => new Map(prev).set(row.seq, { ...prev.get(row.seq), ...pickUtt(row) }));
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_fields', filter }, (p) => {
@@ -189,7 +214,20 @@ export function useVoiceSession(code: string) {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_sessions', filter: `id=eq.${sessionId}` }, (p) => {
         const row = p.new as SessionInfo;
-        setSession((s) => (s ? { ...s, form_name: row.form_name, status: row.status } : s));
+        applyReset(row.reset_seq ?? 0);
+        setSession((s) =>
+          s
+            ? {
+                ...s,
+                form_name: row.form_name,
+                status: row.status,
+                reset_seq: row.reset_seq ?? s.reset_seq,
+                reset_scope: row.reset_scope ?? s.reset_scope,
+                desktop_state: row.desktop_state ?? s.desktop_state,
+                desktop_report: row.desktop_report ?? s.desktop_report,
+              }
+            : s,
+        );
       })
     // The token must be on the socket *before* joining: Realtime records the subscription's role at
     // join time, and a join that races the async accessToken callback is stored as `anon`, which
@@ -209,7 +247,7 @@ export function useVoiceSession(code: string) {
       cancelled = true;
       client.removeChannel(channel);
     };
-  }, [phase, sessionId, refresh]);
+  }, [phase, sessionId, refresh, applyReset]);
 
   // ---------- actions ----------
   const takeSeq = useCallback(() => {
@@ -223,6 +261,7 @@ export function useVoiceSession(code: string) {
 
   const setUtt = (seq: number, patch: Partial<LocalUtterance>) =>
     setUtterances((prev) => {
+      if (hidden(seq)) return prev; // spoken before a Start over, or replaced by a retry
       const cur = prev.get(seq) ?? { seq, target_field_key: null, status: 'processing', transcript: null, error: null };
       return new Map(prev).set(seq, { ...cur, ...patch });
     });
@@ -256,7 +295,7 @@ export function useVoiceSession(code: string) {
           setUtt(seq, { status: 'error', error: body.error, blob });
         }
       } catch {
-        setUtt(seq, { status: 'error', error: 'Network error. Tap to retry.', blob });
+        setUtt(seq, { status: 'error', error: NETWORK_ERROR, blob });
       }
     },
     [authFetch, takeSeq, refresh],
@@ -292,11 +331,63 @@ export function useVoiceSession(code: string) {
     [authFetch, code, takeSeq, refresh],
   );
 
-  const complete = useCallback(async () => {
-    const res = await authFetch(`/api/sessions/${code}/complete`, { method: 'POST' });
-    if (res.ok) setSession((s) => (s ? { ...s, status: 'filled' } : s));
-    return res.ok;
+  /** "Send to desktop". Resolves to an error message, or null when sent. */
+  const complete = useCallback(async (): Promise<string | null> => {
+    try {
+      const res = await authFetch(`/api/sessions/${code}/complete`, { method: 'POST' });
+      if (res.ok) {
+        setSession((s) => (s ? { ...s, status: 'filled' } : s));
+        return null;
+      }
+      return ((await res.json().catch(() => ({}))) as ApiError).error || 'Could not send. Try again.';
+    } catch {
+      return NETWORK_ERROR;
+    }
   }, [authFetch, code]);
+
+  /** Start over: clears every answer (and, for 'both', the form on the computer). Resolves to an error or null. */
+  const reset = useCallback(
+    async (scope: ResetScope): Promise<string | null> => {
+      const seq = takeSeq();
+      try {
+        const res = await authFetch(`/api/sessions/${code}/reset`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ seq, scope }),
+        });
+        if (!res.ok) return ((await res.json().catch(() => ({}))) as ApiError).error || 'Could not clear. Try again.';
+        applyReset(seq);
+        setValues(new Map());
+        setFields((prev) => prev.map((f) => ({ ...f, choice_hint: null })));
+        setSession((s) => (s ? { ...s, status: 'paired', reset_seq: seq, reset_scope: scope } : s));
+        void refresh();
+        return null;
+      } catch {
+        return NETWORK_ERROR;
+      }
+    },
+    [authFetch, code, takeSeq, applyReset, refresh],
+  );
+
+  // ---------- offline: banner, and resend recordings that failed for lack of network ----------
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    update();
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => {
+      window.removeEventListener('online', update);
+      window.removeEventListener('offline', update);
+    };
+  }, []);
+  const utterancesRef = useRef(utterances);
+  utterancesRef.current = utterances;
+  useEffect(() => {
+    if (!online || phase !== 'ready') return;
+    for (const u of utterancesRef.current.values()) {
+      if (u.status === 'error' && u.blob && u.error === NETWORK_ERROR) retry(u);
+    }
+  }, [online, phase, retry]);
 
   const valueByKey = useMemo(() => {
     const m = new Map<string, SessionValue>();
@@ -320,8 +411,12 @@ export function useVoiceSession(code: string) {
     retry,
     editValue,
     complete,
+    reset,
+    online,
   };
 }
+
+const NETWORK_ERROR = 'Network error. Tap to retry.';
 
 function pickUtt(u: UtteranceRow): Omit<LocalUtterance, 'blob'> {
   return { seq: u.seq, target_field_key: u.target_field_key, status: u.status, transcript: u.transcript, error: u.error };

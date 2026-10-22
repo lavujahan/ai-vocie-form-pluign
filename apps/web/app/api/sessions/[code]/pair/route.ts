@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import type { PairResponse } from '@vff/shared';
 import { signSessionJwt } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
-import { getSnapshot, nextSeq, type SessionRow } from '@/lib/sessions';
+import { pairFailure } from '@/lib/session-rules';
+import { getSessionByCode, getSnapshot, nextSeq, withSessionDefaults } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -14,7 +15,7 @@ export const POST = route<Ctx>(async (_req, { params }) => {
   const { code } = await params;
 
   // One conditional update: only a waiting, unexpired session can be paired, and only once.
-  const session = must(
+  const row = must(
     await db()
       .from('form_sessions')
       .update({ status: 'paired', paired_at: new Date().toISOString() })
@@ -23,8 +24,13 @@ export const POST = route<Ctx>(async (_req, { params }) => {
       .gt('expires_at', new Date().toISOString())
       .select('*')
       .maybeSingle(),
-  ) as SessionRow | null;
-  if (!session) throw fail(410, 'This QR code has expired or was already used. Generate a new one from the extension.');
+  ) as Record<string, unknown> | null;
+  if (!row) {
+    // Tell "already opened on another phone" apart from "expired".
+    const existing = await getSessionByCode(code).catch(() => null);
+    throw fail(410, pairFailure(existing));
+  }
+  const session = withSessionDefaults(row);
 
   const { token, expires_at } = await signSessionJwt(session.id);
   const snapshot = await getSnapshot(session);
@@ -32,6 +38,6 @@ export const POST = route<Ctx>(async (_req, { params }) => {
     token,
     token_expires_at: expires_at,
     ...snapshot,
-    next_seq: nextSeq(snapshot.values, snapshot.utterances),
+    next_seq: nextSeq(snapshot.values, snapshot.utterances, snapshot.session.reset_seq),
   } satisfies PairResponse);
 });

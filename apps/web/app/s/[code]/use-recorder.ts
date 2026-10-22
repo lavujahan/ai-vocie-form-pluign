@@ -13,6 +13,8 @@ const MIN_MS = 400;
 export const SEGMENT_MS = 28_000;
 
 export type RecorderState = 'idle' | 'recording' | 'unsupported' | 'denied';
+/** Why the last recording ended unexpectedly: screen lock / call / app switch, or a tap too short to record. */
+export type RecorderNotice = 'interrupted' | 'too_short' | null;
 
 /**
  * Tap-to-toggle recorder. The mic stream is kept open between recordings so
@@ -22,6 +24,7 @@ export type RecorderState = 'idle' | 'recording' | 'unsupported' | 'denied';
 export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => void) {
   const [state, setState] = useState<RecorderState>('idle');
   const [elapsed, setElapsed] = useState(0);
+  const [notice, setNotice] = useState<RecorderNotice>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const startedAt = useRef(0);
@@ -56,6 +59,8 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
     rec.onstop = () => {
       const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
       if (Date.now() - segStart >= MIN_MS && blob.size > 0) onRecordedRef.current(blob, { tag });
+      // Only the first piece can be an accidental tap; later pieces just caught the stop.
+      else if (segStart - startedAt.current < 1000) setNotice('too_short');
     };
     recRef.current = rec;
     rec.start();
@@ -76,11 +81,14 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
           streamRef.current = await navigator.mediaDevices.getUserMedia({
             audio: { echoCancellation: true, noiseSuppression: true },
           });
+          // A phone call (or another app) taking the mic ends the track: stop and send what we have.
+          for (const t of streamRef.current.getAudioTracks()) t.addEventListener('ended', () => stopRef.current('interrupted'));
         }
       } catch {
         setState('denied');
         return false;
       }
+      setNotice(null);
       nextTagRef.current = opts.nextTag ?? null;
       startedAt.current = Date.now(); // the timer shows the whole recording, across pieces
       setElapsed(0);
@@ -91,12 +99,24 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
     [beginSegment],
   );
 
-  const stop = useCallback(() => {
+  /** Stops and sends what was recorded. `interrupted` = not the user's tap (lock screen, call, app switch). */
+  const stop = useCallback((reason?: 'interrupted') => {
     if (cutTimer.current) clearTimeout(cutTimer.current);
-    if (recRef.current?.state === 'recording') recRef.current.stop();
+    const wasRecording = recRef.current?.state === 'recording';
+    if (wasRecording) recRef.current!.stop();
     recRef.current = null;
-    setState('idle');
+    setState((s) => (s === 'recording' ? 'idle' : s));
+    if (reason && wasRecording) setNotice('interrupted');
+  }, []);
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+
+  // Screen locked or app switched mid-recording: mobile browsers stop delivering audio, so send it now.
+  useEffect(() => {
+    const onHide = () => document.hidden && stopRef.current('interrupted');
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
   }, []);
 
-  return { state, elapsed, start, stop };
+  return { state, elapsed, start, stop, notice, clearNotice: () => setNotice(null) };
 }

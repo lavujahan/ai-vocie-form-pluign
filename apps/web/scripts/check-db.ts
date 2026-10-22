@@ -82,6 +82,21 @@ try {
   const { data: v4 } = await admin.from('field_values').select('value').eq('field_id', field.id).single();
   check('latest-wins: newer #4 overwrites', v4?.value === 'from #4');
 
+  // ---- Start over (migration 0005): clears values at seq 10; an utterance from seq 8 finishing later loses ----
+  await admin.from('utterances').insert({ session_id: session.id, seq: 9, status: 'done', transcript: 'previous applicant' });
+  const reset = await admin.rpc('reset_session', { p_session: session.id, p_seq: 10, p_scope: 'both' });
+  check('Start over: reset_session runs (apply migration 0005)', reset.data === true, reset.error?.message);
+  await upsert(8);
+  const { data: afterReset } = await admin.from('field_values').select('value, source_seq').eq('field_id', field.id).single();
+  check('Start over: older speech cannot bring a value back', afterReset?.value === null && afterReset?.source_seq === 10, JSON.stringify(afterReset));
+  const { data: oldUtt } = await admin.from('utterances').select('id').eq('session_id', session.id).lt('seq', 10);
+  check("Start over: the previous applicant's transcripts are deleted", (oldUtt?.length ?? 0) === 0);
+  const again = await admin.rpc('reset_session', { p_session: session.id, p_seq: 10, p_scope: 'phone' });
+  check('Start over: the same seq cannot reset twice', again.data === false, again.error?.message);
+  await upsert(11);
+  // reset_session sets 'paired'; the pairing check below needs a waiting session.
+  await admin.from('form_sessions').update({ status: 'waiting' }).eq('id', session.id);
+
   // ---- single-use pairing ----
   const pair = () =>
     admin

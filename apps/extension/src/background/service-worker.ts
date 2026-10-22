@@ -1,9 +1,11 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import type {
   CreateSessionResponse,
+  DesktopUpdateRequest,
   FieldOption,
   LoginResponse,
   PublicUser,
+  ResetScope,
   ResolveOptionResponse,
   UpdateFieldsRequest,
   SessionField,
@@ -20,11 +22,13 @@ import {
   type ContentRequest,
   type ExtState,
   type FillResult,
+  type PageLoadedMessage,
   type PopupRequest,
   type PopupResponse,
   type ResolveOptionMessage,
   type ScanResult,
   type StateMessage,
+  type UndoResult,
 } from '../messages';
 import { api, ApiError } from './api';
 import { assertRoom, endTab, mergeFill, migrate, otherSessions, patchTab, startTab, tabOfSession, type TabState, type Tabs } from './tabs';
@@ -65,6 +69,7 @@ function publicState(tabId: number | undefined): ExtState {
     lastFill: t?.lastFill ?? null,
     canUndo: t?.canUndo ?? false,
     otherSessions: otherSessions(state.tabs, t ? tabId : undefined),
+    notice: t?.notice ?? null,
   };
 }
 
@@ -81,8 +86,29 @@ function broadcast() {
 }
 
 async function logout() {
+  // Phones of these forms stop sending (nothing would be filled any more).
+  await Promise.all(Object.values(state.tabs).map((t) => reportDesktop(t.session, { state: 'closed' })));
   stopRealtime();
   await save({ auth: null, tabs: {} });
+}
+
+/** Tells the phone where the form tab is ('open' / 'moved' / 'closed') and how the last full fill went. */
+async function reportDesktop(s: ActiveSession, body: DesktopUpdateRequest) {
+  if (!state.auth) return;
+  try {
+    await api(`/api/sessions/${s.session_code}/desktop`, { method: 'PATCH', body, token: state.auth.token });
+  } catch (e) {
+    console.warn('could not report the form tab state', e);
+  }
+}
+
+/** Ends a tab's form session; its phone is told the tab was closed, so it stops sending. */
+async function endTabSession(tabId: number) {
+  const t = tabOf(tabId);
+  if (!t) return;
+  await save({ tabs: endTab(state.tabs, tabId) });
+  await ensureRealtime();
+  await reportDesktop(t.session, { state: 'closed' });
 }
 
 // ---------- content script ----------
@@ -161,14 +187,53 @@ async function fillIntoPage(tabId: number, only?: string[]) {
     const moved = !report.filled.length && report.skipped.some((x) => x.reason === MOVED_REASON);
     const lastFill = only ? mergeFill(tabOf(tabId)?.lastFill ?? null, report) : report;
     // Moved to another site: stop auto-filling there until the user scans again.
-    await setTab(tabId, moved ? { lastFill, autoFill: false, canUndo: false } : { lastFill, canUndo: true });
-    if (!moved) await reportDropdowns(s, report);
+    await setTab(
+      tabId,
+      moved ? { lastFill, autoFill: false, canUndo: false, desktop: 'moved', notice: null } : { lastFill, canUndo: true, notice: null },
+    );
+    if (moved) await reportDesktop(s, { state: 'moved' });
+    else await reportDropdowns(s, report);
+    // A full fill (Send to desktop / Fill form): the phone shows "Filled on computer ✓ 14/16".
+    if (!only && !moved) {
+      await reportDesktop(s, {
+        report: { filled: report.filled.length, skipped: report.skipped.length, total: Object.keys(values).length },
+      });
+    }
   } catch (e) {
     console.warn('fill failed', e);
     await setTab(tabId, {
       lastFill: { filled: [], skipped: Object.keys(values).map((k) => ({ field_key: k, reason: 'The form tab was closed or reloaded' })) },
     });
+    if (!only) await reportDesktop(s, { report: { filled: 0, skipped: Object.keys(values).length, total: Object.keys(values).length } });
   }
+}
+
+/**
+ * The phone pressed Start over. Auto-fill stops (the cleared values must not blank the page). For
+ * scope 'both' the form on the computer is cleared too: Undo restores the page as it was before the
+ * fill; if there is nothing to undo (the page reloaded since), the fields filled earlier are emptied.
+ */
+async function phoneReset(tabId: number, scope: ResetScope | null, before: SessionSnapshot | null) {
+  const t = tabOf(tabId);
+  if (!t) return;
+  const filledBefore =
+    t.lastFill?.filled ??
+    (before
+      ? Object.entries(valuesForFill(before))
+          .filter(([, v]) => v)
+          .map(([k]) => k)
+      : []);
+  await setTab(tabId, {
+    autoFill: false,
+    lastFill: null,
+    canUndo: false,
+    notice: scope === 'both' ? 'The phone cleared this form. Ready for the next applicant.' : 'The phone started over. The form here was left as it is.',
+  });
+  if (scope !== 'both') return;
+  const undone = await sendToTab<UndoResult>(tabId, { type: 'UNDO' }).catch(() => null);
+  if (undone?.restored?.length || !filledBefore.length) return;
+  const empty = Object.fromEntries(filledBefore.map((k) => [k, null]));
+  await sendToTab(tabId, { type: 'FILL', values: empty, site: t.session.page_site }).catch(() => null);
 }
 
 // ---------- Realtime: one socket, one channel per tab session ----------
@@ -186,6 +251,11 @@ async function refreshSnapshot(tabId: number) {
     if (cur?.session_id !== s.session_id) return; // ended or rescanned meanwhile
     const before = cur.snapshot;
     await setTab(tabId, { session: { ...cur, form_name: snap.session.form_name, snapshot: snap } });
+    // The phone pressed Start over while we weren't listening.
+    if (before && (snap.session.reset_seq ?? 0) > (before.session.reset_seq ?? 0)) {
+      await phoneReset(tabId, snap.session.reset_scope, before);
+      return;
+    }
     // The phone pressed "Send to desktop" while we weren't listening.
     if (snap.session.status === 'filled' && before?.session.status !== 'filled') {
       await sentFromPhone(tabId);
@@ -267,6 +337,8 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
         return { ...snap, values: [...snap.values.filter((v) => v.field_id !== row.field_id), row] };
       });
       await save();
+      // Values cleared by the phone's Start over are never typed into the page (it handles clearing itself).
+      if (row.value === null && snap && row.source_seq <= (snap.session.reset_seq ?? 0)) return;
       // Latest wins on the page too: re-fill a field when a newer value arrives.
       const key = snap && fieldKeyById(snap).get(row.field_id);
       if (tabOf(tabId)?.autoFill && key) await fillIntoPage(tabId, [key]);
@@ -297,10 +369,25 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
       const row = p.new as SessionInfo;
       const tabId = tab();
       if (tabId === null) return;
-      const wasFilled = tabOf(tabId)?.session.snapshot?.session.status === 'filled';
-      patchSnapshot(tabId, (snap) => ({ ...snap, session: { ...snap.session, form_name: row.form_name, status: row.status } }));
+      const before = tabOf(tabId)?.session.snapshot ?? null;
+      const wasFilled = before?.session.status === 'filled';
+      const wasReset = before?.session.reset_seq ?? 0;
+      patchSnapshot(tabId, (snap) => ({
+        ...snap,
+        session: {
+          ...snap.session,
+          form_name: row.form_name,
+          status: row.status,
+          reset_seq: row.reset_seq ?? snap.session.reset_seq,
+          reset_scope: row.reset_scope ?? snap.session.reset_scope,
+          desktop_state: row.desktop_state ?? snap.session.desktop_state,
+          desktop_report: row.desktop_report ?? snap.session.desktop_report,
+        },
+      }));
       await save();
-      if (row.status === 'filled' && !wasFilled) await sentFromPhone(tabId);
+      // The session update of a Start over arrives before its cleared values (one transaction, in order).
+      if ((row.reset_seq ?? 0) > wasReset) await phoneReset(tabId, row.reset_scope, before);
+      else if (row.status === 'filled' && !wasFilled) await sentFromPhone(tabId);
     });
 
   const entry: Channel = { channel, live: false };
@@ -357,7 +444,8 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       }
       if (!scan?.schema?.fields?.length) throw new Error('No form fields found on this page');
       const created = await api<CreateSessionResponse>('/api/sessions', { body: scan.schema, token: state.auth.token });
-      // Only this tab's session is replaced; forms in other tabs keep going.
+      // Only this tab's session is replaced (its phone is told it ended); forms in other tabs keep going.
+      const previous = tabOf(tab.id)?.session;
       const session: ActiveSession = {
         ...created,
         tab_id: tab.id,
@@ -367,12 +455,13 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       };
       await save({ tabs: startTab(state.tabs, tab.id, session) });
       await ensureRealtime();
+      if (previous) void reportDesktop(previous, { state: 'closed' });
       await refreshSnapshot(tab.id);
       return;
     }
 
     case 'END_SESSION':
-      if (tabId !== undefined) await save({ tabs: endTab(state.tabs, tabId) });
+      if (tabId !== undefined) await endTabSession(tabId);
       await ensureRealtime();
       return;
 
@@ -391,7 +480,11 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
   }
 }
 
-chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage | PageLoadedMessage, sender, sendResponse) => {
+  if (sender.tab && req.type === 'PAGE_LOADED') {
+    if (sender.frameId === 0 && sender.tab.id !== undefined) void pageLoaded(sender.tab.id, req.site);
+    return false;
+  }
   // From the content script: which loaded dropdown option did the speaker mean? (AI, server-side)
   if (sender.tab) {
     if (req.type !== 'RESOLVE_OPTION') return false;
@@ -410,7 +503,7 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage, 
     })().then(sendResponse);
     return true;
   }
-  if (req.type === 'RESOLVE_OPTION') return false;
+  if (req.type === 'RESOLVE_OPTION' || req.type === 'PAGE_LOADED') return false;
   (async () => {
     await ready;
     const tabId = req.tab_id ?? (await activeTabId());
@@ -444,10 +537,23 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-// A form tab closed: its session can't fill anything any more. Other tabs are unaffected.
+/**
+ * A page finished loading in a tab. If that tab holds a form session: another site means the phone
+ * is told the form tab moved (it stops sending); back on the form's site, it can send again.
+ */
+async function pageLoaded(tabId: number, site: string) {
+  await ready;
+  const t = tabOf(tabId);
+  if (!t) return;
+  const where = site === t.session.page_site ? 'open' : 'moved';
+  if (where === (t.desktop ?? 'open')) return;
+  await setTab(tabId, where === 'moved' ? { desktop: where, autoFill: false, canUndo: false } : { desktop: where });
+  await reportDesktop(t.session, { state: where });
+}
+
+// A form tab closed: its session can't fill anything any more, and its phone shows "Tab closed".
+// Other tabs are unaffected.
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await ready;
-  if (!tabOf(tabId)) return;
-  await save({ tabs: endTab(state.tabs, tabId) });
-  await ensureRealtime();
+  await endTabSession(tabId);
 });
