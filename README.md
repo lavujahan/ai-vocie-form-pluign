@@ -95,7 +95,7 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 
 - **Sarvam settings:** `SARVAM_STT_MODEL` / `SARVAM_STT_MODE` / `SARVAM_STT_LANGUAGE`. `saaras:v4` also gets *keyterms*: the form's option and field labels, to help recognize place names.
 - **30-second limit:** Sarvam's REST speech-to-text accepts clips under 30 s. Long recordings are handled in two steps:
-  1. **Cut at a pause** (`app/s/[code]/split.ts`, `use-recorder.ts`): from 20 s, the phone watches mic loudness and cuts at the first 0.4 s pause, or at 28 s at the latest. The next piece starts before the previous one stops, so nothing is lost at the cut.
+  1. **Cut every 28 s** (`app/s/[code]/use-recorder.ts`): the phone always cuts at 28 s, even mid-word. The next piece starts before the previous one stops, so nothing is lost at the cut.
   2. **Join before mapping** (`lib/recordings.ts`): pieces share a `recording_id` and a `part` number (migration `0003`). For piece N, the server maps the joined transcript of pieces 0…N. A sentence or number cut across pieces ("mobile number 95432 | 49890") is read whole, and the later piece's higher seq replaces the earlier partial values.
 - **Interpretation is done by the AI.** The mapping agent interprets everything: Tanglish fillers, Tamil script, numbers listed piece by piece as `number_parts`, and option choice. Its only tool is `validate_value`, a format and option checker. The server re-checks every value and marks doubtful ones "Check this".
 - **Timings:** the Vercel logs show one line per recording: `utterance seq=… stt=…ms map=…ms values=…`.
