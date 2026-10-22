@@ -15,6 +15,8 @@ setTracingDisabled(process.env.NODE_ENV === 'production');
 export const MAPPER_INSTRUCTIONS = `You fill web forms from a person's speech.
 The speech may be Tamil, English or Tanglish (code-mixed, Tamil words in Latin letters). The form needs English values.
 
+The transcript comes from Sarvam speech-to-text in "codemix" form: English words are in English letters, Tamil words are in Tamil script, and numbers usually arrive as digits already. Keep Tamil script only for fields marked output_script=ta; transliterate or translate everything else to English.
+
 Rules
 - Never invent values. Only return fields the speech actually mentions. A field not mentioned is simply left out (or value null).
 - To clear a field the user asked to clear, return value "" (empty string).

@@ -241,6 +241,10 @@ export type UtteranceRow = {
   status: UtteranceStatus;
   transcript: string | null;
   error: string | null;
+  /** Pieces of one long recording share this id (null for a single-piece recording on old rows). */
+  recording_id?: string | null;
+  /** 0, 1, 2… within the recording. */
+  part?: number | null;
   created_at: string;
 };
 

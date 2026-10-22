@@ -8,6 +8,7 @@ import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
 
 type Mode = 'full' | 'field';
+type PieceTag = { seq: number; target: string | null; recordingId: string; part: number };
 type View = 'record' | 'review';
 
 type FieldStatus =
@@ -36,9 +37,22 @@ export function VoiceSession({ code }: { code: string }) {
   const [target, setTarget] = useState<string | null>(null);
   const [recordingTarget, setRecordingTarget] = useState<string | null>(null);
 
+  /**
+   * Tags for one recording: the first piece gets `seq`; each extra piece (long recordings are cut
+   * for Sarvam's 30 s limit) takes the next seq, the same recordingId and the next part number.
+   */
+  const pieceTags = (seq: number, target: string | null): [PieceTag, { nextTag: () => PieceTag }] => {
+    const recordingId = crypto.randomUUID();
+    let part = 0;
+    return [
+      { seq, target, recordingId, part },
+      { nextTag: () => ({ seq: s.takeSeq(), target, recordingId, part: ++part }) },
+    ];
+  };
+
   const recorder = useRecorder((blob, { tag }) => {
-    const { seq, target } = tag as { seq: number; target: string | null };
-    s.sendUtterance(blob, target, seq);
+    const { seq, target, recordingId, part } = tag as PieceTag;
+    s.sendUtterance(blob, target, seq, { recordingId, part });
   });
 
   // Latest utterance per targeted field.
@@ -96,7 +110,7 @@ export function VoiceSession({ code }: { code: string }) {
     if (t !== target) setTarget(t);
     const seq = s.takeSeq(); // seq = when the user spoke, not when processing finishes
     // Long recordings are sent in ~28 s pieces, each with the next seq.
-    if (await recorder.start({ seq, target: t }, { nextTag: () => ({ seq: s.takeSeq(), target: t }) })) setRecordingTarget(t);
+    if (await recorder.start(...pieceTags(seq, t))) setRecordingTarget(t);
   }
 
   /** Mic inside the review list: records straight into one field without leaving the page. */
@@ -107,7 +121,7 @@ export function VoiceSession({ code }: { code: string }) {
       return;
     }
     const seq = s.takeSeq();
-    if (await recorder.start({ seq, target: fieldKey }, { nextTag: () => ({ seq: s.takeSeq(), target: fieldKey }) })) {
+    if (await recorder.start(...pieceTags(seq, fieldKey))) {
       setRecordingTarget(fieldKey);
     }
   }

@@ -21,7 +21,11 @@ export type LocalUtterance = {
   error: string | null;
   /** Kept for errored utterances so "tap to retry" can resend without re-recording. */
   blob?: Blob;
+  /** Which long recording this piece belongs to, and its number (0, 1, 2…). */
+  recording?: RecordingPiece;
 };
+
+export type RecordingPiece = { recordingId: string; part: number };
 
 type Stored = { token: string; expires_at: string; seq: number };
 const storeKey = (code: string) => `vff:${code}`;
@@ -222,13 +226,17 @@ export function useVoiceSession(code: string) {
 
   /** Fire-and-forget: several utterances can be in flight; `seq` decides who wins. */
   const sendUtterance = useCallback(
-    async (blob: Blob, target: string | null, seq = takeSeq()) => {
-      setUtt(seq, { seq, target_field_key: target, status: 'processing', error: null, blob });
+    async (blob: Blob, target: string | null, seq = takeSeq(), recording?: RecordingPiece) => {
+      setUtt(seq, { seq, target_field_key: target, status: 'processing', error: null, blob, recording });
       const form = new FormData();
       const ext = blob.type.includes('mp4') ? 'mp4' : blob.type.includes('ogg') ? 'ogg' : 'webm';
       form.append('audio', blob, `utterance.${ext}`);
       form.append('seq', String(seq));
       if (target) form.append('target_field_key', target);
+      if (recording) {
+        form.append('recording_id', recording.recordingId);
+        form.append('part', String(recording.part));
+      }
       try {
         const res = await authFetch('/api/utterances', { method: 'POST', body: form });
         const body = (await res.json()) as UtteranceResponse | ApiError;
@@ -261,7 +269,8 @@ export function useVoiceSession(code: string) {
         next.delete(u.seq);
         return next;
       });
-      sendUtterance(u.blob, u.target_field_key);
+      // Same recording and piece number, new seq: the server joins it with the earlier pieces again.
+      sendUtterance(u.blob, u.target_field_key, undefined, u.recording);
     },
     [sendUtterance],
   );

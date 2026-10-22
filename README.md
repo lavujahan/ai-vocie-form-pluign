@@ -1,6 +1,6 @@
 # Voice form filler
 
-A Chrome extension finds the form on a desktop page and shows a QR code. You scan it with your phone and speak (Tamil, English or Tanglish). Sarvam AI turns the speech into English field values, and the extension fills the original form with framework-safe events.
+A Chrome extension finds the form on a desktop page and shows a QR code. You scan it with your phone and speak (Tamil, English or Tanglish). Sarvam AI turns the speech into text and OpenAI maps it to English field values, and the extension fills the original form with framework-safe events.
 
 ```
 apps/extension     Chrome MV3 extension: React + Vite + @crxjs (detector, filler, popup, service worker)
@@ -13,12 +13,12 @@ supabase           SQL migrations (schema, RLS, latest-wins upsert, purge cron)
 
 1. **Extension popup → Scan form.** The content script detects fields, including same-origin iframes and open shadow roots. `POST /api/sessions` stores them and returns a single-use QR code that expires after 10 minutes. The **Form Analyzer Agent** then runs in the background and adds clean labels, semantic types and validation rules.
 2. **Phone scans the QR code.** It opens `/s/<code>`, which pairs the phone and gives it a 30-minute session JWT.
-3. **Tap the mic to start and tap again to stop.** Each recording is one *utterance*, sent with a `seq` number, and several can be processed at once. The server transcribes it with Sarvam **Saaras** (`saaras:v3`, `codemix` mode: English words in English letters, Tamil in Tamil script, numbers as digits), runs the **Field Mapping Agent** on Sarvam `sarvam-105b`, and calls `upsert_field_value`. A value is only overwritten by a newer `seq`, so newer speech wins even if it finishes processing first.
+3. **Tap the mic to start and tap again to stop.** Each recording is one *utterance*, sent with a `seq` number, and several can be processed at once. The server transcribes it with Sarvam **Saaras** (`saaras:v3`, `codemix` mode: English words in English letters, Tamil in Tamil script, numbers as digits), runs the **Field Mapping Agent** (OpenAI Agents SDK, `gpt-4o`), and calls `upsert_field_value`. A value is only overwritten by a newer `seq`, so newer speech wins even if it finishes processing first.
 4. **Values stream to the phone and the extension over Supabase Realtime.** Press **Fill form** once; after that, new values fill the page automatically and the changed field is highlighted. **Undo** restores the page's original values.
 
 ## Setup
 
-Prerequisites: Node 20+, pnpm 9 (`npm i -g pnpm@9`), a Supabase project, a Sarvam AI API key (dashboard.sarvam.ai), and an HTTPS tunnel such as `cloudflared` or `ngrok`. The phone's mic only works over HTTPS.
+Prerequisites: Node 20+, pnpm 9 (`npm i -g pnpm@9`), a Supabase project, a Sarvam AI API key (speech-to-text), an OpenAI API key (form reading and mapping), and an HTTPS tunnel such as `cloudflared` or `ngrok`. The phone's mic only works over HTTPS.
 
 ```bash
 pnpm install
@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql` and then `0002_cron.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, then `0003_recording_parts.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -40,7 +40,7 @@ pnpm install
 ### 2. Environment
 
 ```bash
-cp apps/web/.env.example apps/web/.env.local              # Supabase + Sarvam + PUBLIC_BASE_URL
+cp apps/web/.env.example apps/web/.env.local              # Supabase + Sarvam + OpenAI + PUBLIC_BASE_URL
 cp apps/extension/.env.example apps/extension/.env.local  # API base + Supabase URL / anon key
 ```
 
@@ -78,18 +78,27 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 | `pnpm test` | Unit tests (vitest), no network:<br>• shared normalization and validation<br>• login lockout and IP rate limit<br>• JWTs<br>• agent tools and guardrails<br>• Field Mapping Agent on a scripted model<br>• detector and filler on jsdom, including React controlled inputs |
 | `pnpm --filter extension e2e` | Builds the extension, loads it unpacked in Chromium with Playwright, and fills the vanilla, React and Vue fixtures through the real content script. Checks the framework state, latest-wins re-fill and Undo. Run `npx playwright install chromium` once first. |
 | `pnpm --filter web check:db` | Runs against your Supabase project: latest-wins upsert (seq 3, 1, 2 finishing out of order), single-use pairing and RLS isolation. |
-| `pnpm eval:mapping` | Sends about 30 Tamil, English and Tanglish fixtures to the real Field Mapping Agent and prints per-field accuracy. Uses Sarvam credits. |
+| `pnpm eval:mapping` | Sends about 30 Tamil, English and Tanglish fixtures to the real Field Mapping Agent and prints per-field accuracy. Uses OpenAI tokens. |
 
 ## Deploying
 
 - **Web:** a Vercel project with root `apps/web`. Set the same environment variables, with `PUBLIC_BASE_URL` set to the Vercel URL.
 - **Extension:** build with `VITE_API_BASE=https://<your-app>.vercel.app` and pack `apps/extension/dist`.
 
-## AI provider: Sarvam AI only
+## AI providers: two APIs, one job each
 
-- **Speech-to-text:** `POST https://api.sarvam.ai/speech-to-text`. Model, mode and language are set with `SARVAM_STT_MODEL` / `SARVAM_STT_MODE` / `SARVAM_STT_LANGUAGE`. `saaras:v4` also gets *keyterms*: the form's option and field labels, to help recognize place names.
-- **Agents:** the Form Analyzer and Field Mapping agents run on `sarvam-105b` through Sarvam's chat completions API, using a small tool-calling loop (`apps/web/lib/agents/runAgent.ts`). The agent does all the interpreting; code only validates.
-- **30-second limit:** Sarvam's REST speech-to-text accepts clips under 30 s. The phone cuts longer recordings into ~28 s pieces, and each piece is processed as its own utterance.
+| Job | Provider | Where |
+| --- | --- | --- |
+| Speech → text | **Sarvam AI** `saaras:v3`, `codemix` mode: English words in English letters, Tamil in Tamil script, numbers as digits | `apps/web/lib/sarvam/stt.ts` |
+| Reading the form (clean labels, field types, rules) | **OpenAI** Form Analyzer Agent (`@openai/agents`, `gpt-4o`) | `apps/web/lib/agents/formAnalyzer.ts` |
+| Parsing speech → field values | **OpenAI** Field Mapping Agent (`@openai/agents`, `gpt-4o`) | `apps/web/lib/agents/fieldMapper.ts` |
+
+- **Sarvam settings:** `SARVAM_STT_MODEL` / `SARVAM_STT_MODE` / `SARVAM_STT_LANGUAGE`. `saaras:v4` also gets *keyterms*: the form's option and field labels, to help recognize place names.
+- **30-second limit:** Sarvam's REST speech-to-text accepts clips under 30 s. Long recordings are handled in two steps:
+  1. **Cut at a pause** (`app/s/[code]/split.ts`, `use-recorder.ts`): from 20 s, the phone watches mic loudness and cuts at the first 0.4 s pause, or at 28 s at the latest. The next piece starts before the previous one stops, so nothing is lost at the cut.
+  2. **Join before mapping** (`lib/recordings.ts`): pieces share a `recording_id` and a `part` number (migration `0003`). For piece N, the server maps the joined transcript of pieces 0…N. A sentence or number cut across pieces ("mobile number 95432 | 49890") is read whole, and the later piece's higher seq replaces the earlier partial values.
+- **Interpretation is done by the AI.** The mapping agent interprets everything: Tanglish fillers, Tamil script, numbers listed piece by piece as `number_parts`, and option choice. Its only tool is `validate_value`, a format and option checker. The server re-checks every value and marks doubtful ones "Check this".
+- **Timings:** the Vercel logs show one line per recording: `utterance seq=… stt=…ms map=…ms values=…`.
 
 ## Privacy
 

@@ -8,7 +8,7 @@ import { must, route } from '@/lib/http';
 import { db } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /** Makes field keys unique (the detector may produce duplicates on messy pages). */
 function dedupeKeys<T extends { field_key: string }>(fields: T[]): T[] {

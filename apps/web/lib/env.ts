@@ -17,8 +17,13 @@ export const env = {
   get jwtSecret() {
     return required('SUPABASE_JWT_SECRET');
   },
+  /** Sarvam AI: speech-to-text. */
   get sarvamKey() {
     return required('SARVAM_API_KEY');
+  },
+  /** OpenAI: Form Analyzer and Field Mapping agents. */
+  get openaiKey() {
+    return required('OPENAI_API_KEY');
   },
   get publicBaseUrl() {
     return (process.env.PUBLIC_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
