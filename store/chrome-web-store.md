@@ -1,0 +1,306 @@
+# Chrome Web Store listing: Voice form filler
+
+Copy each section into the matching field in the Chrome Web Store developer dashboard.
+The store shows the description as plain text, so the description below uses `•` bullets and no Markdown.
+
+---
+
+## Name (max 75 characters)
+
+The store title comes from `name` in `apps/extension/vite.config.ts`. Options:
+
+- **Recommended:** `Voice Form Filler: Fill web forms by speaking on your phone` (59). It says what the extension does, without extra keywords.
+- `Voice Form Filler – Speak in Tamil or English to fill any form` (63). Riskier: Google's guidelines warn against stuffing the title with keywords.
+- `Voice form filler` (current; clear, but doesn't explain the phone part)
+
+Search the store before you choose: the title must not look like an existing extension's.
+
+## Summary (max 132 characters)
+
+```
+Scan a QR code, speak on your phone in Tamil, English or Tanglish, and the form on your computer fills itself. Photos and PDFs too.
+```
+(131 characters)
+
+## Category
+
+Productivity → Workflow & Planning
+
+## Language
+
+English. Tamil is supported on the phone screens, so mention it in the description, not as a second listing language.
+
+---
+
+## Detailed description (max 16,000 characters)
+
+```
+Stop typing long forms. Just say the answers.
+
+Voice form filler reads the form on your computer, shows a QR code, and lets you fill it by speaking on your phone in Tamil, English or Tanglish. The answers appear on the computer's form as you speak.
+
+No profiles to set up, no text to paste, nothing to type.
+
+
+HOW IT WORKS
+
+1. Open any web form and click the extension → "Scan form on this page".
+2. Scan the QR code with your phone. No app to install; it opens in the phone's browser.
+3. Tap the mic and speak: "My name is Ramesh Kumar, phone 98765 43210, district Salem."
+4. Press "Fill form" once. New answers then fill the page automatically, and each changed field is highlighted.
+5. Check the form and submit it yourself. Undo puts the page back the way it was.
+
+
+SPEAK THE WAY YOU NORMALLY TALK
+
+• Tamil, English or Tanglish, even mixed in one sentence ("en peru Ramesh, ooru Chennai").
+• Numbers can be said in pieces ("nine eight seven six…" or "98765 – 43210").
+• Spell names letter by letter, including Tamil letter names: "J A G A N" becomes "Jagan".
+• Correct yourself naturally: "no, not Jahan, Jagan", "the last digit is 5", "pincode la 455 illa 445".
+• Voice commands: "start over", "send it", "what is left?"
+• Speak as long as you need. Long answers are cut into pieces and joined again, so nothing is lost.
+• Values are filled in English, even when you speak Tamil.
+
+
+BUILT FOR REAL-WORLD FORMS
+
+Works on registration forms, application portals and modern web apps, including:
+
+• Cascading dropdowns: State → District → Taluk → Village. It waits for each list to load and picks the option you spoke.
+• Spelling variants: "Omaloor" or "Omalur", Tamil script or abbreviations. Unclear matches are sent to your phone as "Did you mean…?" buttons and are never guessed silently.
+• Custom dropdowns: react-select, MUI, choices.js, select2 and standard accessible comboboxes.
+• React, Vue, Angular and plain HTML forms. Values are entered the way a person types, so the site's own checks run.
+• Multi-step forms and wizards: fields that appear on step 2, or after ticking "Other", are added to your phone right away.
+• Forms inside frames and shadow DOM on the same site.
+
+
+PHOTOS AND DOCUMENTS FROM YOUR PHONE
+
+Upload fields are filled from the phone's camera, not by voice:
+
+• The extension reads the site's rules ("JPG only, below 50 KB", exact pixel size, page limits).
+• Take a photo or choose a file, then rotate, crop or add more pages.
+• Your phone converts it to the right format and size: a compressed JPG, or several photos combined into one A4 PDF.
+• The file goes into the website's own upload field, so the site checks it normally. If the site rejects it, your phone tells you why.
+• Location and camera details (EXIF/GPS) are removed from photos.
+
+
+ONE COMPUTER, SEVERAL FORMS
+
+• Fill up to 5 forms at once, one per browser tab, each with its own QR code and phone.
+• The popup always shows the form in the tab you opened it on.
+• "Start over" clears the answers for the next applicant using the same QR code. This is useful for service centres and help desks.
+
+
+THE PHONE SCREEN SPEAKS YOUR LANGUAGE
+
+• Switch the whole phone screen between தமிழ் and English.
+• Field labels show both languages: "தந்தை பெயர் · Father's name".
+• Clear messages for blocked microphones, lost connections, expired QR codes and required fields still empty.
+
+
+WHO IT'S FOR
+
+• Common service centres and e-Sevai operators filling applications for many citizens a day
+• Office staff doing repetitive data entry
+• Anyone who finds typing slow, or is more comfortable speaking Tamil than typing English
+• Help desks taking details over the counter
+
+
+PRIVACY
+
+• Your voice recording is never stored. It is processed and discarded within the same request.
+• Answers and transcripts are deleted automatically about 40 minutes after the session starts.
+• Uploaded photos and PDFs are stored privately and deleted as soon as the computer receives them, or when the tab closes.
+• QR codes work once and expire after 10 minutes. A phone link lasts 30 minutes.
+• The extension never submits a form for you. You review and submit.
+• Nothing is sold or used for advertising.
+
+
+WHAT YOU NEED
+
+• An account from your administrator (phone number and PIN)
+• A phone with a browser and a microphone
+• Chrome on the computer with the form
+
+
+NOT SUPPORTED (YET)
+
+• Upload fields inside another website's embedded frame
+• Saving your details to reuse on future forms
+```
+
+---
+
+## Single purpose (dashboard → Privacy tab)
+
+```
+Fill web forms on the current page from answers the user speaks or photographs on their phone.
+```
+
+## Permission justifications
+
+| Permission | Justification to paste |
+| --- | --- |
+| `storage` | Keeps the user signed in and remembers the active form session for each tab. |
+| `activeTab` | Reads the form fields on the tab where the user clicked "Scan form on this page". |
+| `scripting` | Injects the form detector and filler into the tab the user chose to fill. |
+| Host permission: API server | Sends the detected form fields and receives the values the user spoke on their phone. |
+| Host permission: Supabase | Receives new values in real time while the user speaks, so the form updates without reloading. |
+| Content script on all `http`/`https` sites | The user can fill a form on any website. The script does nothing until the user starts a session from the popup. It also watches for fields that appear on later steps of the same form. |
+
+If you switch to injecting on demand (see **Minimum permissions** below), delete the content script row.
+
+## Data usage disclosures (tick these)
+
+Google counts data as collected if the extension collects, sends, uses or shares it, even data that stays on the device ([User Data FAQ](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq)). What you tick here must match the privacy policy and what the extension really does.
+
+| Category | Tick? | Why |
+| --- | --- | --- |
+| Personally identifiable information | Yes | Names, phone numbers, addresses and ID numbers spoken into forms; the user's own phone number for sign-in |
+| Authentication information | Yes | Phone number and PIN; the session token kept in `chrome.storage` |
+| Website content | Yes | Field labels, dropdown options and upload rules of the form being filled |
+| Web history | Yes | The scan sends the form page's URL (`schema.page_url`), and the phone shows its site name. Google counts URLs as web browsing activity. |
+| Personal communications | Yes, to be safe | Voice recordings are sent for transcription. They are captured on the phone web page, not by the extension, but the store's reviewers may count them. |
+| Health, financial, location, user activity | No | Not collected. A form may ask for health or bank details, but those go into the PII values above, and the extension doesn't look for them. |
+
+Then tick all three certifications:
+- not sold to third parties
+- not used for unrelated purposes
+- not used for creditworthiness or lending
+
+**Limited Use:** you also certify that data is only used for the extension's purpose, is never used for ads, and is never read by people.
+- The admin panel shows usage numbers only, not transcripts or values. That's correct; keep it that way.
+- Add a Limited Use statement to the privacy policy. Google requires it on the homepage or one click away from it.
+
+## Consent inside the extension (required, missing now)
+
+The User Data FAQ requires a **clear notice inside the extension, and a user action to agree, before any data is collected**. A notice that is only in the privacy policy or on the store page doesn't count.
+- **Currently:** the sign-in and Scan cards have no notice, so this has to be fixed before you submit.
+- **Fix:** add a short notice to the sign-in card (`SignIn` in `apps/extension/src/popup/App.tsx`), linked to the privacy policy. Signing in then counts as agreeing. Example wording:
+  > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about 40 minutes. [Privacy policy]
+- Clicking "Scan form on this page" afterwards is the action that starts collection, so the notice must appear before the first scan.
+
+## Minimum permissions (reviewers check this)
+
+The privacy page says that asking for more permissions than you need can get the extension rejected.
+- **Currently:** the manifest's `content_scripts` runs on every `http`, `https` and `file` page, even when no session is active.
+- **Fix:** inject the scripts with `chrome.scripting.executeScript` when the user clicks Scan. `activeTab` and `scripting` already allow that.
+- **What could break:** keep the watcher (`watch.ts`) and the tab-moved checks working within an active session. A wizard's next page on the same site would need injecting again from `chrome.tabs.onUpdated`, which needs a host permission for that site. Test this before you change it.
+- **If you keep `content_scripts`:** drop `file:///*` unless you need it for real users, and explain in the justification why the extension must run on every site.
+
+## Remote code
+
+```
+No, I am not using remote code.
+```
+All JavaScript is bundled into the extension by Vite. Supabase Realtime and the API only send data, not code.
+
+## Privacy policy (required)
+
+The store will not accept the listing without a privacy policy URL. Host one (for example `/privacy` on the Next.js app). It must name the processors:
+
+- **Sarvam AI**: speech to text
+- **OpenAI**: reading the form and turning the transcript into field values
+- **Supabase**: database, real-time updates and file storage
+- **Vercel**: hosting
+
+It must also say:
+- **What is collected, how it is used and when it is shared:** match the data table above.
+- **How long it is kept:** audio is never stored; transcripts and values are deleted after about 40 minutes; files are deleted when the computer has them.
+- **How it is protected:** HTTPS/WSS for every connection; Supabase encrypts data at rest; QR codes work once and expire.
+- **Limited Use:** "The use of information received from this extension follows the Chrome Web Store User Data Policy, including the Limited Use requirements."
+- **Who to contact** about access or deletion.
+
+Put the same URL in the dashboard's Privacy tab and on your developer account page. Google checks that they match.
+
+## Images
+
+This plan follows Google's [listing guidelines](https://developer.chrome.com/docs/webstore/best-listing).
+
+**Rules that apply to all images**
+- Every image shows only what the app really does: the real popup and phone screens, with their real colours, icons and on-screen text.
+- Keep the branding the same in all of them: accent blue `#1e4e9c` / `#dce8fb`, the red mic button `#d4433d`, and the warm page colour `#faf9f7`.
+- Keep text short: one headline of 3 to 5 words per image, plus at most one short line under it.
+- Don't claim things like "Number one", "Editor's choice", "best" or "fastest", and don't mention other extensions.
+- Use PNG, at full resolution, the right way up.
+- Form data is made up (Ramesh Kumar, Salem…). The form page is a generic "Applicant registration" page, with no logo or name of any real portal or government.
+
+### Store icon (128×128 PNG), needed first
+
+The extension has no icon yet: `apps/extension/public` is empty and the manifest has no `icons`.
+- **Design:** the white Lucide `mic` on a blue `#1e4e9c` rounded square.
+- **Size:** 96×96 artwork centred in 128×128, with transparent padding (Chrome's icon guidance).
+- **No UI or screenshots in the icon.**
+- **Export 16, 32, 48 and 128 px** and add them to the manifest (`icons` and `action.default_icon`), so the toolbar icon matches the store icon.
+
+### Screenshots (1280×800 PNG, 5)
+
+Full bleed with square corners: the background fills the whole image, with no outer padding or rounded frame.
+Each one has a short headline on the left and the real UI on the right.
+
+| # | Headline | What it shows (all from the real app) |
+| --- | --- | --- |
+| 1 | **Scan once, then just talk** | A form page in Chrome, with the popup's QR card: form name, "14 fields" pill, QR code, "Scan with your phone", "Expires in 9:42". |
+| 2 | **Speak Tamil, English or Tanglish** | The phone mid-recording ("Listening… 0:07", red mic, transcript quote) next to the form, with a newly filled field outlined in yellow `#f2b705` (the filler's real highlight). The popup shows "Phone paired · Live" and the values. |
+| 3 | **Dependent dropdowns, filled in order** | State → District → Taluk → Village on the form, and the phone's review screen with a "Pick one" row: "You said “…”. Which one did you mean?" and option buttons. |
+| 4 | **Photos sized to the site's rules** | The phone's file sheet ("Applicant photo", "JPG · max 50 KB", thumbnail with rotate/crop, "Ready: JPG · 38 KB", "Send to computer"), and the popup row "✓ 38 KB". |
+| 5 | **Phone screens in தமிழ்** | The phone in Tamil with bilingual labels ("தந்தை பெயர் · Father's name"), the "English" switch, and "கணினியில் நிரப்பப்பட்டது ✓ 14/16". |
+
+Tamil versions of the screenshots can only be uploaded if the extension itself supports Tamil. That needs a `_locales/ta/messages.json` in the extension, and the extension has no `_locales` yet. The promo tile and marquee can't be localized. Optional; skip it for the first release.
+
+### Small promo tile (440×280 PNG or JPEG)
+
+It appears in search results and on category pages, so it matters more than the marquee.
+- **Not a screenshot:** use the brand mark and a simple drawing instead.
+- **Saturated background, no large white or light grey areas:** a blue `#1e4e9c` background filling the whole tile.
+- **Visual:** the red mic button with a white mic, sound arcs, and a simple phone → form shape.
+- **Text:** "Voice Form Filler" and, under it, "Speak. It fills."
+- **Check it at half size (220×140):** the mic and the name must still be readable.
+
+### Marquee (1400×560 PNG), optional
+
+It is only used if Google picks the item for the homepage carousel.
+- **Same look as the promo tile, with more room:** headline on the left, a simple phone + form drawing on the right.
+- **Keep it uncluttered:** at most the headline and one short line under it.
+
+### Video (optional)
+
+A 30 to 45 second screen recording on YouTube. Show: scan QR → speak a Tanglish sentence → form fills → upload a photo → Undo. Use the same made-up data as the screenshots.
+
+## Other dashboard fields
+
+| Field | What to enter |
+| --- | --- |
+| Official URL | Optional. A site you have verified in Google Search Console. Once verified, it shows under the listing title; without it, the store shows your publisher name. |
+| Homepage URL | A page describing the extension's features. The current `apps/web/app/page.tsx` is one card with an "Admin panel" link, so it needs a short features page with links to the privacy policy and support. |
+| Support URL | A contact page or email address. The store also has a built-in support hub. |
+| Mature content | Off |
+| Distribution → regions | All regions by default. Set it to India if the service is only for Indian forms. |
+
+## To-do before submitting
+
+1. Make the store icon and add `icons` to the manifest.
+2. Add the consent notice to the popup (see **Consent inside the extension**).
+3. Decide on `content_scripts` versus injecting on demand, and remove `file:///*` if you don't need it.
+4. Publish the privacy policy, homepage and support pages on the web app.
+5. Make the screenshots and the promo tile.
+6. Build with the production `VITE_API_BASE`, and zip `apps/extension/dist`.
+
+---
+
+## How this differs from the competitors (internal only)
+
+Don't paste this table or name these extensions anywhere in the listing: Google's guidelines say not to mention other extensions.
+
+| | QuickForm (50k users, 4.8★) | Fill A Form AI (1k, 2.3★) | AI Auto Form Filler (10k, 3.2★) | **Voice form filler** |
+| --- | --- | --- | --- | --- |
+| Input | Record a form once, replay it | Saved profile / knowledge base | Pasted plain text | **Voice on phone** |
+| Works for a new person each time | No (needs a profile per person) | No | Partly (paste new text) | **Yes** |
+| Tamil / Tanglish | No | No | No | **Yes** |
+| File/photo uploads | No | No | No | **Yes, resized to site rules** |
+| Cascading dropdowns | Delays only | No | No | **Yes** |
+| Stores your personal data | Yes, synced online | Yes, synced | Locally | **Auto-deleted in ~40 min** |
+| Multi-step forms | Auto-click | — | Click Fill on each step | **New fields appear on phone automatically** |
+
+Competitor descriptions focus on saving data so it can be reused. Our listing leads with what they can't do: filling a form for a new person by voice, in Tamil, including photos, without storing anything.

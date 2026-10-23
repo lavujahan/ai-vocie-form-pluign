@@ -17,7 +17,7 @@ const newId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? c
 /** Status of an upload field, for the field lists. */
 export function FileStatusMarker({ field, file }: { field: SessionField; file: FieldFile | undefined }) {
   const { t } = useI18n();
-  if (!file) return field.required ? <Pill tone="warn">{t('fileAdd')}</Pill> : <span className="text-muted">—</span>;
+  if (!file) return field.required ? <Pill tone="warn">{t('fileNeeded')}</Pill> : <span className="text-muted">—</span>;
   if (file.status === 'filled') return <span className="text-live-ink">{t('fileFilled')}</span>;
   if (file.status === 'rejected') return <Pill tone="danger">{t('fileRefused')}</Pill>;
   return (

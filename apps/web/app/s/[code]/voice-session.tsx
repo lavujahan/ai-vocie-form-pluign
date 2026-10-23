@@ -1,7 +1,25 @@
 'use client';
 
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, Check, ChevronRight, Copy, Loader2, Mic, MonitorX, RotateCcw, Send, Square, WifiOff } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  Camera,
+  Check,
+  Copy,
+  Globe,
+  Loader2,
+  Mic,
+  MonitorX,
+  MoreHorizontal,
+  Paperclip,
+  Pencil,
+  RotateCcw,
+  Send,
+  Square,
+  WifiOff,
+} from 'lucide-react';
 import {
   effectiveFileRules,
   LOW_CONFIDENCE,
@@ -14,15 +32,20 @@ import {
   type SessionValue,
 } from '@vff/shared';
 import { initialLang, saveLang, translate, type Lang } from '@/lib/i18n';
-import { Button, Card, FieldRow, Pill, cx } from '@/components/ui';
+import { Button, Card, Pill, cx } from '@/components/ui';
 import { FileSheet, FileStatusMarker } from './file-upload';
 import { LangCtx, useI18n, type T } from './lang';
 import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
 
-type Mode = 'full' | 'field';
+/**
+ * The phone page. One main page shows every field live while the user speaks: the big mic at the
+ * bottom takes speech for any fields, each row's mic takes speech for that field only, and its pen
+ * types it. Review → Send to desktop is the second page.
+ */
+
 type PieceTag = { seq: number; target: string | null; recordingId: string; part: number };
-type View = 'record' | 'review';
+type View = 'main' | 'review';
 
 type FieldStatus =
   | { kind: 'recording' }
@@ -38,9 +61,11 @@ type FieldStatus =
   | { kind: 'file'; file?: FieldFile };
 
 const isFile = (f: SessionField) => f.field_type === 'file';
-/** Needs the user's attention before sending: required and empty, a dropdown to pick, a refused upload. */
+/** Required and still empty, a dropdown to pick, a refused upload: sending would leave a gap. */
 const needsInput = (f: SessionField, st: FieldStatus) =>
   st.kind === 'missing' || st.kind === 'pick' || (st.kind === 'file' && ((!st.file && f.required) || st.file?.status === 'rejected'));
+/** Worth a look before sending: the gaps above, plus doubtful values and recordings that failed. */
+const needsAttention = (f: SessionField, st: FieldStatus) => needsInput(f, st) || st.kind === 'low' || st.kind === 'error';
 
 function displayValue(f: SessionField, v: string | null | undefined, t: T): string {
   if (!v) return '';
@@ -70,10 +95,11 @@ export function VoiceSession({ code }: { code: string }) {
 function SessionScreen({ code }: { code: string }) {
   const s = useVoiceSession(code);
   const { t, label, srv } = useI18n();
-  const [mode, setMode] = useState<Mode>('full');
-  const [view, setView] = useState<View>('record');
-  const [target, setTarget] = useState<string | null>(null);
+  const [view, setView] = useState<View>('main');
+  /** The field a row mic is recording into (null: the big mic, speech for any fields). */
   const [recordingTarget, setRecordingTarget] = useState<string | null>(null);
+  /** Field whose typing box (pen) is open. */
+  const [editing, setEditing] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   /** Bumped when the user says "send it": the review page asks before sending. */
@@ -98,6 +124,7 @@ function SessionScreen({ code }: { code: string }) {
     const { seq, target, recordingId, part } = tag as PieceTag;
     s.sendUtterance(blob, target, seq, { recordingId, part }, durationMs);
   });
+  const recording = recorder.state === 'recording';
 
   // Latest utterance per targeted field.
   const latestByField = useMemo(() => {
@@ -112,7 +139,7 @@ function SessionScreen({ code }: { code: string }) {
 
   const statusOf = (f: SessionField): FieldStatus => {
     if (isFile(f)) return { kind: 'file', file: s.files.get(f.id) };
-    if (recorder.state === 'recording' && recordingTarget === f.field_key) return { kind: 'recording' };
+    if (recording && recordingTarget === f.field_key) return { kind: 'recording' };
     const value = s.valueByKey.get(f.field_key);
     const u = latestByField.get(f.field_key);
     if (u && (!value || u.seq > value.source_seq)) {
@@ -127,19 +154,14 @@ function SessionScreen({ code }: { code: string }) {
   };
 
   const processing = [...s.utterances.values()].filter((u) => u.status === 'processing').length;
-  const fullModeErrors = [...s.utterances.values()]
-    .filter((u) => u.status === 'error' && !u.target_field_key)
-    .sort((a, b) => b.seq - a.seq)
-    .slice(0, 3);
+  /** Whole-form recordings the server couldn't use (no field of their own to show the error on). */
+  const failedSpeech = [...s.utterances.values()].filter((u) => u.status === 'error' && !u.target_field_key).sort((a, b) => b.seq - a.seq);
   const latestTranscript = [...s.utterances.values()]
     .filter((u) => u.transcript)
     .sort((a, b) => b.seq - a.seq)[0]?.transcript;
   const filledCount = s.fields.filter((f) =>
     isFile(f) ? ['uploaded', 'filled'].includes(s.files.get(f.id)?.status ?? '') : !!s.valueByKey.get(f.field_key)?.value,
   ).length;
-  const fileFields = s.fields.filter(isFile);
-  const voiceFields = s.fields.filter((f) => !isFile(f));
-  const recordingNow = recorder.state === 'recording';
   const steps = useMemo(() => stepStarts(s.fields), [s.fields]);
 
   // Fields that appeared on the computer later (the form's next step, or shown by an answer).
@@ -156,7 +178,7 @@ function SessionScreen({ code }: { code: string }) {
 
   // Reloading or leaving now would lose the recording, or pieces that are still uploading.
   useEffect(() => {
-    if (!recordingNow && processing === 0) return;
+    if (!recording && processing === 0) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = t('beforeUnload');
@@ -164,7 +186,7 @@ function SessionScreen({ code }: { code: string }) {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordingNow, processing]);
+  }, [recording, processing]);
 
   // A spoken command never acts by itself: it opens the same confirmation a tap would.
   useEffect(() => {
@@ -185,63 +207,59 @@ function SessionScreen({ code }: { code: string }) {
   }, [s.command]);
 
   async function startOver(scope: ResetScope) {
-    if (recorder.state === 'recording') recorder.stop();
+    if (recording) recorder.stop();
     setRecordingTarget(null);
+    setEditing(null);
     const err = await s.reset(scope);
     if (err) return srv(err);
     setResetOpen(false);
-    setTarget(null);
-    setView('record');
+    setView('main');
     setNotice(t(scope === 'both' ? 'clearedBoth' : 'clearedPhone'));
     window.scrollTo(0, 0);
     return null;
   }
 
-  /** Next field (in form order) that still needs a value, after `from`. */
-  const nextEmpty = (from: string | null) => {
-    // Upload fields are filled from the camera, never spoken: field-by-field skips them.
-    const i = from ? voiceFields.findIndex((f) => f.field_key === from) : -1;
-    const rest = [...voiceFields.slice(i + 1), ...voiceFields.slice(0, Math.max(i, 0))];
-    return rest.find((f) => !s.valueByKey.get(f.field_key)?.value && !latestByField.has(f.field_key))?.field_key ?? null;
-  };
-
+  /** Big mic: speech for any fields. A second tap (or any mic while recording) stops. */
   async function toggleMic() {
-    if (recorder.state === 'recording') {
+    if (recording) {
       recorder.stop();
       setRecordingTarget(null);
-      // Field-by-field: move straight on to the next field; the last one keeps processing.
-      if (mode === 'field' && target) setTarget(nextEmpty(target));
       return;
     }
-    const tgt = mode === 'field' ? target ?? nextEmpty(null) : null;
-    if (mode === 'field' && !tgt) return;
-    if (tgt !== target) setTarget(tgt);
+    setEditing(null);
     const seq = s.takeSeq(); // seq = when the user spoke, not when processing finishes
     // Long recordings are sent in ~28 s pieces, each with the next seq.
-    if (await recorder.start(...pieceTags(seq, tgt))) setRecordingTarget(tgt);
+    if (await recorder.start(...pieceTags(seq, null))) setRecordingTarget(null);
   }
 
-  /** Mic inside the review list: records straight into one field without leaving the page. */
+  /** A row's mic: speech for that one field. */
   async function micFor(fieldKey: string) {
-    if (recorder.state === 'recording') {
+    if (recording) {
       recorder.stop();
       setRecordingTarget(null);
       return;
     }
+    setEditing(null);
     const seq = s.takeSeq();
-    if (await recorder.start(...pieceTags(seq, fieldKey))) {
-      setRecordingTarget(fieldKey);
-    }
+    if (await recorder.start(...pieceTags(seq, fieldKey))) setRecordingTarget(fieldKey);
   }
 
   function showView(v: View) {
-    if (recorder.state === 'recording') {
+    if (recording) {
       recorder.stop();
       setRecordingTarget(null);
     }
+    setEditing(null);
     setView(v);
     window.scrollTo(0, 0);
   }
+
+  const openFile = (f: SessionField) => {
+    if (recording) recorder.stop();
+    setEditing(null);
+    setFileSheet(f.field_key);
+    window.scrollTo(0, 0);
+  };
 
   if (s.phase === 'pairing') {
     return (
@@ -264,7 +282,6 @@ function SessionScreen({ code }: { code: string }) {
       </Shell>
     );
   }
-
   // The form tab on the computer was closed: this QR code is finished, nothing can be sent.
   if (s.session?.desktop_state === 'closed') {
     return (
@@ -279,32 +296,31 @@ function SessionScreen({ code }: { code: string }) {
     );
   }
 
-  const recording = recorder.state === 'recording';
-  const targetField = s.fields.find((f) => f.field_key === target);
   const desktop = s.session?.desktop_state ?? 'open';
+  const sheetField = fileSheet ? s.fields.find((f) => f.field_key === fileSheet) : undefined;
+  const attention = s.fields.filter((f) => needsAttention(f, statusOf(f)));
 
-  const banners = (
+  /** Banners and sheets shown at the top of either page. */
+  const top = (
     <>
       <DesktopBanner state={desktop} />
       {!s.online && (
-        <p className="mb-3 flex items-center gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
+        <p className="flex items-center gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
           <WifiOff size={16} className="shrink-0" /> {t('offline')}
         </p>
       )}
       {notice && (
-        <button
-          onClick={() => setNotice(null)}
-          className="mb-3 flex w-full items-center gap-2 rounded-lg bg-live-bg px-3 py-2 text-left text-sm text-live-ink"
-        >
+        <button onClick={() => setNotice(null)} className="flex w-full items-center gap-2 rounded-lg bg-live-bg px-3 py-2 text-left text-sm text-live-ink">
           <Check size={16} className="shrink-0" /> {notice}
         </button>
       )}
-    </>
-  );
-
-  const sheetField = fileSheet ? s.fields.find((f) => f.field_key === fileSheet) : undefined;
-  const startOverSheet = (
-    <>
+      {recorder.state === 'unsupported' && (
+        <div className="rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
+          {t('unsupported')}
+          <CopyLinkButton />
+        </div>
+      )}
+      {recorder.state === 'denied' && <MicHelp onRetry={toggleMic} />}
       {resetOpen && <StartOverSheet count={filledCount} onCancel={() => setResetOpen(false)} onConfirm={startOver} />}
       {sheetField && (
         <FileSheet
@@ -318,172 +334,112 @@ function SessionScreen({ code }: { code: string }) {
       )}
     </>
   );
-  const openFile = (f: SessionField) => {
-    if (recorder.state === 'recording') recorder.stop();
-    setFileSheet(f.field_key);
-    window.scrollTo(0, 0);
+
+  /** One field row, the same on both pages. */
+  const item = (f: SessionField, showSource: boolean) => {
+    const st = statusOf(f);
+    return (
+      <FieldItem
+        key={f.id}
+        field={f}
+        status={st}
+        showSource={showSource}
+        elapsed={recorder.elapsed}
+        editing={editing === f.field_key}
+        onMic={() => micFor(f.field_key)}
+        onPen={() => setEditing(editing === f.field_key ? null : f.field_key)}
+        onFile={() => openFile(f)}
+        onRetry={() => st.kind === 'error' && st.utt.blob && s.retry(st.utt)}
+        onSave={async (v) => {
+          const err = await s.editValue(f.field_key, v);
+          if (!err) setEditing(null);
+          return err ? srv(err) : null;
+        }}
+        onCancel={() => setEditing(null)}
+      />
+    );
   };
+
+  const menu = <PageMenu onStartOver={() => (setResetOpen(true), window.scrollTo(0, 0))} />;
 
   if (view === 'review') {
     return (
-      <Shell>
-        {banners}
-        {startOverSheet}
-        <ReviewView
+      <Page>
+        <Header title={t('checkBeforeSending')} onBack={() => showView('main')} menu={menu} />
+        <div className="flex flex-1 flex-col gap-3 px-4 pt-3 pb-6">
+          {top}
+          <ReviewList
+            fields={s.fields}
+            attention={attention}
+            item={item}
+            steps={steps}
+          />
+        </div>
+        <SendBar
           fields={s.fields}
           statusOf={statusOf}
           sent={s.session?.status === 'filled'}
           desktop={desktop}
           report={s.session?.desktop_report ?? null}
           askSend={askSend}
-          onFile={openFile}
-          onBack={() => showView('record')}
-          onEdit={s.editValue}
-          onMic={micFor}
-          recordingKey={recording ? recordingTarget : null}
-          elapsed={recorder.elapsed}
-          onRetry={s.retry}
           onSend={s.complete}
         />
-        {!resetOpen && <StartOverButton onClick={() => setResetOpen(true)} />}
-      </Shell>
+      </Page>
     );
   }
 
   return (
-    <Shell>
-      {banners}
-      {startOverSheet}
-      <Card>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold">{s.session?.form_name || t('form')}</h1>
-            {/* With several forms open on the computer, the site helps check this is the right QR. */}
-            {hostOf(s.session?.page_url) && <p className="truncate text-xs text-muted">{hostOf(s.session?.page_url)}</p>}
-          </div>
-          {processing > 0 && (
-            <Pill tone="neutral">
-              <Loader2 size={12} className="mr-1 animate-spin" /> {t('processing', { n: processing })}
-            </Pill>
-          )}
-        </div>
-
-        <div className="mt-3 flex gap-2" role="tablist">
-          {(['full', 'field'] as const).map((m) => (
-            <button
-              key={m}
-              role="tab"
-              aria-selected={mode === m}
-              disabled={recording}
-              onClick={() => {
-                setMode(m);
-                if (m === 'field' && !target) setTarget(nextEmpty(null));
-              }}
-              className={cx(
-                'min-h-9 rounded-lg border px-3 text-sm',
-                mode === m ? 'border-transparent bg-accent-bg font-medium text-accent-ink' : 'border-line bg-card text-ink',
-              )}
-            >
-              {t(m === 'full' ? 'modeFull' : 'modeField')}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-6 flex flex-col items-center">
-          <button
-            onClick={toggleMic}
-            disabled={recorder.state === 'unsupported' || (mode === 'field' && !target && !recording)}
-            aria-label={t(recording ? 'stopRec' : 'startRec')}
-            className={cx(
-              'relative grid size-24 place-items-center rounded-full bg-danger text-white shadow-sm transition-transform active:scale-95 disabled:opacity-40',
-              recording && 'ring-8 ring-danger/20',
-            )}
-          >
-            {recording ? <Square size={30} fill="currentColor" /> : <Mic size={36} />}
-            {recording && <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />}
-          </button>
-          <p className={cx('mt-3 text-center text-sm', recording ? 'font-medium text-danger-ink' : 'text-muted')}>
-            {recorder.state === 'unsupported'
-              ? t('unsupported')
-              : recorder.state === 'denied'
-                ? t('micBlocked')
-                : recording
-                  ? t('listening', { time: fmtTime(recorder.elapsed) })
-                  : mode === 'field'
-                    ? targetField
-                      ? t('tapToSpeakField', { label: label(targetField) })
-                      : t('allFilled')
-                    : t('tapToSpeak')}
-          </p>
-          {recorder.state === 'unsupported' && <CopyLinkButton />}
-          {recorder.state === 'denied' && <MicHelp onRetry={toggleMic} />}
-          {!recording && recorder.notice && (
-            <p className="mt-2 rounded-lg bg-warn-bg px-3 py-2 text-center text-sm text-warn-ink">
-              {t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort')}
-            </p>
-          )}
-        </div>
-
-        {latestTranscript && (
-          <blockquote className="mt-4 rounded-lg bg-subtle px-3 py-2 text-sm text-ink/90">“{latestTranscript}”</blockquote>
-        )}
-
-        {mode === 'full' &&
-          fullModeErrors.map((u) => (
-            <button
-              key={u.seq}
-              onClick={() => s.retry(u)}
-              disabled={!u.blob}
-              className="mt-2 flex w-full items-center gap-2 rounded-lg bg-danger-bg px-3 py-2 text-left text-sm text-danger-ink"
-            >
-              <AlertCircle size={16} /> {u.error ? srv(u.error) : t('failed')}
-            </button>
-          ))}
-      </Card>
-
-      {fileFields.length > 0 && (
-        <Card className="mt-3 py-1">
-          <p className="pt-3 pb-1 text-xs font-semibold tracking-wide text-muted uppercase">{t('files')}</p>
-          {fileFields.map((f) => (
-            <FieldRow key={f.id} label={label(f)} onClick={() => openFile(f)}>
-              <FileStatusMarker field={f} file={s.files.get(f.id)} />
-            </FieldRow>
-          ))}
-        </Card>
-      )}
-
-      {mode === 'field' && (
-        <Card className="mt-3 py-1">
-          {voiceFields.map((f) => (
+    <Page>
+      <Header
+        title={s.session?.form_name || t('form')}
+        subtitle={hostOf(s.session?.page_url)}
+        live={s.live}
+        menu={menu}
+      />
+      <div className="flex flex-1 flex-col gap-3 px-4 pt-3 pb-6">
+        {top}
+        <div>
+          {s.fields.map((f, i) => (
             <Fragment key={f.id}>
               <StepDivider step={steps.get(f.id)} />
-              <FieldRow
-                label={label(f)}
-                active={f.field_key === target}
-                onClick={() => {
-                  const st = statusOf(f);
-                  if (st.kind === 'error' && st.utt.blob) s.retry(st.utt);
-                  else if (!recording) setTarget(f.field_key);
-                }}
-              >
-                <StatusMarker field={f} status={statusOf(f)} />
-              </FieldRow>
+              {/* Upload fields are listed together under their own heading. */}
+              {isFile(f) && (i === 0 || !isFile(s.fields[i - 1])) && <GroupLabel>{t('files')}</GroupLabel>}
+              {item(f, false)}
             </Fragment>
           ))}
-        </Card>
-      )}
-
-      <Button className="mt-3 w-full" onClick={() => showView('review')}>
-        {t('checkBeforeSending')} · {filledCount}/{s.fields.length}
-        <ChevronRight size={16} />
-      </Button>
-      {!s.live && <p className="mt-2 text-center text-xs text-muted">{t('reconnecting')}</p>}
-      {!resetOpen && <StartOverButton onClick={() => setResetOpen(true)} />}
-    </Shell>
+        </div>
+      </div>
+      <BottomBar
+        heard={recording && !recordingTarget ? t('listenAll') : latestTranscript ?? null}
+        filled={filledCount}
+        total={s.fields.length}
+        processing={processing}
+        attention={attention.length}
+        failed={failedSpeech}
+        onRetryFailed={() => failedSpeech.forEach((u) => u.blob && s.retry(u))}
+        onAttention={() => {
+          const first = attention[0];
+          if (first) document.getElementById(`field-${first.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }}
+        recording={recording}
+        elapsed={recorder.elapsed}
+        micDisabled={recorder.state === 'unsupported'}
+        notice={!recording && recorder.notice ? t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort') : null}
+        onMic={toggleMic}
+        onReview={() => showView('review')}
+      />
+    </Page>
   );
 }
 
-/** Page frame, with the தமிழ் / English switch. */
+// ---------- layout ----------
+
+/** Full-height page: sticky header, scrolling content, a bar fixed at the bottom. */
+function Page({ children }: { children: React.ReactNode }) {
+  return <main className="mx-auto flex min-h-dvh max-w-md flex-col">{children}</main>;
+}
+
+/** Simple screens (connecting, errors) with the language switch. */
 function Shell({ children }: { children: React.ReactNode }) {
   const { lang, setLang } = useContext(LangCtx);
   return (
@@ -500,6 +456,77 @@ function Shell({ children }: { children: React.ReactNode }) {
       {children}
     </main>
   );
+}
+
+function Header({
+  title,
+  subtitle,
+  live,
+  onBack,
+  menu,
+}: {
+  title: string;
+  subtitle?: string;
+  live?: boolean;
+  onBack?: () => void;
+  menu: React.ReactNode;
+}) {
+  const { t } = useI18n();
+  return (
+    <header className="sticky top-0 z-20 flex items-start gap-2 border-b border-line bg-page px-4 pt-3 pb-2">
+      {onBack && (
+        <button onClick={onBack} aria-label={t('backToRecording')} className="-ml-2 grid size-10 shrink-0 place-items-center rounded-lg hover:bg-subtle">
+          <ArrowLeft size={20} />
+        </button>
+      )}
+      <div className="min-w-0 flex-1 pt-1">
+        <h1 className="text-[17px] leading-tight font-semibold text-balance">{title}</h1>
+        {subtitle && (
+          <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted">
+            {/* With several forms open on the computer, the site helps check this is the right QR. */}
+            {subtitle}
+            {live === false ? (
+              <span>· {t('reconnecting')}</span>
+            ) : (
+              <span className="size-1.5 shrink-0 rounded-full bg-live-ink" aria-hidden />
+            )}
+          </p>
+        )}
+      </div>
+      {menu}
+    </header>
+  );
+}
+
+/** ⋯ menu: language and Start over, so the bottom bar keeps just the mic and Review. */
+function PageMenu({ onStartOver }: { onStartOver: () => void }) {
+  const { lang, setLang } = useContext(LangCtx);
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)} aria-label={t('more')} aria-expanded={open} className="grid size-10 place-items-center rounded-lg hover:bg-subtle">
+        <MoreHorizontal size={20} />
+      </button>
+      {open && (
+        <div className="absolute top-11 right-0 z-30 flex min-w-52 flex-col rounded-xl border border-line bg-card p-1.5 shadow-lg">
+          <button
+            onClick={() => (setLang(lang === 'ta' ? 'en' : 'ta'), setOpen(false))}
+            className="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-left text-sm hover:bg-subtle"
+          >
+            <Globe size={17} /> {translate(lang, 'switchLang')}
+          </button>
+          <button onClick={() => (onStartOver(), setOpen(false))} className="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-left text-sm hover:bg-subtle">
+            <RotateCcw size={17} /> {t('startOver')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GroupLabel({ children }: { children: React.ReactNode }) {
+  return <p className="pt-4 pb-1 text-[11.5px] font-bold tracking-wider text-muted uppercase">{children}</p>;
 }
 
 /**
@@ -519,7 +546,7 @@ function stepStarts(fields: SessionField[]): Map<string, number> {
 function StepDivider({ step }: { step: number | undefined }) {
   const { t } = useI18n();
   if (!step) return null;
-  return <p className="pt-3 pb-1 text-xs font-semibold tracking-wide text-muted uppercase">{t('step', { n: step })}</p>;
+  return <GroupLabel>{t('step', { n: step })}</GroupLabel>;
 }
 
 function hostOf(url: string | undefined): string {
@@ -535,96 +562,108 @@ function DesktopBanner({ state }: { state: DesktopState }) {
   const { t } = useI18n();
   if (state !== 'moved') return null;
   return (
-    <p className="mb-3 flex items-start gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
+    <p className="flex items-start gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
       <MonitorX size={16} className="mt-0.5 shrink-0" /> {t('srvTabMoved')}
     </p>
   );
 }
 
-function StartOverButton({ onClick }: { onClick: () => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="mt-4 text-center">
-      <button onClick={onClick} className="inline-flex min-h-10 items-center gap-1.5 px-3 text-sm text-muted hover:text-ink">
-        <RotateCcw size={14} /> {t('startOver')}
-      </button>
-    </div>
-  );
-}
+// ---------- field rows ----------
 
-/** Start over: the sheet itself is the confirmation (it says it can't be undone). */
-function StartOverSheet({
-  count,
+/** One field: label, live value / status, and its own Speak + Type buttons (or Add for uploads). */
+function FieldItem({
+  field,
+  status,
+  showSource,
+  elapsed,
+  editing,
+  onMic,
+  onPen,
+  onFile,
+  onRetry,
+  onSave,
   onCancel,
-  onConfirm,
 }: {
-  count: number;
+  field: SessionField;
+  status: FieldStatus;
+  showSource: boolean;
+  elapsed: number;
+  editing: boolean;
+  onMic: () => void;
+  onPen: () => void;
+  onFile: () => void;
+  onRetry: () => void;
+  onSave: (v: string | null) => Promise<string | null>;
   onCancel: () => void;
-  onConfirm: (scope: ResetScope) => Promise<string | null>;
 }) {
-  const { t } = useI18n();
-  const [busy, setBusy] = useState<ResetScope | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const run = async (scope: ResetScope) => {
-    setBusy(scope);
-    setError(await onConfirm(scope));
-    setBusy(null);
-  };
-  return (
-    <Card className="mb-3 border-danger/40">
-      <h2 className="flex items-center gap-2 text-base font-semibold">
-        <RotateCcw size={16} /> {t('startOver')}
-      </h2>
-      <p className="mt-1 text-sm text-muted">{t(count === 1 ? 'clearOne' : 'clearMany', { n: count })}</p>
-      <div className="mt-3 space-y-2">
-        <Button className="w-full" loading={busy === 'phone'} disabled={!!busy} onClick={() => run('phone')}>
-          {t('clearPhone')}
-        </Button>
-        <Button className="w-full" loading={busy === 'both'} disabled={!!busy} onClick={() => run('both')}>
-          {t('clearBoth')}
-        </Button>
-        <Button variant="ghost" className="w-full" disabled={!!busy} onClick={onCancel}>
-          {t('cancel')}
-        </Button>
-      </div>
-      {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
-    </Card>
-  );
-}
+  const { t, label } = useI18n();
+  const rec = status.kind === 'recording';
+  const file = isFile(field);
+  const source = showSource && 'value' in status ? status.value?.source_phrase : null;
+  const actBase = 'flex w-[52px] min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] font-semibold leading-tight';
 
-/** In-app browsers (WhatsApp, Lens…) can't record: copy the link to open it in Chrome or Safari. */
-function CopyLinkButton() {
-  const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
   return (
-    <Button
-      className="mt-3"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(window.location.href);
-          setCopied(true);
-        } catch {
-          window.prompt(t('copyPrompt'), window.location.href);
-        }
-      }}
+    <div
+      id={`field-${field.id}`}
+      className={cx('scroll-mt-20 scroll-mb-64 border-b border-line', rec && '-mx-2.5 rounded-xl border-transparent bg-accent-bg px-2.5')}
     >
-      <Copy size={14} /> {t(copied ? 'linkCopied' : 'copyLink')}
-    </Button>
-  );
-}
-
-function MicHelp({ onRetry }: { onRetry: () => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="mt-2 w-full rounded-lg bg-subtle px-3 py-2 text-sm text-ink/90">
-      <p className="font-medium">{t('micHelpTitle')}</p>
-      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted">
-        <li>{t('micHelpChrome')}</li>
-        <li>{t('micHelpSafari')}</li>
-      </ul>
-      <Button className="mt-2 w-full" onClick={onRetry}>
-        {t('tryAgain')}
-      </Button>
+      <div className="flex items-center gap-2 py-2.5">
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1 text-[13px] leading-snug text-muted">
+            {file && <Paperclip size={13} className="shrink-0" />}
+            <span>
+              {label(field)}
+              {field.required ? ' *' : ''}
+            </span>
+          </p>
+          <div className="mt-0.5 text-[15.5px] leading-snug font-semibold break-words">
+            {rec ? (
+              <span className="inline-flex items-center gap-1.5 text-danger-ink">
+                <span className="size-2 animate-pulse rounded-full bg-danger" /> {t('listening', { time: fmtTime(elapsed) })}
+              </span>
+            ) : status.kind === 'error' ? (
+              <button onClick={onRetry} className="text-left">
+                <Pill tone="danger">{t('tapToRetry')}</Pill>
+              </button>
+            ) : (
+              <StatusMarker field={field} status={status} />
+            )}
+          </div>
+          {status.kind === 'pick' && !editing && <p className="mt-0.5 text-xs text-muted">{t('youSaid', { text: status.hint.spoken })}</p>}
+          {source && <p className="mt-0.5 text-xs text-muted">{source}</p>}
+        </div>
+        <div className="flex flex-none gap-1.5">
+          {file ? (
+            <button onClick={onFile} aria-label={`${t('fileTakePhoto')} · ${label(field)}`} className={cx(actBase, 'bg-accent-bg text-accent-ink')}>
+              <Camera size={20} />
+              {status.kind === 'file' && status.file ? t('fileReplace') : t('fileAdd')}
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onMic}
+                aria-label={rec ? t('stopRec') : t('speakField', { label: label(field) })}
+                className={cx(actBase, rec ? 'bg-danger text-white' : 'bg-accent-bg text-accent-ink')}
+              >
+                {rec ? <Square size={18} fill="currentColor" /> : <Mic size={20} />}
+                {rec ? t('stop') : t('speak')}
+              </button>
+              <button
+                onClick={onPen}
+                aria-label={`${t('type')} · ${label(field)}`}
+                aria-expanded={editing}
+                className={cx(actBase, 'border-[1.5px] border-accent-ink text-accent-ink', editing ? 'bg-accent-bg' : 'bg-card')}
+              >
+                <Pencil size={18} />
+                {t('type')}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {editing && !file && (
+        <ValueEditor field={field} initial={'value' in status ? (status.value?.value ?? null) : null} onSave={onSave} onCancel={onCancel} />
+      )}
     </div>
   );
 }
@@ -644,14 +683,14 @@ function StatusMarker({ field, status }: { field: SessionField; status: FieldSta
       return <Pill tone="danger">{t('tapToRetry')}</Pill>;
     case 'low':
       return (
-        <span className="inline-flex items-center gap-2">
+        <span className="inline-flex flex-wrap items-center gap-2">
           {displayValue(field, status.value.value, t)} <Pill tone="warn">{t('checkThis')}</Pill>
         </span>
       );
     case 'filled':
       return (
         <span className="inline-flex items-center gap-1.5">
-          <Check size={14} className="text-live-ink" /> {displayValue(field, status.value.value, t)}
+          <Check size={15} className="shrink-0 text-live-ink" /> {displayValue(field, status.value.value, t)}
         </span>
       );
     case 'missing':
@@ -661,24 +700,141 @@ function StatusMarker({ field, status }: { field: SessionField; status: FieldSta
     case 'file':
       return <FileStatusMarker field={field} file={status.file} />;
     default:
-      return <span className="text-muted">—</span>;
+      return <span className="font-normal text-muted">—</span>;
   }
 }
 
-function ReviewView({
+// ---------- main page bottom bar ----------
+
+/** Fixed at the bottom: what was heard, filled / processing / needs-you, the big mic and Review. */
+function BottomBar({
+  heard,
+  filled,
+  total,
+  processing,
+  attention,
+  failed,
+  onRetryFailed,
+  onAttention,
+  recording,
+  elapsed,
+  micDisabled,
+  notice,
+  onMic,
+  onReview,
+}: {
+  heard: string | null;
+  filled: number;
+  total: number;
+  processing: number;
+  attention: number;
+  failed: LocalUtterance[];
+  onRetryFailed: () => void;
+  onAttention: () => void;
+  recording: boolean;
+  elapsed: number;
+  micDisabled: boolean;
+  notice: string | null;
+  onMic: () => void;
+  onReview: () => void;
+}) {
+  const { t, srv } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="sticky bottom-0 z-20 flex flex-col gap-2 border-t border-line bg-card px-4 pt-2.5 pb-[calc(12px+env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+      {heard && (
+        <button onClick={() => setOpen((o) => !o)} className={cx('text-left text-[13px] text-muted italic', !open && 'truncate')}>
+          {recording ? heard : `${t('heard')}: “${heard}”`}
+        </button>
+      )}
+      {notice && <p className="rounded-lg bg-warn-bg px-3 py-1.5 text-[13px] text-warn-ink">{notice}</p>}
+      {failed.length > 0 && (
+        <button onClick={onRetryFailed} className="flex items-center gap-1.5 rounded-lg bg-danger-bg px-3 py-1.5 text-left text-[13px] text-danger-ink">
+          <AlertCircle size={15} className="shrink-0" />
+          {failed.length === 1 && failed[0].error ? srv(failed[0].error) : t('failedRetry', { n: failed.length })}
+        </button>
+      )}
+      <div className="flex flex-wrap items-center gap-2 text-[13.5px]">
+        <span className="font-bold tabular-nums">{t('filledCount', { n: filled, total })}</span>
+        {processing > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-muted">
+            · <Loader2 size={14} className="animate-spin" /> {t('processing', { n: processing })}
+          </span>
+        )}
+        {attention > 0 && (
+          <button onClick={onAttention} className="rounded-full bg-warn-bg px-2.5 py-0.5 font-semibold text-warn-ink">
+            {t('needYou', { n: attention })}
+          </button>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col items-center gap-0.5">
+          <button
+            onClick={onMic}
+            disabled={micDisabled}
+            aria-label={t(recording ? 'stopRec' : 'startRec')}
+            className={cx(
+              'relative grid size-[72px] place-items-center rounded-full bg-danger text-white shadow-[0_6px_18px_rgba(212,67,61,0.35)] transition-transform active:scale-95 disabled:opacity-40',
+              recording && 'ring-8 ring-danger/20',
+            )}
+          >
+            {recording ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
+            {recording && <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />}
+          </button>
+          <span className="text-[11.5px] text-muted tabular-nums">{recording ? fmtTime(elapsed) : t('tapToSpeak')}</span>
+        </div>
+        <button onClick={onReview} className="flex min-h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-ink text-base font-bold text-page">
+          {t('review')} <ArrowRight size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- review page ----------
+
+function ReviewList({
+  fields,
+  attention,
+  item,
+  steps,
+}: {
+  fields: SessionField[];
+  attention: SessionField[];
+  item: (f: SessionField, showSource: boolean) => React.ReactNode;
+  steps: Map<string, number>;
+}) {
+  const { t } = useI18n();
+  const rest = fields.filter((f) => !attention.includes(f));
+  return (
+    <div>
+      {attention.length > 0 && (
+        <>
+          <GroupLabel>
+            {t('needsYou')} ({attention.length})
+          </GroupLabel>
+          {attention.map((f) => item(f, true))}
+        </>
+      )}
+      <GroupLabel>{t('allFields')}</GroupLabel>
+      {rest.map((f) => (
+        <Fragment key={f.id}>
+          <StepDivider step={steps.get(f.id)} />
+          {item(f, true)}
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/** Fixed at the bottom of the review page: Send to desktop, with its confirmation and acknowledgement. */
+function SendBar({
   fields,
   statusOf,
   sent,
   desktop,
   report,
   askSend,
-  onFile,
-  onBack,
-  onEdit,
-  onMic,
-  recordingKey,
-  elapsed,
-  onRetry,
   onSend,
 }: {
   fields: SessionField[];
@@ -688,25 +844,15 @@ function ReviewView({
   report: DesktopReport | null;
   /** Bumped when the user said "send it": ask before sending. */
   askSend: number;
-  /** Opens the photo / file sheet of an upload field. */
-  onFile: (f: SessionField) => void;
-  onBack: () => void;
-  onEdit: (key: string, value: string | null) => Promise<string | null>;
-  onMic: (key: string) => void;
-  recordingKey: string | null;
-  elapsed: number;
-  onRetry: (u: LocalUtterance) => void;
   onSend: () => Promise<string | null>;
 }) {
-  const { t, label, srv } = useI18n();
-  const [editing, setEditing] = useState<string | null>(null);
+  const { t, srv } = useI18n();
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   /** Asking before sending: required fields are empty, or the send was spoken. */
   const [confirm, setConfirm] = useState<'missing' | 'voice' | null>(null);
   const [sends, setSends] = useState(0);
   const ack = useDesktopAck(sent, report, sends);
-  const steps = useMemo(() => stepStarts(fields), [fields]);
 
   const missing = fields.filter((f) => needsInput(f, statusOf(f))).length;
   // Sent, but the computer didn't fill (asleep, or the form page changed): allow sending again.
@@ -727,62 +873,15 @@ function ReviewView({
   }, [askSend]);
 
   return (
-    <Card>
-      <div className="flex items-center gap-2">
-        <button onClick={onBack} aria-label={t('backToRecording')} className="-ml-1 grid size-9 place-items-center rounded-lg hover:bg-subtle">
-          <ArrowLeft size={18} />
-        </button>
-        <h1 className="text-base font-semibold">{t('checkBeforeSending')}</h1>
-      </div>
-      <div className="mt-2">
-        {fields.map((f) => {
-          const st = statusOf(f);
-          return (
-            <div key={f.id} className="border-b border-line last:border-b-0">
-              <StepDivider step={steps.get(f.id)} />
-              <FieldRow
-                label={label(f)}
-                sub={st.kind === 'pick' ? t('youSaid', { text: st.hint.spoken }) : 'value' in st ? st.value?.source_phrase : undefined}
-                onClick={() => {
-                  if (isFile(f)) onFile(f);
-                  else if (st.kind === 'error' && st.utt.blob) onRetry(st.utt);
-                  else setEditing(editing === f.field_key ? null : f.field_key);
-                }}
-              >
-                <StatusMarker field={f} status={st} />
-              </FieldRow>
-              {editing === f.field_key && (
-                <ValueEditor
-                  field={f}
-                  initial={'value' in st ? (st.value?.value ?? null) : null}
-                  onCancel={() => setEditing(null)}
-                  onSave={async (v) => {
-                    const err = await onEdit(f.field_key, v);
-                    if (!err) setEditing(null);
-                    return err ? srv(err) : null;
-                  }}
-                  recording={recordingKey === f.field_key}
-                  elapsed={elapsed}
-                  onMic={() => {
-                    const stopping = recordingKey === f.field_key;
-                    onMic(f.field_key);
-                    // After speaking, close the editor: the row shows a spinner, then the new value.
-                    if (stopping) setEditing(null);
-                  }}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <p className="mt-3 text-xs text-muted">{t('tapToEdit')}</p>
+    <div className="sticky bottom-0 z-20 flex flex-col gap-2 border-t border-line bg-card px-4 pt-2.5 pb-[calc(12px+env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
+      <p className="text-xs text-muted">{t('captchaNote')}</p>
       {confirm ? (
-        <div className="mt-3 rounded-lg bg-warn-bg px-3 py-2">
+        <div className="rounded-xl bg-warn-bg px-3 py-2">
           <p className="text-sm text-warn-ink">
             {missing ? t(missing === 1 ? 'missingOne' : 'missingMany', { n: missing }) : t('voiceSendConfirm')}
           </p>
           <div className="mt-2 flex gap-2">
-            <Button className="flex-1" onClick={send}>
+            <Button className="flex-1" variant="primary" onClick={send}>
               {t(missing ? 'sendAnyway' : 'sendNow')}
             </Button>
             <Button variant="ghost" onClick={() => setConfirm(null)}>
@@ -791,27 +890,28 @@ function ReviewView({
           </div>
         </div>
       ) : (
-        <Button
-          className="mt-3 w-full"
-          loading={sending}
-          disabled={!canSend}
+        <button
+          disabled={!canSend || sending}
           onClick={() => (missing && !sent ? setConfirm('missing') : send())}
+          className="flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-ink text-base font-bold text-page disabled:opacity-50"
         >
-          {sent && !canResend ? (
+          {sending ? (
+            <Loader2 size={18} className="animate-spin" />
+          ) : sent && !canResend ? (
             <>
-              <Check size={16} /> {t('sentToDesktop')}
+              <Check size={18} /> {t('sentToDesktop')}
             </>
           ) : (
             <>
-              <Send size={16} /> {t(sent ? 'sendAgain' : 'sendToDesktop')}
+              <Send size={18} /> {t(sent ? 'sendAgain' : 'sendToDesktop')}
             </>
           )}
-        </Button>
+        </button>
       )}
-      {desktop === 'moved' && <p className="mt-2 text-xs text-warn-ink">{t('srvTabMoved')}</p>}
-      {sendError && <p className="mt-2 text-xs text-danger-ink">{sendError}</p>}
+      {desktop === 'moved' && <p className="text-xs text-warn-ink">{t('srvTabMoved')}</p>}
+      {sendError && <p className="text-xs text-danger-ink">{sendError}</p>}
       {sent && !sendError && <AckLine ack={ack} />}
-    </Card>
+    </div>
   );
 }
 
@@ -859,44 +959,120 @@ function AckLine({ ack }: { ack: Ack }) {
   switch (ack.kind) {
     case 'waiting':
       return (
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-muted">
+        <p className="flex items-center gap-1.5 text-xs text-muted">
           <Loader2 size={12} className="animate-spin" /> {t('ackWaiting')}
         </p>
       );
     case 'filled':
       return (
-        <p className="mt-2 text-xs text-live-ink">
+        <p className="text-xs text-live-ink">
           {t('ackFilled', { filled: ack.report.filled, total: ack.report.total })}
           {ack.report.skipped > 0 && <span className="text-warn-ink">{t('ackSkipped', { n: ack.report.skipped })}</span>}
         </p>
       );
     case 'nothing':
-      return <p className="mt-2 text-xs text-danger-ink">{t('ackNothing')}</p>;
+      return <p className="text-xs text-danger-ink">{t('ackNothing')}</p>;
     case 'timeout':
-      return <p className="mt-2 text-xs text-danger-ink">{t('ackTimeout')}</p>;
+      return <p className="text-xs text-danger-ink">{t('ackTimeout')}</p>;
     default:
       return null;
   }
 }
 
+// ---------- sheets and helpers ----------
+
+/** Start over: the sheet itself is the confirmation (it says it can't be undone). */
+function StartOverSheet({
+  count,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  onCancel: () => void;
+  onConfirm: (scope: ResetScope) => Promise<string | null>;
+}) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState<ResetScope | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (scope: ResetScope) => {
+    setBusy(scope);
+    setError(await onConfirm(scope));
+    setBusy(null);
+  };
+  return (
+    <Card className="border-danger/40">
+      <h2 className="flex items-center gap-2 text-base font-semibold">
+        <RotateCcw size={16} /> {t('startOver')}
+      </h2>
+      <p className="mt-1 text-sm text-muted">{t(count === 1 ? 'clearOne' : 'clearMany', { n: count })}</p>
+      <div className="mt-3 space-y-2">
+        <Button className="w-full" loading={busy === 'phone'} disabled={!!busy} onClick={() => run('phone')}>
+          {t('clearPhone')}
+        </Button>
+        <Button className="w-full" loading={busy === 'both'} disabled={!!busy} onClick={() => run('both')}>
+          {t('clearBoth')}
+        </Button>
+        <Button variant="ghost" className="w-full" disabled={!!busy} onClick={onCancel}>
+          {t('cancel')}
+        </Button>
+      </div>
+      {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
+    </Card>
+  );
+}
+
+/** In-app browsers (WhatsApp, Lens…) can't record: copy the link to open it in Chrome or Safari. */
+function CopyLinkButton() {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  return (
+    <Button
+      className="mt-2"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(window.location.href);
+          setCopied(true);
+        } catch {
+          window.prompt(t('copyPrompt'), window.location.href);
+        }
+      }}
+    >
+      <Copy size={14} /> {t(copied ? 'linkCopied' : 'copyLink')}
+    </Button>
+  );
+}
+
+function MicHelp({ onRetry }: { onRetry: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="w-full rounded-lg bg-subtle px-3 py-2 text-sm text-ink/90">
+      <p className="font-medium">
+        {t('micBlocked')} {t('micHelpTitle')}
+      </p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted">
+        <li>{t('micHelpChrome')}</li>
+        <li>{t('micHelpSafari')}</li>
+      </ul>
+      <Button className="mt-2 w-full" onClick={onRetry}>
+        {t('tryAgain')}
+      </Button>
+    </div>
+  );
+}
+
+/** The pen: type a value (or pick one of the dropdown's choices) in place under the row. */
 function ValueEditor({
   field,
   initial,
   onSave,
   onCancel,
-  onMic,
-  recording,
-  elapsed,
 }: {
   field: SessionField;
   initial: string | null;
   onSave: (v: string | null) => Promise<string | null>;
   onCancel: () => void;
-  onMic: () => void;
-  recording: boolean;
-  elapsed: number;
 }) {
-  const { t, label } = useI18n();
+  const { t } = useI18n();
   const [value, setValue] = useState(initial ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -980,10 +1156,10 @@ function ValueEditor({
       )}
       {input}
       {error && <p className="text-xs text-danger-ink">{error}</p>}
-      {recording && <p className="text-xs font-medium text-danger-ink">{t('listeningStop')}</p>}
       <div className="flex gap-2">
         <Button
           className="flex-1"
+          variant="primary"
           loading={busy}
           onClick={async () => {
             setBusy(true);
@@ -992,19 +1168,6 @@ function ValueEditor({
           }}
         >
           {t('save')}
-        </Button>
-        <Button
-          onClick={onMic}
-          aria-label={recording ? t('stopRec') : t('speakField', { label: label(field) })}
-          className={recording ? 'border-danger text-danger-ink' : ''}
-        >
-          {recording ? (
-            <>
-              <Square size={13} fill="currentColor" /> {fmtTime(elapsed)}
-            </>
-          ) : (
-            <Mic size={16} />
-          )}
         </Button>
         <Button variant="ghost" onClick={onCancel}>
           {t('cancel')}
