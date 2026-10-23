@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql` and `0008_usage_billing.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql` and `0009_retention.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -41,7 +41,7 @@ pnpm install
 
 ```bash
 cp apps/web/.env.example apps/web/.env.local              # Supabase + Sarvam + OpenAI + PUBLIC_BASE_URL
-cp apps/extension/.env.example apps/extension/.env.local  # API base + Supabase URL / anon key
+cp apps/extension/.env.example apps/extension/.env.local  # API base + Supabase URL / anon key + privacy page URL
 ```
 
 ### 3. First admin and checks
@@ -229,7 +229,7 @@ The extension reports the form tab's state to the phone (`PATCH /api/sessions/[c
 | **moved** to another site | amber banner | Speaking is fine; Send to desktop is off until the tab is back on the form's site. |
 | **closed** (tab closed, "New form", sign out) | **"Tab closed"** card | Nothing; the server refuses (409) recordings, edits and Send for that QR code. |
 
-**Desktop acknowledgement:** after Send to desktop, the phone shows "Filled on computer ✓ 14/16". With no answer within 15 s, it shows "The computer hasn't responded", with **Send again**.
+**Send to desktop** is the button next to the big mic on the phone (there is no separate review page). It asks first when required fields are empty, waits while speech is still being processed, and changes to "Send 2 changes" when answers change after a Send. **Desktop acknowledgement:** after a Send the phone shows "Sent. Click Fill form on the computer.", then "Filled on computer ✓ 14/16" once the page is filled. If nothing could be filled, it offers **Send again**.
 
 **Other phone messages**
 - QR code already used vs expired.
@@ -244,7 +244,11 @@ The extension reports the form tab's state to the phone (`PATCH /api/sessions/[c
 
 - Audio is never stored. It is only held in memory while one request runs.
 - **Uploaded photos and PDFs** live in a private bucket that clients can't list or read. Upload and download links work for one file (download links for 60 seconds). Files are deleted as soon as the computer has them, on Start over, when the form tab closes, and at the latest when the session expires. Re-encoding on the phone removes EXIF/GPS data, and file contents are never logged.
-- Transcripts and values are purged by `pg_cron` about 40 minutes after a session is created.
+- `pg_cron` runs `purge_expired()` every 15 minutes (migration `0009`):
+  - transcripts, values and spoken dropdown hints are deleted about 40–55 minutes after a session is created;
+  - whole session records (page URL, title, fields) are deleted after 30 days;
+  - sign-in attempts are deleted after 1 day.
+  - The public privacy policy (`store/pages/privacy.md`) states these times, so change both together.
 - Clients can't write to the database directly; every write goes through the API using the service role.
 - RLS limits each client to reading its own session.
 

@@ -20,7 +20,7 @@ Status key: ☐ to do · ◐ in progress · ☑ done. Steps marked **blocker** w
 | # | Decision | Options | Affects |
 | --- | --- | --- | --- |
 | D1 | Store title | ☑ **"Voice Form Filler: Fill web forms by speaking on your phone"** | Step 1.4, all images |
-| D2 | Content script | ☐ Open: (a) inject only when Scan is clicked, which has less risk of rejection but needs testing; (b) keep it on all sites, but drop `file:///*` | Step 1.3 |
+| D2 | Content script | ☐ Open: (a) inject only when Scan is clicked, which has less risk of rejection but needs testing; (b) keep it on all sites, but drop `file:///*` | Step 1.3 (`file:///*` already removed) |
 | D3 | Public pages | ☑ Homepage, privacy and support pages go on your other existing site. ☐ Still needed: that site's address and the support email/phone, to fill the `{{…}}` placeholders. | Steps 1.2, 2.x, 4.2 |
 | D4 | Regions | ☐ Open: all regions, or India only | Step 4.2 |
 
@@ -29,11 +29,11 @@ Status key: ☐ to do · ◐ in progress · ☑ done. Steps marked **blocker** w
 | # | Step | Files | Status |
 | --- | --- | --- | --- |
 | 1.1 | **Blocker:** store and toolbar icon. White Lucide `mic` on a `#1e4e9c` rounded square, 96 px artwork in 128 px. Export 16, 32, 48 and 128 px PNGs, and add `icons` and `action.default_icon` to the manifest. | `public/icons/*`, `vite.config.ts` | ☐ |
-| 1.2 | **Blocker:** consent notice on the sign-in card, linked to the privacy page on your other site (see **Consent inside the extension**). Put the link in a `VITE_PRIVACY_URL` build setting rather than hard-coding it. | `src/popup/App.tsx`, `src/env.ts` | ☐ |
-| 1.3 | **Minimum permissions**, per D2. For (a), inject from the service worker on Scan and keep the watcher and tab-moved checks working; re-run `pnpm --filter extension e2e` and the `watch` and `tabs` unit tests. For (b), only remove `file:///*`. | `vite.config.ts`, `src/background/*`, `src/content/index.ts` | ☐ |
-| 1.4 | Use the D1 title in the manifest `name` and `default_title`. Keep the popup heading short ("Voice form filler"). | `vite.config.ts` | ☐ |
-| 1.5 | Bump `version` to `1.0.0` for the first public release. | `vite.config.ts`, `package.json` | ☐ |
-| 1.6 | **Blocker:** make data retention match the privacy policy. The purge job (`0002_cron.sql`) deletes answers and transcripts, but keeps `form_sessions` (page URL, title, form name) and `form_fields` forever. `form_fields.choice_hint` even holds what the person said for an unclear dropdown. New migration `0009`: on expiry, set `choice_hint` to null; delete sessions older than 30 days (fields cascade, usage rows keep their numbers with `session_id` set to null). Add the check to `check:db`. | `supabase/migrations/0009_retention.sql` | ☐ |
+| 1.2 | **Blocker:** consent notice on the sign-in card, linked to the privacy page on your other site (see **Consent inside the extension**). Put the link in a `VITE_PRIVACY_URL` build setting rather than hard-coding it. | `src/popup/App.tsx`, `src/env.ts` | ☑ done: notice under the sign-in form, link from `VITE_PRIVACY_URL` (`apps/extension/.env.example`) |
+| 1.3 | **Minimum permissions**, per D2. For (a), inject from the service worker on Scan and keep the watcher and tab-moved checks working; re-run `pnpm --filter extension e2e` and the `watch` and `tabs` unit tests. For (b), only remove `file:///*`. | `vite.config.ts`, `src/background/*`, `src/content/index.ts` | ◐ `file:///*` removed; on-demand injection waits for D2 |
+| 1.4 | Use the D1 title in the manifest `name` and `default_title`. Keep the popup heading short ("Voice form filler"). | `vite.config.ts` | ☑ done (also `short_name: "Voice Form Filler"`) |
+| 1.5 | Bump `version` to `1.0.0` for the first public release. | `vite.config.ts`, `package.json` | ☑ done |
+| 1.6 | **Blocker:** make data retention match the privacy policy. The purge job (`0002_cron.sql`) deletes answers and transcripts, but keeps `form_sessions` (page URL, title, form name) and `form_fields` forever. `form_fields.choice_hint` even holds what the person said for an unclear dropdown. New migration `0009`: on expiry, set `choice_hint` to null; delete sessions older than 30 days (fields cascade, usage rows keep their numbers with `session_id` set to null). Add the check to `check:db`. | `supabase/migrations/0009_retention.sql` | ◐ written + `check:db` test; apply `0009` in Supabase and run `pnpm --filter web check:db` |
 
 ### Phase 2: Public pages (on your other site)
 
@@ -41,7 +41,7 @@ The content is written in `store/pages/`. Copy it to your other site and fill in
 
 | # | Page | Content | Status |
 | --- | --- | --- | --- |
-| 2.1 | **Blocker:** privacy policy | [pages/privacy.md](pages/privacy.md). Section 5 assumes step 1.6 is done; the comment at the top says what to change if you publish earlier. | ◐ written, not published |
+| 2.1 | **Blocker:** privacy policy | [pages/privacy.md](pages/privacy.md). Section 5 is true once migration `0009` is applied in Supabase (step 1.6). | ◐ written, not published |
 | 2.2 | Homepage (the dashboard's Homepage URL) | [pages/home.md](pages/home.md). Add screenshots after Phase 3. | ◐ written, not published |
 | 2.3 | Support (the dashboard's Support URL) | [pages/support.md](pages/support.md). Every answer uses the app's real on-screen messages. | ◐ written, not published |
 | 2.4 | Change `apps/web/app/page.tsx` to link to the new homepage, or leave it. Optional. | — | ☐ |
@@ -249,7 +249,7 @@ The privacy page says that asking for more permissions than you need can get the
 - **Currently:** the manifest's `content_scripts` runs on every `http`, `https` and `file` page, even when no session is active.
 - **Fix:** inject the scripts with `chrome.scripting.executeScript` when the user clicks Scan. `activeTab` and `scripting` already allow that.
 - **What could break:** keep the watcher (`watch.ts`) and the tab-moved checks working within an active session. A wizard's next page on the same site would need injecting again from `chrome.tabs.onUpdated`, which needs a host permission for that site. Test this before you change it.
-- **If you keep `content_scripts`:** drop `file:///*` unless you need it for real users, and explain in the justification why the extension must run on every site.
+- **`file:///*` is already removed** (it was only needed for local files). If you keep `content_scripts`, explain in the justification why the extension must run on every site.
 
 ## Remote code
 

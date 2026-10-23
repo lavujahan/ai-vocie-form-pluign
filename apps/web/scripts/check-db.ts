@@ -4,6 +4,7 @@
  * - latest-wins upsert: seq 3, 1, 2 finishing out of order → value of #3 stays
  * - pairing code is single-use
  * - RLS: users and phones only see their own session (also what Realtime enforces)
+ * - retention: expired sessions lose answers and dropdown hints; sessions older than 30 days are deleted
  * Creates throwaway users/sessions and deletes them afterwards.
  */
 import { randomBytes } from 'node:crypto';
@@ -159,6 +160,38 @@ try {
     const viaLink = signed.data ? await fetch(signed.data.signedUrl) : null;
     check('Uploads: a 60-second signed link downloads it', viaLink?.ok === true, signed.error?.message);
     await admin.storage.from('form-files').remove([path]);
+  }
+
+  // ---- Retention (migration 0009): expired sessions lose their answers and hints, 30-day-old sessions go ----
+  // purge_expired() is what the 15-minute cron runs, so calling it here only does early what the cron would do.
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  const { data: aged } = await admin
+    .from('form_sessions')
+    .insert([
+      { user_id: a.id, session_code: randomBytes(16).toString('base64url'), page_url: 'https://example.test/expired', page_origin: 'https://example.test', status: 'paired', expires_at: ago(2 * 3600_000), created_at: ago(2 * 3600_000) },
+      { user_id: a.id, session_code: randomBytes(16).toString('base64url'), page_url: 'https://example.test/old', page_origin: 'https://example.test', status: 'expired', expires_at: ago(31 * 86400_000), created_at: ago(31 * 86400_000) },
+    ])
+    .select('id');
+  if (aged?.length === 2) {
+    const [expired, old] = aged as { id: string }[];
+    const { data: hinted } = await admin
+      .from('form_fields')
+      .insert({ session_id: expired.id, field_key: 'village', label: 'Village', field_type: 'select', position: 0, choice_hint: { spoken: 'check-db', reason: 'ambiguous', top: [] } })
+      .select('id')
+      .single();
+    if (hinted) {
+      await admin.rpc('upsert_field_value', { p_session: expired.id, p_field: hinted.id, p_value: 'x', p_confidence: 1, p_source_phrase: null, p_seq: 1, p_utterance: null });
+    }
+    const purge = await admin.rpc('purge_expired');
+    check('Retention: purge_expired runs (apply migration 0009)', !purge.error, purge.error?.message);
+    const { data: hint } = await admin.from('form_fields').select('choice_hint').eq('session_id', expired.id).maybeSingle();
+    check('Retention: expired session loses what was said for a dropdown', hint?.choice_hint === null, JSON.stringify(hint));
+    const { data: vals } = await admin.from('field_values').select('id').eq('session_id', expired.id);
+    check('Retention: expired session loses its values', (vals?.length ?? 0) === 0);
+    const { data: gone } = await admin.from('form_sessions').select('id').eq('id', old.id);
+    check('Retention: sessions older than 30 days are deleted', (gone?.length ?? 1) === 0);
+  } else {
+    check('Retention: could create aged test sessions', false);
   }
 
   // ---- Realtime: the phone and the extension get value changes pushed ----

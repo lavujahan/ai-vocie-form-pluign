@@ -13,3 +13,4 @@ next-env.d.ts
 
 # Mapping accuracy reports (pnpm eval:mapping)
 apps/web/eval-results
+apps/extension/release

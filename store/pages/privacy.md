@@ -2,7 +2,7 @@
 Before publishing:
 1. Replace {{COMPANY}}, {{SITE}} and {{EMAIL}}.
 2. Section 5, "Form session records", assumes plan step 1.6 is done: session records are deleted after 30 days.
-   If you publish before 1.6, change that row to: "Kept until the account is deleted."
+   If you publish before applying it, change that row to: "Kept until the account is deleted."
 3. Every statement here must match the Chrome Web Store Privacy tab and what the code does.
    If the code changes, update this page.
 -->

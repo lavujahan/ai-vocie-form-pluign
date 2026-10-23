@@ -3,8 +3,6 @@
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
-  ArrowLeft,
-  ArrowRight,
   Camera,
   Check,
   Copy,
@@ -40,13 +38,12 @@ import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
 
 /**
- * The phone page. One main page shows every field live while the user speaks: the big mic at the
- * bottom takes speech for any fields, each row's mic takes speech for that field only, and its pen
- * types it. Review → Send to desktop is the second page.
+ * The phone page: one page shows every field live while the user speaks. The big mic at the bottom
+ * takes speech for any fields, each row's mic takes speech for that field only, and its pen types it.
+ * Send to desktop sits next to the big mic.
  */
 
 type PieceTag = { seq: number; target: string | null; recordingId: string; part: number };
-type View = 'main' | 'review';
 
 type FieldStatus =
   | { kind: 'recording' }
@@ -96,15 +93,16 @@ export function VoiceSession({ code }: { code: string }) {
 function SessionScreen({ code }: { code: string }) {
   const s = useVoiceSession(code);
   const { t, label, srv } = useI18n();
-  const [view, setView] = useState<View>('main');
   /** The field a row mic is recording into (null: the big mic, speech for any fields). */
   const [recordingTarget, setRecordingTarget] = useState<string | null>(null);
   /** Field whose typing box (pen) is open. */
   const [editing, setEditing] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  /** Bumped when the user says "send it": the review page asks before sending. */
+  /** Bumped when the user says "send it": the bottom bar asks before sending. */
   const [askSend, setAskSend] = useState(0);
+  /** Which "needs you" field the chip goes to next (each tap goes to the next one). */
+  const nextAttention = useRef(0);
   /** Upload field whose photo / file sheet is open. */
   const [fileSheet, setFileSheet] = useState<string | null>(null);
   /** Newest answer / upload time at the last Send (server clock): anything newer is "not sent yet". */
@@ -185,6 +183,30 @@ function SessionScreen({ code }: { code: string }) {
   ).length;
   const steps = useMemo(() => stepStarts(s.fields), [s.fields]);
 
+  const desktop = s.session?.desktop_state ?? 'open';
+  const sent = s.session?.status === 'filled';
+  const resetSeq = s.session?.reset_seq ?? 0;
+  const values = [...s.valueByKey.values()];
+  const files = [...s.files.values()];
+  /** After a Send: answers / uploads changed since then (they can be sent again). */
+  const unsent = sent ? unsentChanges(values, files, resetSeq, sentUpTo, s.session?.desktop_report?.at) : 0;
+  const send = useSend({
+    fields: s.fields,
+    statusOf,
+    sent,
+    unsent,
+    desktop,
+    report: s.session?.desktop_report ?? null,
+    askSend,
+    onSend: async () => {
+      // What this Send covers: anything newer afterwards counts as "not sent yet".
+      const mark = sendWatermark(values, files, resetSeq);
+      const err = await s.complete();
+      if (!err) setSentUpTo(mark || Date.now());
+      return err;
+    },
+  });
+
   // Fields that appeared on the computer later (the form's next step, or shown by an answer).
   const fieldCount = useRef(0);
   useEffect(() => {
@@ -218,7 +240,6 @@ function SessionScreen({ code }: { code: string }) {
       setResetOpen(true);
       window.scrollTo(0, 0);
     } else if (c.command === 'send') {
-      showView('review');
       setAskSend((n) => n + 1);
     } else {
       const left = s.fields.filter((f) => needsInput(f, statusOf(f))).map(label);
@@ -235,7 +256,6 @@ function SessionScreen({ code }: { code: string }) {
     if (err) return srv(err);
     setSentUpTo(null);
     setResetOpen(false);
-    setView('main');
     setNotice(t(scope === 'both' ? 'clearedBoth' : 'clearedPhone'));
     window.scrollTo(0, 0);
     return null;
@@ -264,16 +284,6 @@ function SessionScreen({ code }: { code: string }) {
     setEditing(null);
     const seq = s.takeSeq();
     if (await recorder.start(...pieceTags(seq, fieldKey))) setRecordingTarget(fieldKey);
-  }
-
-  function showView(v: View) {
-    if (recording) {
-      recorder.stop();
-      setRecordingTarget(null);
-    }
-    setEditing(null);
-    setView(v);
-    window.scrollTo(0, 0);
   }
 
   const openFile = (f: SessionField) => {
@@ -318,17 +328,10 @@ function SessionScreen({ code }: { code: string }) {
     );
   }
 
-  const desktop = s.session?.desktop_state ?? 'open';
-  const sent = s.session?.status === 'filled';
-  const resetSeq = s.session?.reset_seq ?? 0;
-  const values = [...s.valueByKey.values()];
-  const files = [...s.files.values()];
-  /** After a Send: answers / uploads changed since then (they can be sent again). */
-  const unsent = sent ? unsentChanges(values, files, resetSeq, sentUpTo, s.session?.desktop_report?.at) : 0;
   const sheetField = fileSheet ? s.fields.find((f) => f.field_key === fileSheet) : undefined;
   const attention = s.fields.filter((f) => needsAttention(f, statusOf(f)));
 
-  /** Banners and sheets shown at the top of either page. */
+  /** Banners and sheets shown above the fields. */
   const top = (
     <>
       <DesktopBanner state={desktop} />
@@ -363,15 +366,13 @@ function SessionScreen({ code }: { code: string }) {
     </>
   );
 
-  /** One field row, the same on both pages. */
-  const item = (f: SessionField, showSource: boolean) => {
+  const item = (f: SessionField) => {
     const st = statusOf(f);
     return (
       <FieldItem
         key={f.id}
         field={f}
         status={st}
-        showSource={showSource}
         elapsed={recorder.elapsed}
         editing={editing === f.field_key}
         onMic={() => micFor(f.field_key)}
@@ -390,39 +391,6 @@ function SessionScreen({ code }: { code: string }) {
 
   const menu = <PageMenu onStartOver={() => (setResetOpen(true), window.scrollTo(0, 0))} />;
 
-  if (view === 'review') {
-    return (
-      <Page>
-        <Header title={t('checkBeforeSending')} onBack={() => showView('main')} menu={menu} />
-        <div className="flex flex-1 flex-col gap-3 px-4 pt-3 pb-6">
-          {top}
-          <ReviewList
-            fields={s.fields}
-            attention={attention}
-            item={item}
-            steps={steps}
-          />
-        </div>
-        <SendBar
-          fields={s.fields}
-          statusOf={statusOf}
-          sent={sent}
-          unsent={unsent}
-          desktop={desktop}
-          report={s.session?.desktop_report ?? null}
-          askSend={askSend}
-          onSend={async () => {
-            // What this Send covers: anything newer afterwards counts as "not sent yet".
-            const mark = sendWatermark(values, files, resetSeq);
-            const err = await s.complete();
-            if (!err) setSentUpTo(mark || Date.now());
-            return err;
-          }}
-        />
-      </Page>
-    );
-  }
-
   return (
     <Page>
       <Header
@@ -439,7 +407,7 @@ function SessionScreen({ code }: { code: string }) {
               <StepDivider step={steps.get(f.id)} />
               {/* Upload fields are listed together under their own heading. */}
               {isFile(f) && (i === 0 || !isFile(s.fields[i - 1])) && <GroupLabel>{t('files')}</GroupLabel>}
-              {item(f, false)}
+              {item(f)}
             </Fragment>
           ))}
         </div>
@@ -454,15 +422,16 @@ function SessionScreen({ code }: { code: string }) {
         failed={failedSpeech}
         onRetryFailed={() => failedSpeech.forEach((u) => u.blob && s.retry(u))}
         onAttention={() => {
-          const first = attention[0];
-          if (first) document.getElementById(`field-${first.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (!attention.length) return;
+          const f = attention[nextAttention.current++ % attention.length];
+          document.getElementById(`field-${f.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }}
         recording={recording}
         elapsed={recorder.elapsed}
         micDisabled={recorder.state === 'unsupported'}
         notice={!recording && recorder.notice ? t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort') : null}
         onMic={toggleMic}
-        onReview={() => showView('review')}
+        send={send}
       />
     </Page>
   );
@@ -494,27 +463,10 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Header({
-  title,
-  subtitle,
-  live,
-  onBack,
-  menu,
-}: {
-  title: string;
-  subtitle?: string;
-  live?: boolean;
-  onBack?: () => void;
-  menu: React.ReactNode;
-}) {
+function Header({ title, subtitle, live, menu }: { title: string; subtitle?: string; live?: boolean; menu: React.ReactNode }) {
   const { t } = useI18n();
   return (
     <header className="sticky top-0 z-20 flex items-start gap-2 border-b border-line bg-page px-4 pt-3 pb-2">
-      {onBack && (
-        <button onClick={onBack} aria-label={t('backToRecording')} className="-ml-2 grid size-10 shrink-0 place-items-center rounded-lg hover:bg-subtle">
-          <ArrowLeft size={20} />
-        </button>
-      )}
       <div className="min-w-0 flex-1 pt-1">
         <h1 className="text-[17px] leading-tight font-semibold text-balance">{title}</h1>
         {subtitle && (
@@ -534,7 +486,7 @@ function Header({
   );
 }
 
-/** ⋯ menu: language and Start over, so the bottom bar keeps just the mic and Review. */
+/** ⋯ menu: language and Start over, so the bottom bar keeps just the mic and Send. */
 function PageMenu({ onStartOver }: { onStartOver: () => void }) {
   const { lang, setLang } = useContext(LangCtx);
   const { t } = useI18n();
@@ -610,7 +562,6 @@ function DesktopBanner({ state }: { state: DesktopState }) {
 function FieldItem({
   field,
   status,
-  showSource,
   elapsed,
   editing,
   onMic,
@@ -622,7 +573,6 @@ function FieldItem({
 }: {
   field: SessionField;
   status: FieldStatus;
-  showSource: boolean;
   elapsed: number;
   editing: boolean;
   onMic: () => void;
@@ -635,7 +585,10 @@ function FieldItem({
   const { t, label } = useI18n();
   const rec = status.kind === 'recording';
   const file = isFile(field);
-  const source = showSource && 'value' in status ? status.value?.source_phrase : null;
+  // What was said, when it differs from the value ("nine eight seven…" → 9876…): to check a wrong value.
+  const said = 'value' in status ? status.value?.source_phrase?.trim() : null;
+  const shown = 'value' in status ? displayValue(field, status.value?.value, t) : '';
+  const source = said && said.toLowerCase() !== shown.toLowerCase() ? said : null;
   const actBase = 'flex w-[52px] min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] font-semibold leading-tight';
 
   return (
@@ -666,7 +619,7 @@ function FieldItem({
             )}
           </div>
           {status.kind === 'pick' && !editing && <p className="mt-0.5 text-xs text-muted">{t('youSaid', { text: status.hint.spoken })}</p>}
-          {source && <p className="mt-0.5 text-xs text-muted">{source}</p>}
+          {source && !rec && <p className="mt-0.5 text-xs text-muted">{t('heard')}: “{source}”</p>}
         </div>
         <div className="flex flex-none gap-1.5">
           {file ? (
@@ -742,7 +695,10 @@ function StatusMarker({ field, status }: { field: SessionField; status: FieldSta
 
 // ---------- main page bottom bar ----------
 
-/** Fixed at the bottom: what was heard, filled / processing / needs-you, the big mic and Review. */
+/**
+ * Fixed at the bottom: what was heard; filled · processing · needs you · not sent yet; the big mic and
+ * Send to desktop, with its confirmation and the computer's reply.
+ */
 function BottomBar({
   heard,
   filled,
@@ -758,14 +714,14 @@ function BottomBar({
   micDisabled,
   notice,
   onMic,
-  onReview,
+  send,
 }: {
   heard: string | null;
   filled: number;
   total: number;
   processing: number;
   attention: number;
-  /** After a Send: changes not sent yet (tap: Review, to send them). */
+  /** After a Send: changes not sent yet. */
   unsent: number;
   failed: LocalUtterance[];
   onRetryFailed: () => void;
@@ -775,7 +731,7 @@ function BottomBar({
   micDisabled: boolean;
   notice: string | null;
   onMic: () => void;
-  onReview: () => void;
+  send: SendState;
 }) {
   const { t, srv } = useI18n();
   const [open, setOpen] = useState(false);
@@ -805,12 +761,23 @@ function BottomBar({
             {t('needYou', { n: attention })}
           </button>
         )}
-        {unsent > 0 && (
-          <button onClick={onReview} className="rounded-full bg-accent-bg px-2.5 py-0.5 font-semibold text-accent-ink">
-            {t('notSentYet', { n: unsent })}
-          </button>
-        )}
+        {unsent > 0 && <span className="rounded-full bg-accent-bg px-2.5 py-0.5 font-semibold text-accent-ink">{t('notSentYet', { n: unsent })}</span>}
       </div>
+      {send.confirm && (
+        <div className="rounded-xl bg-warn-bg px-3 py-2">
+          <p className="text-sm text-warn-ink">
+            {send.missing ? t(send.missing === 1 ? 'missingOne' : 'missingMany', { n: send.missing }) : t('voiceSendConfirm')}
+          </p>
+          <div className="mt-2 flex gap-2">
+            <Button className="flex-1" variant="primary" onClick={send.send}>
+              {t(send.missing ? 'sendAnyway' : 'sendNow')}
+            </Button>
+            <Button variant="ghost" onClick={send.cancel}>
+              {t('cancel')}
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <div className="flex flex-col items-center gap-0.5">
           <button
@@ -827,52 +794,23 @@ function BottomBar({
           </button>
           <span className="text-[11.5px] text-muted tabular-nums">{recording ? fmtTime(elapsed) : t('tapToSpeak')}</span>
         </div>
-        <button onClick={onReview} className="flex min-h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-ink text-base font-bold text-page">
-          {t('review')} <ArrowRight size={18} />
-        </button>
+        {/* While speech is still being turned into answers, Send waits (else they'd miss this Send). */}
+        <SendButton send={send} waiting={recording || processing > 0} />
       </div>
+      {send.error ? <p className="text-xs text-danger-ink">{send.error}</p> : <AckLine ack={send.ack} />}
     </div>
   );
 }
 
-// ---------- review page ----------
+// ---------- Send to desktop ----------
 
-function ReviewList({
-  fields,
-  attention,
-  item,
-  steps,
-}: {
-  fields: SessionField[];
-  attention: SessionField[];
-  item: (f: SessionField, showSource: boolean) => React.ReactNode;
-  steps: Map<string, number>;
-}) {
-  const { t } = useI18n();
-  const rest = fields.filter((f) => !attention.includes(f));
-  return (
-    <div>
-      {attention.length > 0 && (
-        <>
-          <GroupLabel>
-            {t('needsYou')} ({attention.length})
-          </GroupLabel>
-          {attention.map((f) => item(f, true))}
-        </>
-      )}
-      <GroupLabel>{t('allFields')}</GroupLabel>
-      {rest.map((f) => (
-        <Fragment key={f.id}>
-          <StepDivider step={steps.get(f.id)} />
-          {item(f, true)}
-        </Fragment>
-      ))}
-    </div>
-  );
-}
+type SendState = ReturnType<typeof useSend>;
 
-/** Fixed at the bottom of the review page: Send to desktop, with its confirmation and acknowledgement. */
-function SendBar({
+/**
+ * Send to desktop: whether it can be pressed, the confirmation before sending (required fields are
+ * empty, or the send was spoken), and the computer's reply after it.
+ */
+function useSend({
   fields,
   statusOf,
   sent,
@@ -893,10 +831,9 @@ function SendBar({
   askSend: number;
   onSend: () => Promise<string | null>;
 }) {
-  const { t, srv } = useI18n();
+  const { srv } = useI18n();
   const [sending, setSending] = useState(false);
-  const [sendError, setSendError] = useState<string | null>(null);
-  /** Asking before sending: required fields are empty, or the send was spoken. */
+  const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<'missing' | 'voice' | null>(null);
   const [sends, setSends] = useState(0);
   const ack = useDesktopAck(sent, report, sends);
@@ -909,7 +846,7 @@ function SendBar({
     setConfirm(null);
     setSending(true);
     const err = await onSend();
-    setSendError(err ? srv(err) : null);
+    setError(err ? srv(err) : null);
     if (!err) setSends((n) => n + 1);
     setSending(false);
   };
@@ -919,47 +856,44 @@ function SendBar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [askSend]);
 
+  return {
+    sent,
+    unsent,
+    sending,
+    error,
+    confirm,
+    missing,
+    ack,
+    canSend,
+    canResend,
+    send,
+    cancel: () => setConfirm(null),
+    /** Required fields still empty on the first Send: ask first. */
+    press: () => (missing && !sent ? setConfirm('missing') : send()),
+  };
+}
+
+function SendButton({ send: s, waiting }: { send: SendState; waiting: boolean }) {
+  const { t } = useI18n();
   return (
-    <div className="sticky bottom-0 z-20 flex flex-col gap-2 border-t border-line bg-card px-4 pt-2.5 pb-[calc(12px+env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
-      <p className="text-xs text-muted">{t('captchaNote')}</p>
-      {confirm ? (
-        <div className="rounded-xl bg-warn-bg px-3 py-2">
-          <p className="text-sm text-warn-ink">
-            {missing ? t(missing === 1 ? 'missingOne' : 'missingMany', { n: missing }) : t('voiceSendConfirm')}
-          </p>
-          <div className="mt-2 flex gap-2">
-            <Button className="flex-1" variant="primary" onClick={send}>
-              {t(missing ? 'sendAnyway' : 'sendNow')}
-            </Button>
-            <Button variant="ghost" onClick={() => setConfirm(null)}>
-              {t('cancel')}
-            </Button>
-          </div>
-        </div>
+    <button
+      disabled={!s.canSend || s.sending || waiting || !!s.confirm}
+      onClick={s.press}
+      className="flex min-h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-ink px-3 text-center text-base leading-tight font-bold text-page disabled:opacity-50"
+    >
+      {s.sending ? (
+        <Loader2 size={18} className="animate-spin" />
+      ) : s.sent && !s.canResend ? (
+        <>
+          <Check size={18} className="shrink-0" /> {t('sentShort')}
+        </>
       ) : (
-        <button
-          disabled={!canSend || sending}
-          onClick={() => (missing && !sent ? setConfirm('missing') : send())}
-          className="flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-ink text-base font-bold text-page disabled:opacity-50"
-        >
-          {sending ? (
-            <Loader2 size={18} className="animate-spin" />
-          ) : sent && !canResend ? (
-            <>
-              <Check size={18} /> {t('sentShort')}
-            </>
-          ) : (
-            <>
-              <Send size={18} />{' '}
-              {!sent ? t('sendToDesktop') : unsent === 1 ? t('sendOneChange') : unsent > 1 ? t('sendChanges', { n: unsent }) : t('sendAgain')}
-            </>
-          )}
-        </button>
+        <>
+          <Send size={18} className="shrink-0" />
+          {!s.sent ? t('sendToDesktop') : s.unsent === 1 ? t('sendOneChange') : s.unsent > 1 ? t('sendChanges', { n: s.unsent }) : t('sendAgain')}
+        </>
       )}
-      {desktop === 'moved' && <p className="text-xs text-warn-ink">{t('srvTabMoved')}</p>}
-      {sendError && <p className="text-xs text-danger-ink">{sendError}</p>}
-      {sent && !sendError && <AckLine ack={ack} />}
-    </div>
+    </button>
   );
 }
 
@@ -1000,7 +934,11 @@ function AckLine({ ack }: { ack: Ack }) {
   const { t } = useI18n();
   switch (ack.kind) {
     case 'waiting':
-      return <p className="text-xs text-accent-ink">{t('ackWaitingFill')}</p>;
+      return (
+        <p className="text-xs text-accent-ink">
+          {t('ackWaitingFill')} {t('captchaNote')}
+        </p>
+      );
     case 'filled':
       return (
         <p className="text-xs text-live-ink">

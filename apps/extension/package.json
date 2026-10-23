@@ -1,11 +1,12 @@
 {
   "name": "extension",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "zip": "vite build --mode production && node scripts/zip.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "fixtures": "vite --config test-fixtures/vite.config.ts",
