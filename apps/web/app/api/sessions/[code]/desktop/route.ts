@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { DesktopUpdateRequest, type DesktopReport } from '@vff/shared';
 import { requireUser } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
+import { removeSessionFiles } from '@/lib/files/storage';
 import { getSessionByCode } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
@@ -26,5 +27,10 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
   if (body.state && session.desktop_state !== 'closed') patch.desktop_state = body.state;
   if (body.report) patch.desktop_report = { ...body.report, at: new Date().toISOString() } satisfies DesktopReport;
   if (Object.keys(patch).length) must(await db().from('form_sessions').update(patch).eq('id', session.id));
+  // The form tab is closed: nothing can use the uploaded files any more.
+  if (body.state === 'closed') {
+    await removeSessionFiles(session.id);
+    await db().from('field_files').delete().eq('session_id', session.id);
+  }
   return NextResponse.json({ ok: true });
 });

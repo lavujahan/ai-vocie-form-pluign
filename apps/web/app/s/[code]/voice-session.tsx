@@ -1,18 +1,22 @@
 'use client';
 
-import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, Check, ChevronRight, Copy, Loader2, Mic, MonitorX, RotateCcw, Send, Square, WifiOff } from 'lucide-react';
 import {
+  effectiveFileRules,
   LOW_CONFIDENCE,
   type ChoiceHint,
+  type FieldFile,
   type DesktopReport,
   type DesktopState,
   type ResetScope,
   type SessionField,
   type SessionValue,
 } from '@vff/shared';
-import { fieldLabelFor, initialLang, saveLang, serverText, translate, type Lang, type TextKey } from '@/lib/i18n';
+import { initialLang, saveLang, translate, type Lang } from '@/lib/i18n';
 import { Button, Card, FieldRow, Pill, cx } from '@/components/ui';
+import { FileSheet, FileStatusMarker } from './file-upload';
+import { LangCtx, useI18n, type T } from './lang';
 import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
 
@@ -29,24 +33,16 @@ type FieldStatus =
   | { kind: 'missing' }
   | { kind: 'empty' }
   /** The computer couldn't match the spoken value to the dropdown's loaded options: pick one. */
-  | { kind: 'pick'; hint: ChoiceHint; value?: SessionValue };
+  | { kind: 'pick'; hint: ChoiceHint; value?: SessionValue }
+  /** Upload field (photo / PDF): filled from the phone's camera or files, not by voice. */
+  | { kind: 'file'; file?: FieldFile };
 
-// ---------- language (English / Tamil screens) ----------
+const isFile = (f: SessionField) => f.field_type === 'file';
+/** Needs the user's attention before sending: required and empty, a dropdown to pick, a refused upload. */
+const needsInput = (f: SessionField, st: FieldStatus) =>
+  st.kind === 'missing' || st.kind === 'pick' || (st.kind === 'file' && ((!st.file && f.required) || st.file?.status === 'rejected'));
 
-const LangCtx = createContext<{ lang: Lang; setLang: (l: Lang) => void }>({ lang: 'en', setLang: () => {} });
-
-/** Screen text, field labels and server messages in the chosen language. */
-function useI18n() {
-  const { lang } = useContext(LangCtx);
-  return {
-    lang,
-    t: (key: TextKey, vars?: Record<string, string | number>) => translate(lang, key, vars),
-    label: (f: SessionField) => fieldLabelFor(lang, f),
-    srv: (text: string | null | undefined) => serverText(lang, text),
-  };
-}
-
-function displayValue(f: SessionField, v: string | null | undefined, t: ReturnType<typeof useI18n>['t']): string {
+function displayValue(f: SessionField, v: string | null | undefined, t: T): string {
   if (!v) return '';
   if (f.field_type === 'checkbox' && !f.multiple) return v === 'true' ? t('yes') : v === 'false' ? t('no') : v;
   return v;
@@ -82,6 +78,8 @@ function SessionScreen({ code }: { code: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   /** Bumped when the user says "send it": the review page asks before sending. */
   const [askSend, setAskSend] = useState(0);
+  /** Upload field whose photo / file sheet is open. */
+  const [fileSheet, setFileSheet] = useState<string | null>(null);
 
   /**
    * Tags for one recording: the first piece gets `seq`; each extra piece (long recordings are cut
@@ -113,6 +111,7 @@ function SessionScreen({ code }: { code: string }) {
   }, [s.utterances]);
 
   const statusOf = (f: SessionField): FieldStatus => {
+    if (isFile(f)) return { kind: 'file', file: s.files.get(f.id) };
     if (recorder.state === 'recording' && recordingTarget === f.field_key) return { kind: 'recording' };
     const value = s.valueByKey.get(f.field_key);
     const u = latestByField.get(f.field_key);
@@ -135,7 +134,11 @@ function SessionScreen({ code }: { code: string }) {
   const latestTranscript = [...s.utterances.values()]
     .filter((u) => u.transcript)
     .sort((a, b) => b.seq - a.seq)[0]?.transcript;
-  const filledCount = s.fields.filter((f) => s.valueByKey.get(f.field_key)?.value).length;
+  const filledCount = s.fields.filter((f) =>
+    isFile(f) ? ['uploaded', 'filled'].includes(s.files.get(f.id)?.status ?? '') : !!s.valueByKey.get(f.field_key)?.value,
+  ).length;
+  const fileFields = s.fields.filter(isFile);
+  const voiceFields = s.fields.filter((f) => !isFile(f));
   const recordingNow = recorder.state === 'recording';
   const steps = useMemo(() => stepStarts(s.fields), [s.fields]);
 
@@ -175,7 +178,7 @@ function SessionScreen({ code }: { code: string }) {
       showView('review');
       setAskSend((n) => n + 1);
     } else {
-      const left = s.fields.filter((f) => ['missing', 'pick'].includes(statusOf(f).kind)).map(label);
+      const left = s.fields.filter((f) => needsInput(f, statusOf(f))).map(label);
       setNotice(left.length ? t('whatsLeftSome', { list: left.join(', ') }) : t('whatsLeftNone'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,8 +199,9 @@ function SessionScreen({ code }: { code: string }) {
 
   /** Next field (in form order) that still needs a value, after `from`. */
   const nextEmpty = (from: string | null) => {
-    const i = from ? s.fields.findIndex((f) => f.field_key === from) : -1;
-    const rest = [...s.fields.slice(i + 1), ...s.fields.slice(0, Math.max(i, 0))];
+    // Upload fields are filled from the camera, never spoken: field-by-field skips them.
+    const i = from ? voiceFields.findIndex((f) => f.field_key === from) : -1;
+    const rest = [...voiceFields.slice(i + 1), ...voiceFields.slice(0, Math.max(i, 0))];
     return rest.find((f) => !s.valueByKey.get(f.field_key)?.value && !latestByField.has(f.field_key))?.field_key ?? null;
   };
 
@@ -298,9 +302,27 @@ function SessionScreen({ code }: { code: string }) {
     </>
   );
 
-  const startOverSheet = resetOpen && (
-    <StartOverSheet count={filledCount} onCancel={() => setResetOpen(false)} onConfirm={startOver} />
+  const sheetField = fileSheet ? s.fields.find((f) => f.field_key === fileSheet) : undefined;
+  const startOverSheet = (
+    <>
+      {resetOpen && <StartOverSheet count={filledCount} onCancel={() => setResetOpen(false)} onConfirm={startOver} />}
+      {sheetField && (
+        <FileSheet
+          key={sheetField.id}
+          field={sheetField}
+          rules={effectiveFileRules(sheetField)}
+          file={s.files.get(sheetField.id)}
+          onUpload={(file, pages) => s.uploadFile(sheetField.field_key, file, pages)}
+          onClose={() => setFileSheet(null)}
+        />
+      )}
+    </>
   );
+  const openFile = (f: SessionField) => {
+    if (recorder.state === 'recording') recorder.stop();
+    setFileSheet(f.field_key);
+    window.scrollTo(0, 0);
+  };
 
   if (view === 'review') {
     return (
@@ -314,6 +336,7 @@ function SessionScreen({ code }: { code: string }) {
           desktop={desktop}
           report={s.session?.desktop_report ?? null}
           askSend={askSend}
+          onFile={openFile}
           onBack={() => showView('record')}
           onEdit={s.editValue}
           onMic={micFor}
@@ -418,9 +441,20 @@ function SessionScreen({ code }: { code: string }) {
           ))}
       </Card>
 
+      {fileFields.length > 0 && (
+        <Card className="mt-3 py-1">
+          <p className="pt-3 pb-1 text-xs font-semibold tracking-wide text-muted uppercase">{t('files')}</p>
+          {fileFields.map((f) => (
+            <FieldRow key={f.id} label={label(f)} onClick={() => openFile(f)}>
+              <FileStatusMarker field={f} file={s.files.get(f.id)} />
+            </FieldRow>
+          ))}
+        </Card>
+      )}
+
       {mode === 'field' && (
         <Card className="mt-3 py-1">
-          {s.fields.map((f) => (
+          {voiceFields.map((f) => (
             <Fragment key={f.id}>
               <StepDivider step={steps.get(f.id)} />
               <FieldRow
@@ -624,6 +658,8 @@ function StatusMarker({ field, status }: { field: SessionField; status: FieldSta
       return <Pill tone="warn">{t('sayIt')}</Pill>;
     case 'pick':
       return <Pill tone="warn">{t('pickOne')}</Pill>;
+    case 'file':
+      return <FileStatusMarker field={field} file={status.file} />;
     default:
       return <span className="text-muted">—</span>;
   }
@@ -636,6 +672,7 @@ function ReviewView({
   desktop,
   report,
   askSend,
+  onFile,
   onBack,
   onEdit,
   onMic,
@@ -651,6 +688,8 @@ function ReviewView({
   report: DesktopReport | null;
   /** Bumped when the user said "send it": ask before sending. */
   askSend: number;
+  /** Opens the photo / file sheet of an upload field. */
+  onFile: (f: SessionField) => void;
   onBack: () => void;
   onEdit: (key: string, value: string | null) => Promise<string | null>;
   onMic: (key: string) => void;
@@ -669,7 +708,7 @@ function ReviewView({
   const ack = useDesktopAck(sent, report, sends);
   const steps = useMemo(() => stepStarts(fields), [fields]);
 
-  const missing = fields.filter((f) => ['missing', 'pick'].includes(statusOf(f).kind)).length;
+  const missing = fields.filter((f) => needsInput(f, statusOf(f))).length;
   // Sent, but the computer didn't fill (asleep, or the form page changed): allow sending again.
   const canResend = ack.kind === 'timeout' || ack.kind === 'nothing';
   const canSend = desktop === 'open' && (!sent || canResend);
@@ -705,7 +744,8 @@ function ReviewView({
                 label={label(f)}
                 sub={st.kind === 'pick' ? t('youSaid', { text: st.hint.spoken }) : 'value' in st ? st.value?.source_phrase : undefined}
                 onClick={() => {
-                  if (st.kind === 'error' && st.utt.blob) onRetry(st.utt);
+                  if (isFile(f)) onFile(f);
+                  else if (st.kind === 'error' && st.utt.blob) onRetry(st.utt);
                   else setEditing(editing === f.field_key ? null : f.field_key);
                 }}
               >

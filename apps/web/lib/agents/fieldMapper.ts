@@ -9,6 +9,7 @@ import {
   type SanitizedMapping,
 } from './guardrails';
 import { fieldLabel, mapperTools, type AgentField } from './tools';
+import { modelName, runWithUsage, type OnUsage } from './usage';
 
 setTracingDisabled(process.env.NODE_ENV === 'production');
 
@@ -108,12 +109,16 @@ export type MapInput = {
 
 export type MapOutcome = (SanitizedMapping & { empty: false }) | { empty: true };
 
-export async function mapTranscript(input: MapInput, opts: { model?: Model | string } = {}): Promise<MapOutcome> {
+export async function mapTranscript(
+  input: MapInput,
+  opts: { model?: Model | string; onUsage?: OnUsage } = {},
+): Promise<MapOutcome> {
   const fields = input.targetFieldKey ? input.fields.filter((f) => f.field_key === input.targetFieldKey) : input.fields;
+  const model = opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o';
   const agent = new Agent<MapperContext, typeof MappingResult>({
     name: 'Field Mapping Agent',
     instructions: MAPPER_INSTRUCTIONS,
-    model: opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o',
+    model,
     outputType: MappingResult,
     tools: mapperTools(fields),
     inputGuardrails: [emptyTranscriptGuardrail],
@@ -121,10 +126,12 @@ export async function mapTranscript(input: MapInput, opts: { model?: Model | str
   });
 
   try {
-    const result = await run(agent, buildMapperPrompt(input), {
-      context: { transcript: input.transcript, fieldKeys: new Set(fields.map((f) => f.field_key)) },
-      maxTurns: 10,
-    });
+    const result = await runWithUsage(opts.onUsage, modelName(model), () =>
+      run(agent, buildMapperPrompt(input), {
+        context: { transcript: input.transcript, fieldKeys: new Set(fields.map((f) => f.field_key)) },
+        maxTurns: 10,
+      }),
+    );
     if (!result.finalOutput) throw new Error('Mapping agent returned no output');
     return { empty: false, ...sanitizeMapping(result.finalOutput, fields, input.targetFieldKey) };
   } catch (e) {

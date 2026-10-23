@@ -55,7 +55,8 @@ export const POST = route(async (req) => {
   // Desktop tab closed (nothing would be filled), or spoken before a Start over: don't spend AI on it.
   assertPhoneCanWrite(session, seq);
 
-  const fields = await getFieldRows(session.id);
+  // Upload fields are filled from the phone's camera / files, never from speech.
+  const fields = (await getFieldRows(session.id)).filter((f) => f.field_type !== 'file');
   if (target && !fields.some((f) => f.field_key === target)) throw fail(400, 'Unknown target field');
 
   const row = { session_id: session.id, seq, target_field_key: target, status: 'processing' };

@@ -269,6 +269,76 @@ test('multi-step form: fields that appear later are reported (next step, reveale
   await page.close();
 });
 
+test('uploads: the phone’s file goes into plain, button-hidden and drop-zone inputs; the site’s own check is reported', async () => {
+  const url = `${BASE}/upload.html`;
+  const page = await context.newPage();
+  await page.goto(url);
+  await page.waitForSelector('#photo');
+  const echo = async () => JSON.parse((await page.locator('#state-echo').textContent()) ?? '{}');
+  const bytes = (n: number) => Buffer.alloc(n, 7).toString('base64');
+
+  const { schema } = await toContent<{ schema: FormSchemaInput }>(url, { type: 'SCAN' });
+  const files = Object.fromEntries(schema.fields.filter((f) => f.field_type === 'file').map((f) => [f.field_key, f]));
+  expect(Object.keys(files)).toEqual(['photo', 'cert', 'sign']);
+  expect(files.photo).toMatchObject({ label: 'Applicant photo', accept: '.jpg,.jpeg' });
+  expect(files.cert).toMatchObject({ label: 'Community certificate', accept: 'application/pdf' });
+  expect(files.photo.context).toContain('below 50 KB');
+
+  type R = { ok: boolean; error?: string; needsUploadClick?: boolean };
+  const fill = (field_key: string, name: string, mime: string, size: number) =>
+    toContent<R>(url, { type: 'FILL_FILE', field_key, name, mime, base64: bytes(size), site: BASE });
+
+  expect(await fill('photo', 'Applicant_photo.jpg', 'image/jpeg', 20 * 1024)).toEqual({ ok: true, needsUploadClick: false });
+  expect((await echo()).photo).toEqual({ name: 'Applicant_photo.jpg', size: 20 * 1024, type: 'image/jpeg' });
+
+  // Too big for the site: its own check shows an error and drops the file; that is reported back.
+  expect(await fill('photo', 'Applicant_photo.jpg', 'image/jpeg', 60 * 1024)).toEqual({ ok: false, error: 'File size must be below 50 KB' });
+
+  // Hidden input behind "Choose file", with the page's own Upload button to click afterwards.
+  expect(await fill('cert', 'Community_certificate.pdf', 'application/pdf', 300 * 1024)).toEqual({ ok: true, needsUploadClick: true });
+  expect((await echo()).cert).toMatchObject({ name: 'Community_certificate.pdf', type: 'application/pdf' });
+  await page.click('#cert-upload');
+  expect((await echo()).cert_uploaded).toBe(true);
+
+  // Drop zone with its input inside.
+  expect((await fill('sign', 'Signature.png', 'image/png', 4096)).ok).toBe(true);
+  expect((await echo()).sign).toMatchObject({ name: 'Signature.png', size: 4096 });
+
+  // A tab now on another site never gets the file.
+  expect(await toContent(url, { type: 'FILL_FILE', field_key: 'sign', name: 'x.png', mime: 'image/png', base64: bytes(10), site: 'https://elsewhere.example' })).toEqual({
+    ok: false,
+    error: MOVED_REASON,
+  });
+
+  // Start over (phone and computer): the upload fields filled from the phone are emptied.
+  await toContent(url, { type: 'CLEAR_FILES' });
+  expect(await echo()).toMatchObject({ photo: null, cert: null, sign: null });
+  await page.close();
+});
+
+test('phone converter: photo under the size limit, photos into one PDF, rotate, crop, exact size', async () => {
+  test.setTimeout(60_000);
+  const page = await context.newPage();
+  await page.goto(`${BASE}/convert.html`);
+  await page.waitForFunction(() => typeof (window as unknown as { convertTests?: unknown }).convertTests === 'function');
+  const r = (await page.evaluate(() => (window as unknown as { convertTests: () => Promise<unknown> }).convertTests())) as Record<
+    string,
+    Record<string, unknown>
+  > & { bigBytes: number };
+
+  expect(r.bigBytes).toBeGreaterThan(1024 * 1024); // a 3000×2000 "photo" of more than 1 MB…
+  expect(r.small).toMatchObject({ type: 'image/jpeg', problem: null }); // …becomes a JPG within 50 KB
+  expect(r.small.bytes as number).toBeLessThanOrEqual(50 * 1024);
+  expect(r.three).toMatchObject({ type: 'application/pdf', pages: 3, problem: null }); // 3 photos → one PDF within 500 KB
+  expect(r.three.bytes as number).toBeLessThanOrEqual(500 * 1024);
+  expect(r.rotated).toEqual({ w: 200, h: 400 }); // 400×200 turned 90°
+  expect(r.cropped).toEqual({ w: 200, h: 200 }); // left half kept
+  expect(r.exact).toMatchObject({ w: 200, h: 230, problem: null }); // the field's exact pixel size
+  expect(r.tooBigPdf.pages).toBe(3);
+  expect(r.tooBigPdf.problem as string).toMatch(/limit is 100 KB\. Take photos of the pages instead\./);
+  await page.close();
+});
+
 test('cascade: State → District → Village with lists loading after a delay', async () => {
   const url = `${BASE}/cascade.html`;
   const page = await context.newPage();

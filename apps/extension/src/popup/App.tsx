@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { ClipboardList, Clock, Loader2, Mic, Smartphone } from 'lucide-react';
-import { LOCK_MINUTES, LOW_CONFIDENCE, MAX_PIN_ATTEMPTS, type SessionField } from '@vff/shared';
+import { formatSize, LOCK_MINUTES, LOW_CONFIDENCE, MAX_PIN_ATTEMPTS, type FieldFile, type SessionField } from '@vff/shared';
 import { NOT_ON_PAGE, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
 import { Button, Card, FieldRow, Input, LinkButton, Pill } from './ui';
 
@@ -229,13 +229,14 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
   const [error, setError] = useState<string | null>(null);
 
   const valueOf = useMemo(() => new Map(snap.values.map((v) => [v.field_id, v])), [snap.values]);
+  const fileOf = useMemo(() => new Map((snap.files ?? []).map((f) => [f.field_id, f])), [snap.files]);
   const processingKeys = useMemo(
     () => new Set(snap.utterances.filter((u) => u.status === 'processing' && u.target_field_key).map((u) => u.target_field_key!)),
     [snap.utterances],
   );
   const processing = snap.utterances.filter((u) => u.status === 'processing').length;
   const skipped = new Map((state.lastFill?.skipped ?? []).map((x) => [x.field_key, x.reason]));
-  const hasValues = snap.values.some((v) => v.value);
+  const hasValues = snap.values.some((v) => v.value) || (snap.files ?? []).some((f) => f.status === 'uploaded');
 
   async function act(type: 'FILL' | 'UNDO') {
     setBusy(type === 'FILL' ? 'fill' : 'undo');
@@ -262,6 +263,9 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
 
       <div className="mt-2 max-h-72 overflow-y-auto">
         {snap.fields.map((f) => {
+          if (f.field_type === 'file') {
+            return <FileRow key={f.id} field={f} file={fileOf.get(f.id)} needsClick={state.uploadClicks.includes(f.field_key)} />;
+          }
           const v = valueOf.get(f.id);
           const reason = skipped.get(f.field_key);
           let content: React.ReactNode;
@@ -313,5 +317,24 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
         <LinkButton onClick={() => send({ type: 'LOGOUT' })}>Sign out</LinkButton>
       </div>
     </Card>
+  );
+}
+
+/** An upload field: waiting for the phone, received, in the page (maybe needing the page's Upload button), or refused. */
+function FileRow({ field, file, needsClick }: { field: SessionField; file: FieldFile | undefined; needsClick: boolean }) {
+  let content: React.ReactNode;
+  let sub: React.ReactNode;
+  if (!file) content = field.required ? <Pill tone="warn">From phone</Pill> : <span className="text-muted">Waiting for phone</span>;
+  else if (file.status === 'rejected') {
+    content = <Pill tone="warn">Refused</Pill>;
+    sub = <span className="text-danger-ink">Refused by the site: {file.reason ?? 'check its size / type rules'}</span>;
+  } else if (file.status === 'filled') {
+    content = `✓ ${formatSize(file.bytes)}`;
+    if (needsClick) sub = <span className="text-accent-ink">Click “Upload” next to this field on the page</span>;
+  } else content = <span className="text-muted">Received · {formatSize(file.bytes)}</span>;
+  return (
+    <FieldRow label={field.label} sub={sub}>
+      {content}
+    </FieldRow>
   );
 }

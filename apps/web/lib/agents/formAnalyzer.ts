@@ -1,6 +1,7 @@
 import { Agent, run, setTracingDisabled, type Model } from '@openai/agents';
-import { FormAnalysis, type FieldAnalysis, type FormSchema } from '@vff/shared';
+import { FormAnalysis, sanitizeFileRules, type FieldAnalysis, type FormSchema } from '@vff/shared';
 import { analyzerTools } from './tools';
+import { modelName, runWithUsage, type OnUsage } from './usage';
 
 setTracingDisabled(process.env.NODE_ENV === 'production');
 
@@ -19,6 +20,13 @@ For every field in the input (use the exact field_key; include every field once)
 - output_script: "ta" only if the label asks for Tamil (e.g. "Name in Tamil", "தமிழில் பெயர்"); otherwise "en".
 - label_ta: the label in simple, common Tamil for someone reading it on a phone ("Father's name" → "தந்தை பெயர்", "Mobile number" → "கைபேசி எண்", "Date of birth" → "பிறந்த தேதி", "Taluk" → "வட்டம்"). Tamil script only; keep it short; use the English word in Tamil letters when that is what people say ("ஆதார் எண்").
 
+- file_rules: only for upload fields (type file), else null. Read them from the accept attribute and the text near the field or anywhere on the page ("Photo: JPG, below 50 KB, 3.5 x 4.5 cm", "Upload community certificate in PDF, max 1 MB"):
+  kind = photo (a person's photo), signature, or document (certificates, ID cards, any scan);
+  formats = the allowed file types (jpg / png / pdf), empty if not stated;
+  max_kb / min_kb = stated size limits in KB (1 MB = 1024 KB), null if not stated; never guess a size;
+  max_pages = for PDFs, if stated; width_px / height_px = only if stated in pixels;
+  note = any other stated requirement, short ("white background", "self-attested").
+
 Use get_field_context when a field's label is unclear.`;
 
 function describeSchema(schema: FormSchema): string {
@@ -30,7 +38,8 @@ function describeSchema(schema: FormSchema): string {
     if (f.pattern) parts.push(`pattern: ${f.pattern}`);
     if (f.min || f.max) parts.push(`min/max: ${f.min ?? ''}/${f.max ?? ''}`);
     if (f.group_key) parts.push(`group: ${f.group_key}`);
-    if (f.context) parts.push(`nearby: ${JSON.stringify(f.context.slice(0, 200))}`);
+    if (f.accept) parts.push(`accept: ${f.accept}`);
+    if (f.context) parts.push(`nearby: ${JSON.stringify(f.context.slice(0, f.field_type === 'file' ? 400 : 200))}`);
     return `- ${parts.join(' · ')}`;
   });
   return [
@@ -44,15 +53,19 @@ function describeSchema(schema: FormSchema): string {
     .join('\n\n');
 }
 
-export async function analyzeForm(schema: FormSchema, opts: { model?: Model | string } = {}): Promise<FormAnalysis> {
+export async function analyzeForm(
+  schema: FormSchema,
+  opts: { model?: Model | string; onUsage?: OnUsage } = {},
+): Promise<FormAnalysis> {
+  const model = opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o';
   const agent = new Agent({
     name: 'Form Analyzer Agent',
     instructions: ANALYZER_INSTRUCTIONS,
-    model: opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o',
+    model,
     outputType: FormAnalysis,
     tools: analyzerTools(schema.fields),
   });
-  const result = await run(agent, describeSchema(schema), { maxTurns: 6 });
+  const result = await runWithUsage(opts.onUsage, modelName(model), () => run(agent, describeSchema(schema), { maxTurns: 6 }));
   if (!result.finalOutput) throw new Error('Form analyzer returned no output');
   return result.finalOutput;
 }
@@ -81,6 +94,7 @@ export function cleanTamilLabel(s: string | null | undefined): string | null {
 /** Keeps only known fields, drops broken regexes and dangling depends_on links. */
 export function sanitizeAnalysis(analysis: FormAnalysis, schema: FormSchema): FieldAnalysis[] {
   const keys = new Set(schema.fields.map((f) => f.field_key));
+  const byKey = new Map(schema.fields.map((f) => [f.field_key, f]));
   const seen = new Set<string>();
   const out: FieldAnalysis[] = [];
   for (const f of analysis.fields) {
@@ -90,6 +104,8 @@ export function sanitizeAnalysis(analysis: FormAnalysis, schema: FormSchema): Fi
       ...f,
       clean_label: f.clean_label.trim().slice(0, 200),
       label_ta: cleanTamilLabel(f.label_ta) ?? '',
+      // Upload rules only for upload fields; the accept attribute wins over what was read from the text.
+      file_rules: byKey.get(f.field_key)?.field_type === 'file' ? sanitizeFileRules(f.file_rules, byKey.get(f.field_key)?.accept) : null,
       depends_on: f.depends_on && keys.has(f.depends_on) && f.depends_on !== f.field_key ? f.depends_on : null,
       validation: { ...f.validation, regex: regexOk(f.validation.regex) },
     });
@@ -108,7 +124,8 @@ export async function analyzeAndStore(sessionId: string, schema: FormSchema, opt
     const analysis = await analyzeForm(schema);
     const fields = sanitizeAnalysis(analysis, schema);
     const detectedRequired = new Map(schema.fields.map((f) => [f.field_key, f.required]));
-    const save = (f: FieldAnalysis, withTamil: boolean) =>
+    // withNew: the columns of migrations 0006/0007 (Tamil label, upload rules).
+    const save = (f: FieldAnalysis, withNew: boolean) =>
       db()
         .from('form_fields')
         .update({
@@ -119,14 +136,15 @@ export async function analyzeAndStore(sessionId: string, schema: FormSchema, opt
           depends_on: f.depends_on,
           ...(opts.partial ? {} : { step_index: f.step_index }),
           output_script: f.output_script,
-          ...(withTamil && f.label_ta ? { label_ta: f.label_ta } : {}),
+          ...(withNew && f.label_ta ? { label_ta: f.label_ta } : {}),
+          ...(withNew && f.file_rules ? { file_rules: f.file_rules } : {}),
         })
         .eq('session_id', sessionId)
         .eq('field_key', f.field_key);
     await Promise.all(
       fields.map(async (f) => {
         const res = await save(f, true);
-        // Migration 0006 (Tamil labels) not applied yet: save everything else.
+        // Migrations 0006 / 0007 not applied yet: save everything else.
         if (res.error?.code === 'PGRST204') await save(f, false);
       }),
     );

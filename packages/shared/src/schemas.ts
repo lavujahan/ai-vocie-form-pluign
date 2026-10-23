@@ -16,6 +16,8 @@ export const FieldType = z.enum([
   'date',
   'contenteditable',
   'combobox',
+  /** File upload (photo / PDF): filled from the phone's camera or files, never by voice. */
+  'file',
 ]);
 export type FieldType = z.infer<typeof FieldType>;
 
@@ -44,6 +46,8 @@ export const FieldDescriptor = z.object({
   placeholder: z.string().nullable().default(null),
   /** Short text around the field (help text, error messages). */
   context: z.string().max(1000).nullable().default(null),
+  /** File inputs: the `accept` attribute (".pdf", "image/*", …). */
+  accept: z.string().max(300).nullable().default(null),
 });
 export type FieldDescriptor = z.infer<typeof FieldDescriptor>;
 export type FieldDescriptorInput = z.input<typeof FieldDescriptor>;
@@ -103,6 +107,20 @@ export const ValidationRules = z.object({
 });
 export type ValidationRules = z.infer<typeof ValidationRules>;
 
+/** What a file upload field takes, read from `accept` and the page text by the Form Analyzer. */
+export const FileRules = z.object({
+  kind: z.enum(['photo', 'signature', 'document']),
+  formats: z.array(z.enum(['jpg', 'png', 'pdf'])).describe('Allowed formats; empty if the page does not say'),
+  max_kb: z.number().nullable().describe('Largest allowed size in KB, only if the page states it'),
+  min_kb: z.number().nullable(),
+  max_pages: z.number().int().nullable().describe('PDFs: most pages allowed, if stated'),
+  width_px: z.number().int().nullable().describe('Required image width in pixels, if stated'),
+  height_px: z.number().int().nullable(),
+  note: z.string().nullable().describe('Other stated requirements, e.g. "Passport size, white background"'),
+});
+export type FileRules = z.infer<typeof FileRules>;
+export type FileFormat = FileRules['formats'][number];
+
 export const FieldAnalysis = z.object({
   field_key: z.string(),
   clean_label: z.string(),
@@ -113,6 +131,7 @@ export const FieldAnalysis = z.object({
   step_index: z.number().int(),
   output_script: OutputScript,
   label_ta: z.string().describe("Short Tamil translation of the label for the phone screen, e.g. \"தந்தை பெயர்\" for Father's name"),
+  file_rules: FileRules.nullable().describe('Only for file upload fields (type file); null for every other field'),
 });
 export type FieldAnalysis = z.infer<typeof FieldAnalysis>;
 
@@ -248,6 +267,25 @@ export type SessionField = {
   choice_hint: ChoiceHint | null;
   /** Tamil translation of the label (phone screens in Tamil). */
   label_ta?: string | null;
+  /** File upload fields: the input's `accept` and the rules read from the page. */
+  accept?: string | null;
+  file_rules?: FileRules | null;
+};
+
+export type FileStatus = 'uploaded' | 'filled' | 'rejected';
+
+/** A file the phone uploaded for a file field (one live file per field; a newer one replaces it). */
+export type FieldFile = {
+  id: string;
+  field_id: string;
+  file_name: string;
+  mime: string;
+  bytes: number;
+  pages: number | null;
+  status: FileStatus;
+  /** Why the website refused it (its own size/type check), when rejected. */
+  reason: string | null;
+  created_at: string;
 };
 
 export type SessionValue = {
@@ -314,7 +352,37 @@ export type SessionSnapshot = {
   fields: SessionField[];
   values: SessionValue[];
   utterances: UtteranceRow[];
+  /** Files uploaded from the phone (migration 0007). */
+  files?: FieldFile[];
 };
+
+export const FileMime = z.enum(['image/jpeg', 'image/png', 'application/pdf']);
+
+/** Phone → server: ask where to upload a file it has prepared (checked against the field's rules). */
+export const FileUploadUrlRequest = z.object({
+  field_key: z.string(),
+  mime: FileMime,
+  bytes: z.number().int().min(1),
+  pages: z.number().int().min(1).nullable().default(null),
+});
+export type FileUploadUrlRequest = z.infer<typeof FileUploadUrlRequest>;
+export type FileUploadUrlResponse = { path: string; token: string };
+
+/** Phone → server: the upload finished; the server checks the stored file before the computer sees it. */
+export const FileCommitRequest = z.object({
+  field_key: z.string(),
+  path: z.string().min(1).max(500),
+  file_name: z.string().min(1).max(200),
+  pages: z.number().int().min(1).nullable().default(null),
+});
+export type FileCommitRequest = z.infer<typeof FileCommitRequest>;
+
+/** Extension → server: the file was put into the page (it is then deleted), or the website refused it. */
+export const FileStatusRequest = z.object({
+  status: z.enum(['filled', 'rejected']),
+  reason: z.string().max(500).nullable().default(null),
+});
+export type FileStatusRequest = z.infer<typeof FileStatusRequest>;
 
 export const PatchValuesRequest = z.object({
   /** The phone's next seq: manual edits win over older speech. */

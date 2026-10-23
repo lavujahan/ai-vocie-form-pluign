@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql` and `0006_corrections_tamil.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql` and `0007_file_uploads.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -122,6 +122,29 @@ One signed-in user can fill several forms at once, for example two CAN registrat
 - **Limit:** 5 active forms per browser.
 - **Sign out** ends all of them.
 
+## Photo and PDF uploads (migration `0007`)
+
+Upload fields are filled from the phone's camera or files, never by voice.
+
+1. **Detect** (`apps/extension/src/content/detector.ts`): the extension finds `<input type=file>`, including inputs hidden behind a styled "Choose file" button, a label or a drop zone. It reads the `accept` attribute, the text around the field ("JPG only, below 50 KB"), and any separate **Upload** button the page needs.
+2. **Read the rules:** the Form Analyzer turns that into `file_rules`: kind, formats, max/min KB, max pages, pixel size, and a note. `accept` always wins over what the AI read. The shared helpers are in `packages/shared/src/files.ts`.
+3. **Phone:** a "Photos and documents" card lists the upload fields, like "Applicant photo · JPG · max 50 KB". **Take photo** or **Choose file**; rotate, crop, **Add page**; then **Make file**.
+   - Conversion happens on the phone (`apps/web/lib/files/convert.ts`): a JPG within the size limit (quality search, then resize), several photos as one A4 PDF within the limit (pdf-lib, loaded only when needed), or the exact pixel size if the page asks for one.
+   - Re-encoding drops EXIF/GPS data.
+   - A PDF picked on the phone is sent as it is; if it is too big, the phone asks for photos of the pages instead.
+4. **Upload:** `POST /api/sessions/[code]/files/upload-url` checks the file against the rules and returns a one-time signed URL. The phone uploads straight to the private Storage bucket `form-files`, which avoids API body limits. Then `POST /files` makes the server check what arrived (real type from the first bytes, real size) before the computer sees it. A newer upload replaces the older one.
+5. **Desktop:** the extension downloads the file through a 60-second signed link and puts it into the page as a real file (`DataTransfer` + `input.files` + change events), so the site's own checks run.
+   - If the site shows an error or drops the file, the phone shows "The website refused it: …".
+   - If the page has its own **Upload** button, it is highlighted and the popup says to click it.
+6. **Deletion:**
+   - The stored file is deleted as soon as the computer reports it filled or refused.
+   - It is also deleted on Start over and when the form tab closes.
+   - Files from expired sessions are purged after each new session, plus a daily Vercel Cron (`/api/cron/purge-files`, needs `CRON_SECRET`).
+
+**Not supported:** in-page webcam widgets, upload fields inside another site's iframe, shrinking an existing PDF that is too big, and automatic document edge detection.
+
+Test pages: `test-fixtures/upload.html` (plain input with its own size check, hidden input + Upload button, drop zone) and `test-fixtures/convert.html` (the phone converter in a real browser).
+
 ## Spoken corrections and commands
 
 The Field Mapping Agent also sees the **last 3 recordings** and the fields they set. That lets corrections that don't name a field work. All of these go through the same AI call, with no extra agent and no extra delay:
@@ -208,6 +231,7 @@ The extension reports the form tab's state to the phone (`PATCH /api/sessions/[c
 ## Privacy
 
 - Audio is never stored. It is only held in memory while one request runs.
+- **Uploaded photos and PDFs** live in a private bucket that clients can't list or read. Upload and download links work for one file (download links for 60 seconds). Files are deleted as soon as the computer has them, on Start over, when the form tab closes, and at the latest when the session expires. Re-encoding on the phone removes EXIF/GPS data, and file contents are never logged.
 - Transcripts and values are purged by `pg_cron` about 40 minutes after a session is created.
 - Clients can't write to the database directly; every write goes through the API using the service role.
 - RLS limits each client to reading its own session.

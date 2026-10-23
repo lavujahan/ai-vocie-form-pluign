@@ -11,6 +11,11 @@ export type RegistryEntry = {
   group?: { el: HTMLInputElement; option: FieldOption }[];
   /** Custom dropdown (react-select, MUI, choices.js, select2…): filled through its own UI. */
   widget?: Widget;
+  /**
+   * Upload field: what the user clicks to choose a file (the input itself, its label, a styled button
+   * or a drop zone), and the page's own "Upload" button if it needs one after choosing (JSF / PrimeFaces).
+   */
+  file?: { trigger: HTMLElement | null; uploadButton: HTMLElement | null };
 };
 export type Registry = Map<string, RegistryEntry>;
 
@@ -26,7 +31,7 @@ const CANDIDATES = [
   'button[aria-haspopup="listbox"]',
 ].join(',');
 
-const SKIP_INPUT_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'file', 'password', 'search', 'range', 'color']);
+const SKIP_INPUT_TYPES = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'password', 'search', 'range', 'color']);
 const SKIP_NAME = /csrf|xsrf|token|captcha|honeypot|recaptcha|authenticity/i;
 
 /** Text of an element without the text of form controls inside it (e.g. a <label> wrapping a <select>). */
@@ -166,6 +171,7 @@ function fieldTypeOf(el: HTMLElement): FieldType | null {
     if (t === 'tel') return 'tel';
     if (t === 'number') return 'number';
     if (t === 'url') return 'url';
+    if (t === 'file') return 'file';
     if (t === 'date' || t === 'datetime-local' || t === 'month') return 'date';
     if (el.getAttribute('role') === 'combobox') return 'text';
     return 'text';
@@ -214,6 +220,58 @@ function collectRoots(doc: Document): (Document | ShadowRoot)[] {
   return roots;
 }
 
+const CHOOSE_TEXT = /choose|browse|select|upload|attach|add (a )?(file|photo|document)|drag|drop|பதிவேற்று|தேர்ந்தெடு|இணை/i;
+const UPLOAD_TEXT = /\bupload\b|பதிவேற்று/i;
+const buttonText = (b: Element) => clean(b.textContent) || (b as HTMLInputElement).value || b.getAttribute('aria-label') || '';
+
+const ownsOtherFileInput = (n: Element, input: HTMLInputElement) =>
+  [...n.querySelectorAll('input[type="file"]')].some((other) => other !== input);
+
+/**
+ * What the user clicks to choose a file. File inputs are often hidden behind a styled button, a label
+ * or a drop zone; an input that is hidden with nothing visible to click is not a field on the page.
+ */
+function fileTrigger(input: HTMLInputElement): HTMLElement | null {
+  if (!isHidden(input)) return input;
+  const root = input.getRootNode() as Document | ShadowRoot;
+  const byFor = input.id ? root.querySelector?.<HTMLElement>(`label[for="${cssEscape(input.id)}"]`) : null;
+  if (byFor && !isHidden(byFor)) return byFor;
+  const wrap = input.closest('label');
+  if (wrap && !isHidden(wrap)) return wrap;
+  for (let n = input.parentElement, d = 0; n && d < 4; n = n.parentElement, d++) {
+    // A block holding another upload field: its buttons belong to that field.
+    if (ownsOtherFileInput(n, input)) break;
+    if (isHidden(n)) continue;
+    const btn = [...n.querySelectorAll<HTMLElement>('button, [role="button"], a, label')].find((b) => !isHidden(b) && CHOOSE_TEXT.test(buttonText(b)));
+    if (btn) return btn;
+    // A drop zone: the visible box around the input that says "drag / drop".
+    if (/drag|drop/i.test(clean(n.textContent))) return n;
+  }
+  return null;
+}
+
+/** The page's own "Upload" button next to the field (sites that upload only when it is clicked). */
+function uploadButtonNear(input: HTMLInputElement, trigger: HTMLElement | null): HTMLElement | null {
+  for (let n = input.parentElement, d = 0; n && d < 3; n = n.parentElement, d++) {
+    if (ownsOtherFileInput(n, input)) break;
+    const btn = [...n.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, [role="button"]')].find(
+      (b) => b !== trigger && !b.contains(input) && !isHidden(b) && UPLOAD_TEXT.test(buttonText(b)) && !CHOOSE_TEXT.test(buttonText(b).replace(UPLOAD_TEXT, '')),
+    );
+    if (btn) return btn;
+  }
+  return null;
+}
+
+/** Text around an upload field ("JPG only, below 50 KB"), so the analyzer can read its rules. */
+function fileContext(input: HTMLElement): string | null {
+  const own = contextText(input);
+  for (let n = input.parentElement, d = 0; n && d < 4; n = n.parentElement, d++) {
+    const t = textWithoutControls(n);
+    if (t.length > 20 || d === 3) return [own, t.slice(0, 500)].filter(Boolean).join(' · ').slice(0, 900) || null;
+  }
+  return own;
+}
+
 function contextText(el: HTMLElement): string | null {
   const ids = el.getAttribute('aria-describedby');
   const t = ids ? byIds(el.getRootNode() as Document, ids) : '';
@@ -252,7 +310,9 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
       if (((el as HTMLInputElement).disabled && el.tagName !== 'SELECT') || (el as HTMLInputElement).readOnly) continue;
       const name = el.getAttribute('name') ?? '';
       if (SKIP_NAME.test(name) || SKIP_NAME.test(el.id)) continue;
-      if (isHidden(el)) continue;
+      // Upload fields are kept when something visible opens them (styled button, label, drop zone).
+      const trigger = type === 'file' ? fileTrigger(el as HTMLInputElement) : null;
+      if (type === 'file' ? !trigger : isHidden(el)) continue;
       // Contenteditable children of an editable region are covered by their parent.
       if (type === 'contenteditable' && el.parentElement?.closest('[contenteditable=""],[contenteditable="true"]')) continue;
 
@@ -290,13 +350,20 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
         }
       }
 
-      const label = resolveLabel(el);
+      let label = resolveLabel(el);
+      // A hidden upload input has no useful label of its own ("Choose file" is the button's): use the
+      // text before its button.
+      const weak = !label || label === name || label === el.id || (label.length < 30 && CHOOSE_TEXT.test(label));
+      if (type === 'file' && trigger && trigger !== el && weak) {
+        label = nearbyText(trigger) || clean(trigger.textContent) || label;
+      }
       const raw = rawLabelText(el);
       const key = uniqueKey(el.id || name || `path:${domPath(el)}`);
       const input = el as HTMLInputElement;
       const fieldsetLegend = el.closest('fieldset')?.querySelector('legend')?.textContent;
       registry.set(key, {
         el,
+        ...(type === 'file' ? { file: { trigger, uploadButton: uploadButtonNear(input, trigger) } } : {}),
         descriptor: {
           field_key: key,
           label: label || key,
@@ -305,13 +372,14 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
           options: el.tagName === 'SELECT' ? selectOptions(el as HTMLSelectElement) : [],
           dynamic_options:
             el.tagName === 'SELECT' && ((el as HTMLSelectElement).disabled || selectOptions(el as HTMLSelectElement).length === 0),
-          multiple: el.tagName === 'SELECT' ? (el as HTMLSelectElement).multiple : false,
+          multiple: el.tagName === 'SELECT' ? (el as HTMLSelectElement).multiple : type === 'file' ? input.multiple : false,
           group_key: clean(fieldsetLegend) || null,
           min: input.min || null,
           max: input.max || null,
           pattern: input.pattern || null,
           placeholder: el.getAttribute('placeholder') || null,
-          context: contextText(el),
+          context: type === 'file' ? fileContext(el) : contextText(el),
+          accept: type === 'file' ? input.accept || null : null,
         },
       });
     }

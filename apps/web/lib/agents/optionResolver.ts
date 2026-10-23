@@ -1,6 +1,7 @@
 import { Agent, run, setTracingDisabled, type Model } from '@openai/agents';
 import { z } from 'zod';
 import { matchOption, type FieldOption, type ResolveOptionResponse } from '@vff/shared';
+import { modelName, runWithUsage, type OnUsage } from './usage';
 
 setTracingDisabled(process.env.NODE_ENV === 'production');
 
@@ -29,7 +30,7 @@ const MAX_OPTIONS = 400;
 
 export async function resolveOption(
   input: { label: string; spoken: string; options: FieldOption[] },
-  opts: { model?: Model | string } = {},
+  opts: { model?: Model | string; onUsage?: OnUsage } = {},
 ): Promise<ResolveOptionResponse> {
   let options = input.options;
   if (options.length > MAX_OPTIONS) {
@@ -42,14 +43,15 @@ export async function resolveOption(
     options = [...new Map([...ranked.map((r) => r.option), ...scored].map((o) => [o.label, o])).values()];
   }
 
+  const model = opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o';
   const agent = new Agent({
     name: 'Option Resolver Agent',
     instructions: RESOLVER_INSTRUCTIONS,
-    model: opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o',
+    model,
     outputType: Output,
   });
   const prompt = `Field: ${input.label}\nSpoken value: ${JSON.stringify(input.spoken)}\nOptions:\n${options.map((o) => `- ${o.label}`).join('\n')}`;
-  const result = await run(agent, prompt, { maxTurns: 2 });
+  const result = await runWithUsage(opts.onUsage, modelName(model), () => run(agent, prompt, { maxTurns: 2 }));
   const out = result.finalOutput;
   if (!out) return { choice: null, ambiguous: false, top: [] };
 

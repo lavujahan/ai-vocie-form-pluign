@@ -20,6 +20,8 @@ export default defineConfig({
         dropdowns: resolve(__dirname, 'dropdowns.html'),
         wizard: resolve(__dirname, 'wizard.html'),
         wizard2: resolve(__dirname, 'wizard-2.html'),
+        upload: resolve(__dirname, 'upload.html'),
+        convert: resolve(__dirname, 'convert.html'),
       },
     },
   },

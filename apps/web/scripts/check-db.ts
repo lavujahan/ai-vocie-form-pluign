@@ -130,6 +130,37 @@ try {
   const write = await asToken(await userToken(a.id)).from('field_values').update({ value: 'hacked' }).eq('session_id', session.id).select('id');
   check('RLS: clients cannot write values', (write.data?.length ?? 0) === 0);
 
+  // ---- File uploads (migration 0007): private bucket, files only readable by their own session ----
+  const bucketInfo = await admin.storage.getBucket('form-files');
+  check('Uploads: storage bucket form-files exists and is private (apply migration 0007)', bucketInfo.data?.public === false, bucketInfo.error?.message);
+  const { data: fileField } = await admin
+    .from('form_fields')
+    .insert({ session_id: session.id, field_key: 'photo', label: 'Photo', field_type: 'file', position: 1 })
+    .select('id')
+    .single();
+  if (fileField) {
+    const path = `${session.id}/photo/check-db.jpg`;
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46]);
+    const up = await admin.storage.from('form-files').upload(path, jpeg, { contentType: 'image/jpeg', upsert: true });
+    check('Uploads: the API can store a file', !up.error, up.error?.message);
+    const row = await admin
+      .from('field_files')
+      .insert({ session_id: session.id, field_id: fileField.id, path, file_name: 'Photo.jpg', mime: 'image/jpeg', bytes: jpeg.length })
+      .select('id')
+      .single();
+    check('Uploads: field_files table exists (apply migration 0007)', !row.error, row.error?.message);
+    const own = await asToken(await phoneToken(session.id)).from('field_files').select('id').eq('session_id', session.id);
+    check('Uploads RLS: the paired phone sees its file', own.data?.length === 1, own.error?.message);
+    const foreign = await asToken(await phoneToken(crypto.randomUUID())).from('field_files').select('id').eq('session_id', session.id);
+    check('Uploads RLS: another phone sees nothing', !foreign.error && foreign.data?.length === 0, foreign.error?.message);
+    const direct = await asToken(await phoneToken(session.id)).storage.from('form-files').download(path);
+    check('Uploads: a client cannot download from the bucket without a signed link', !!direct.error);
+    const signed = await admin.storage.from('form-files').createSignedUrl(path, 60);
+    const viaLink = signed.data ? await fetch(signed.data.signedUrl) : null;
+    check('Uploads: a 60-second signed link downloads it', viaLink?.ok === true, signed.error?.message);
+    await admin.storage.from('form-files').remove([path]);
+  }
+
   // ---- Realtime: the phone and the extension get value changes pushed ----
   for (const [who, token] of [
     ['phone', await phoneToken(session.id)],

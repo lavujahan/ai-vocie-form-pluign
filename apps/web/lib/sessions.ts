@@ -3,6 +3,7 @@ import type {
   ChoiceHint,
   FieldDescriptor,
   FieldOption,
+  FileRules,
   FieldType,
   OutputScript,
   SemanticType,
@@ -13,6 +14,7 @@ import type {
   UtteranceRow,
   ValidationRules,
 } from '@vff/shared';
+import { getFiles } from './files/storage';
 import { fail, must } from './http';
 import { phoneWriteBlock } from './session-rules';
 import { db } from './supabase-admin';
@@ -54,6 +56,9 @@ export type FieldRow = {
   choice_hint: ChoiceHint | null;
   /** Migration 0006. */
   label_ta?: string | null;
+  /** Migration 0007 (file uploads). */
+  accept?: string | null;
+  file_rules?: FileRules | null;
 };
 
 const BASE_COLUMNS =
@@ -96,17 +101,22 @@ export function fieldRows(sessionId: string, fields: FieldDescriptor[], startPos
     pattern: f.pattern,
     placeholder: f.placeholder,
     context: f.context,
+    accept: f.accept,
     position: startPosition + i,
   }));
 }
 
-/** Inserts field rows and returns them. Works before migration 0004 too (without `dynamic_options`). */
+/**
+ * Inserts field rows and returns them. Works before migrations 0004 / 0007 too: columns they add
+ * (`dynamic_options`, `accept`) are left out when the database doesn't know them yet.
+ */
 export async function insertFieldRows(rows: ReturnType<typeof fieldRows>): Promise<FieldRow[]> {
   let res = await db().from('form_fields').insert(rows).select('*');
+  if (res.error?.code === 'PGRST204') res = await db().from('form_fields').insert(rows.map(({ accept: _a, ...r }) => r)).select('*');
   if (res.error?.code === 'PGRST204') {
     res = await db()
       .from('form_fields')
-      .insert(rows.map(({ dynamic_options: _d, ...r }) => r))
+      .insert(rows.map(({ accept: _a, dynamic_options: _d, ...r }) => r))
       .select('*');
   }
   return must(res) as FieldRow[];
@@ -146,6 +156,7 @@ export function toSessionField(f: FieldRow): SessionField {
     dynamic_options: f.dynamic_options ?? false,
     choice_hint: f.choice_hint ?? null,
     label_ta: f.label_ta ?? null,
+    ...(f.field_type === 'file' ? { accept: f.accept ?? null, file_rules: f.file_rules ?? null } : {}),
   };
 }
 
@@ -213,12 +224,14 @@ export async function getUtterances(sessionId: string): Promise<UtteranceRow[]> 
 }
 
 export async function getSnapshot(session: SessionRow): Promise<SessionSnapshot> {
-  const [fields, values, utterances] = await Promise.all([
+  const [fields, values, utterances, files] = await Promise.all([
     getFieldRows(session.id),
     getValues(session.id),
     getUtterances(session.id),
+    getFiles(session.id),
   ]);
   return {
+    files,
     session: toSessionInfo(session),
     fields: fields.map(toSessionField),
     values,

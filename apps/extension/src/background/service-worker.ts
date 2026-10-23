@@ -2,6 +2,7 @@ import { createClient, type RealtimeChannel, type SupabaseClient } from '@supaba
 import type {
   AddFieldsResponse,
   CreateSessionResponse,
+  FieldFile,
   DesktopUpdateRequest,
   FieldOption,
   LoginResponse,
@@ -24,6 +25,7 @@ import {
   type ContentRequest,
   type ExtState,
   type FieldsChangedMessage,
+  type FileFillResult,
   type FillResult,
   type PageLoadedMessage,
   type PopupRequest,
@@ -73,6 +75,7 @@ function publicState(tabId: number | undefined): ExtState {
     canUndo: t?.canUndo ?? false,
     otherSessions: otherSessions(state.tabs, t ? tabId : undefined),
     notice: t?.notice ?? null,
+    uploadClicks: t?.uploadClicks ?? [],
   };
 }
 
@@ -255,6 +258,78 @@ async function fillIntoPage(tabId: number, only?: string[]) {
   }
 }
 
+const filesInFlight = new Set<string>();
+
+function toBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/**
+ * Puts photos / PDFs uploaded from the phone into the page's upload fields: a 60-second link from the
+ * API, the bytes, then the page. The server deletes its copy once told the result ('filled', or
+ * 'rejected' with the website's own message, which the phone shows).
+ */
+async function fillFiles(tabId: number, only?: string[]) {
+  const s = tabOf(tabId)?.session;
+  if (!s?.snapshot || !state.auth) return;
+  const keyById = fieldKeyById(s.snapshot);
+  const pending = (s.snapshot.files ?? []).filter((f) => f.status === 'uploaded' && (!only || only.includes(f.id)) && !filesInFlight.has(f.id));
+  for (const f of pending) {
+    const key = keyById.get(f.field_id);
+    if (!key) continue;
+    filesInFlight.add(f.id);
+    let result: FileFillResult;
+    try {
+      const link = await api<{ url: string; file_name: string; mime: string }>(`/api/sessions/${s.session_code}/files/${f.id}`, {
+        token: state.auth.token,
+      });
+      const res = await fetch(link.url);
+      if (!res.ok) throw new Error(`download ${res.status}`);
+      result = await sendToTab<FileFillResult>(tabId, {
+        type: 'FILL_FILE',
+        field_key: key,
+        name: link.file_name,
+        mime: link.mime,
+        base64: toBase64(await res.arrayBuffer()),
+        site: s.page_site,
+      });
+    } catch (e) {
+      console.warn('file fill failed', e);
+      filesInFlight.delete(f.id);
+      continue; // tried again on the next fill / refresh
+    }
+    try {
+      await api(`/api/sessions/${s.session_code}/files/${f.id}`, {
+        method: 'PATCH',
+        body: result.ok ? { status: 'filled', reason: null } : { status: 'rejected', reason: result.error },
+        token: state.auth!.token,
+      });
+    } catch (e) {
+      console.warn('could not report the file result', e);
+    }
+    const t = tabOf(tabId);
+    if (t) {
+      const clicks = new Set(t.uploadClicks ?? []);
+      if (result.ok && result.needsUploadClick) clicks.add(key);
+      else clicks.delete(key);
+      const lastFill = t.lastFill ?? { filled: [], skipped: [] };
+      await setTab(tabId, {
+        uploadClicks: [...clicks],
+        canUndo: true,
+        lastFill: {
+          ...lastFill,
+          filled: result.ok ? [...new Set([...lastFill.filled, key])] : lastFill.filled.filter((k) => k !== key),
+          skipped: [...lastFill.skipped.filter((x) => x.field_key !== key), ...(result.ok ? [] : [{ field_key: key, reason: result.error }])],
+        },
+      });
+    }
+    filesInFlight.delete(f.id);
+  }
+}
+
 /**
  * The phone pressed Start over. Auto-fill stops (the cleared values must not blank the page). For
  * scope 'both' the form on the computer is cleared too: Undo restores the page as it was before the
@@ -277,6 +352,8 @@ async function phoneReset(tabId: number, scope: ResetScope | null, before: Sessi
     notice: scope === 'both' ? 'The phone cleared this form. Ready for the next applicant.' : 'The phone started over. The form here was left as it is.',
   });
   if (scope !== 'both') return;
+  await setTab(tabId, { uploadClicks: [] });
+  await sendToTab(tabId, { type: 'CLEAR_FILES' }).catch(() => null);
   const undone = await sendToTab<UndoResult>(tabId, { type: 'UNDO' }).catch(() => null);
   if (undone?.restored?.length || !filledBefore.length) return;
   const empty = Object.fromEntries(filledBefore.map((k) => [k, null]));
@@ -315,6 +392,7 @@ async function refreshSnapshot(tabId: number) {
       const changed = Object.keys(now).filter((k) => old[k] !== now[k]);
       if (changed.length) await fillIntoPage(tabId, changed);
     }
+    if (tabOf(tabId)?.autoFill) await fillFiles(tabId);
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) await logout();
     // Purged on the server (sessions live about 40 minutes): this tab has nothing to fill any more.
@@ -329,6 +407,7 @@ async function refreshSnapshot(tabId: number) {
 async function sentFromPhone(tabId: number) {
   await setTab(tabId, { autoFill: true });
   await fillIntoPage(tabId);
+  await fillFiles(tabId);
 }
 
 function patchSnapshot(tabId: number, fn: (snap: SessionSnapshot) => SessionSnapshot) {
@@ -399,6 +478,23 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
         utterances: [row, ...snap.utterances.filter((u) => u.seq !== row.seq)].sort((a, b) => b.seq - a.seq).slice(0, 50),
       }));
       await save();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'field_files', filter }, async (p) => {
+      const tabId = tab();
+      if (tabId === null) return;
+      const row = p.new as (FieldFile & { path?: string }) | undefined;
+      const gone = p.old as { id?: string } | undefined;
+      patchSnapshot(tabId, (snap) => {
+        const files = (snap.files ?? []).filter((f) => f.id !== (row?.id ?? gone?.id));
+        if (row?.id) {
+          const { path: _p, ...file } = row;
+          files.push(file);
+        }
+        return { ...snap, files };
+      });
+      await save();
+      // A new photo / PDF from the phone: into the page right away once filling has started.
+      if (row?.status === 'uploaded' && tabOf(tabId)?.autoFill) await fillFiles(tabId, [row.id]);
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'form_fields', filter }, async (p) => {
       const row = p.new as SessionField & { clean_label: string | null };
@@ -539,6 +635,7 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       if (tabId === undefined || !tabOf(tabId)) return;
       await setTab(tabId, { autoFill: true });
       await fillIntoPage(tabId);
+      await fillFiles(tabId);
       return;
 
     case 'UNDO': {

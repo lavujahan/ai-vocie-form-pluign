@@ -3,6 +3,7 @@ import {
   siteOf,
   type ContentRequest,
   type FieldsChangedMessage,
+  type FileFillResult,
   type FillResult,
   type PageLoadedMessage,
   type ResolveOptionMessage,
@@ -13,9 +14,12 @@ import {
 import type { Resolver } from './cascade';
 import { detect, type Registry } from './detector';
 import { fillAll, undoAll } from './filler';
+import { fillFile } from './upload';
 import { startWatch, stopWatch } from './watch';
 
 let registry: Registry = new Map();
+/** Upload fields this page got a file for from the phone (Start over empties them). */
+const filledFiles = new Set<string>();
 
 /** Unclear dropdown matches go to the AI through the service worker (it holds the session and token). */
 const resolve: Resolver = async (field_key, spoken, options) => {
@@ -66,6 +70,27 @@ chrome.runtime.onMessage.addListener((msg: ContentRequest, _sender, sendResponse
       }
       case 'UNDO':
         return { restored: await undoAll() } satisfies UndoResult;
+      case 'FILL_FILE': {
+        if (msg.site && msg.site !== siteOf(location.href)) return { ok: false, error: MOVED_REASON } satisfies FileFillResult;
+        let entry = registry.get(msg.field_key);
+        if (!entry?.el.isConnected) {
+          scan();
+          entry = registry.get(msg.field_key);
+        }
+        if (!entry?.file) return { ok: false, error: "The upload field isn't on the page" } satisfies FileFillResult;
+        const result = await fillFile(entry, { name: msg.name, mime: msg.mime, base64: msg.base64 });
+        if (result.ok) filledFiles.add(msg.field_key);
+        return result satisfies FileFillResult;
+      }
+      case 'CLEAR_FILES': {
+        if (!registry.size) scan();
+        for (const key of filledFiles) {
+          const entry = registry.get(key);
+          if (entry?.file) await fillFile(entry, null);
+        }
+        filledFiles.clear();
+        return { ok: true };
+      }
       case 'WATCH':
         if (msg.off) stopWatch();
         else {

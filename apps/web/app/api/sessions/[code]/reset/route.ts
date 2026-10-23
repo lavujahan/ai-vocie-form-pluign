@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ResetRequest } from '@vff/shared';
 import { requirePhone } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
+import { removeSessionFiles } from '@/lib/files/storage';
 import { assertPhoneCanWrite, getSessionByCode } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
@@ -22,6 +23,8 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const body = ResetRequest.parse(await req.json());
   assertPhoneCanWrite(session, body.seq);
 
+  // Uploaded photos / PDFs go too (reset_session deletes their rows; storage objects need the API).
+  await removeSessionFiles(session.id);
   const done = must(
     await db().rpc('reset_session', { p_session: session.id, p_seq: body.seq, p_scope: body.scope }),
   ) as boolean;

@@ -40,7 +40,13 @@ export type ContentRequest =
     }
   | { type: 'UNDO' }
   /** Watch the page for fields that appear later (`known` = the session's field keys); `off` stops it. */
-  | { type: 'WATCH'; known?: string[]; off?: boolean };
+  | { type: 'WATCH'; known?: string[]; off?: boolean }
+  /** Put a file from the phone into an upload field (base64: messages can't carry Blobs). */
+  | { type: 'FILL_FILE'; field_key: string; name: string; mime: string; base64: string; site?: string }
+  /** Empty the upload fields filled from the phone (Start over: phone and computer). */
+  | { type: 'CLEAR_FILES' };
+
+export type FileFillResult = { ok: true; needsUploadClick: boolean } | { ok: false; error: string };
 
 export type ScanResult = { schema: FormSchemaInput };
 export type FillResult = FillReport;
@@ -97,6 +103,8 @@ export type ExtState = {
   otherSessions: number;
   /** One-off message for this tab, e.g. "Phone started over". */
   notice: string | null;
+  /** Upload fields filled from the phone whose page still needs its own "Upload" button clicked. */
+  uploadClicks: string[];
 };
 
 export type StateMessage = { type: 'STATE'; state: ExtState };

@@ -19,6 +19,8 @@ export type TabState = {
   desktop?: 'open' | 'moved';
   /** One-off message for the popup, e.g. "Phone started over". */
   notice?: string | null;
+  /** Upload fields filled from the phone whose page still needs its own "Upload" button clicked. */
+  uploadClicks?: string[];
 };
 /** Keyed by tab id (a string once it has been through chrome.storage). */
 export type Tabs = Record<string, TabState>;

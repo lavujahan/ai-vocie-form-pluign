@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type {
   ApiError,
+  FieldFile,
+  FileUploadUrlResponse,
   PairResponse,
   ResetScope,
   SessionField,
@@ -64,6 +66,8 @@ const rowToField = (r: FieldRowPayload, prev?: SessionField): SessionField => ({
   dynamic_options: r.dynamic_options ?? false,
   choice_hint: r.choice_hint ?? null,
   label_ta: r.label_ta ?? prev?.label_ta ?? null,
+  accept: r.accept ?? prev?.accept ?? null,
+  file_rules: r.file_rules ?? prev?.file_rules ?? null,
 });
 
 export type Phase = 'pairing' | 'ready' | 'error';
@@ -74,6 +78,8 @@ export function useVoiceSession(code: string) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [fields, setFields] = useState<SessionField[]>([]);
   const [values, setValues] = useState<Map<string, SessionValue>>(new Map());
+  /** Uploaded photos / PDFs, by field id. */
+  const [files, setFiles] = useState<Map<string, FieldFile>>(new Map());
   const [utterances, setUtterances] = useState<Map<number, LocalUtterance>>(new Map());
   const [live, setLive] = useState(false);
 
@@ -103,6 +109,7 @@ export function useVoiceSession(code: string) {
       applyReset(snap.session.reset_seq ?? 0);
       setSession(snap.session);
       setFields(snap.fields);
+      setFiles(new Map((snap.files ?? []).map((f) => [f.field_id, f])));
       setValues(new Map(snap.values.map((v) => [v.field_id, v])));
       setUtterances((prev) => {
         const next = new Map(prev);
@@ -213,6 +220,17 @@ export function useVoiceSession(code: string) {
         setUtterances((prev) => new Map(prev).set(row.seq, { ...prev.get(row.seq), ...pickUtt(row) }));
       })
       // Fields that appeared on the computer later (a wizard's next step, a field shown by an answer).
+      // Uploaded files: the computer marks them filled (or refused by the website).
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'field_files', filter }, (p) => {
+        const row = p.new as (FieldFile & { path?: string }) | undefined;
+        const gone = p.old as { id?: string } | undefined;
+        if (row?.field_id) {
+          const { path: _path, ...file } = row;
+          setFiles((prev) => new Map(prev).set(row.field_id, file));
+        } else if (gone?.id) {
+          setFiles((prev) => new Map([...prev].filter(([, f]) => f.id !== gone.id)));
+        }
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'form_fields', filter }, (p) => {
         const row = p.new as FieldRowPayload;
         if (!row?.id) return;
@@ -369,6 +387,7 @@ export function useVoiceSession(code: string) {
         if (!res.ok) return ((await res.json().catch(() => ({}))) as ApiError).error || 'Could not clear. Try again.';
         applyReset(seq);
         setValues(new Map());
+        setFiles(new Map());
         setFields((prev) => prev.map((f) => ({ ...f, choice_hint: null })));
         setSession((s) => (s ? { ...s, status: 'paired', reset_seq: seq, reset_scope: scope } : s));
         void refresh();
@@ -378,6 +397,44 @@ export function useVoiceSession(code: string) {
       }
     },
     [authFetch, code, takeSeq, applyReset, refresh],
+  );
+
+  /**
+   * Uploads a prepared photo / PDF for an upload field: the server checks it against the field's rules
+   * and hands out a one-time upload URL; the file goes straight to storage; then the server checks what
+   * arrived and the computer gets it. Resolves to an error message or null.
+   */
+  const uploadFile = useCallback(
+    async (fieldKey: string, file: File, pages: number | null): Promise<string | null> => {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url || !anon) return 'Uploads are not set up on this server.';
+      const json = { 'content-type': 'application/json' };
+      try {
+        const res = await authFetch(`/api/sessions/${code}/files/upload-url`, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({ field_key: fieldKey, mime: file.type, bytes: file.size, pages }),
+        });
+        if (!res.ok) return ((await res.json().catch(() => ({}))) as ApiError).error || 'Could not upload. Try again.';
+        const target = (await res.json()) as FileUploadUrlResponse;
+        const storage = createClient(url, anon, { auth: { persistSession: false } }).storage.from('form-files');
+        const up = await storage.uploadToSignedUrl(target.path, target.token, file, { contentType: file.type });
+        if (up.error) return 'Could not upload. Try again.';
+        const done = await authFetch(`/api/sessions/${code}/files`, {
+          method: 'POST',
+          headers: json,
+          body: JSON.stringify({ field_key: fieldKey, path: target.path, file_name: file.name, pages }),
+        });
+        const body = (await done.json().catch(() => ({}))) as FieldFile & ApiError;
+        if (!done.ok) return body.error || 'Could not upload. Try again.';
+        setFiles((prev) => new Map(prev).set(body.field_id, body));
+        return null;
+      } catch {
+        return NETWORK_ERROR;
+      }
+    },
+    [authFetch, code],
   );
 
   // ---------- offline: banner, and resend recordings that failed for lack of network ----------
@@ -426,6 +483,8 @@ export function useVoiceSession(code: string) {
     complete,
     reset,
     online,
+    files,
+    uploadFile,
     command,
     clearCommand,
   };
