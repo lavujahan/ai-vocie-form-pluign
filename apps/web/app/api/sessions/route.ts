@@ -52,7 +52,7 @@ export const POST = route(async (req) => {
 
   // The Form Analyzer takes a few seconds; the QR is shown right away and the
   // analysis lands in form_fields (and reaches clients through Realtime) when done.
-  after(() => analyzeAndStore(session.id, schema));
+  after(() => analyzeAndStore(session.id, schema, { userId: user.id }));
   // Uploaded files of sessions that expired meanwhile (normally deleted once filled).
   after(() => purgeExpiredFiles().catch((e) => console.warn('file purge failed', e)));
 

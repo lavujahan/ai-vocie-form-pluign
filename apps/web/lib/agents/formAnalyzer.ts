@@ -2,6 +2,7 @@ import { Agent, run, setTracingDisabled, type Model } from '@openai/agents';
 import { FormAnalysis, sanitizeFileRules, type FieldAnalysis, type FormSchema } from '@vff/shared';
 import { analyzerTools } from './tools';
 import { modelName, runWithUsage, type OnUsage } from './usage';
+import { openaiEvent, type UsageEvent } from '../usage/events';
 
 setTracingDisabled(process.env.NODE_ENV === 'production');
 
@@ -118,10 +119,18 @@ export function sanitizeAnalysis(analysis: FormAnalysis, schema: FormSchema): Fi
  * `partial`: only fields that appeared later (a wizard's next step, a revealed field). Their step was set
  * when they were added, and the session's name and analysis status stay as the first analysis left them.
  */
-export async function analyzeAndStore(sessionId: string, schema: FormSchema, opts: { partial?: boolean } = {}): Promise<void> {
+export async function analyzeAndStore(
+  sessionId: string,
+  schema: FormSchema,
+  opts: { partial?: boolean; userId?: string } = {},
+): Promise<void> {
   const { db } = await import('../supabase-admin');
+  const { recordUsage } = await import('../usage/record');
+  const owner = { user_id: opts.userId ?? null, session_id: sessionId };
+  const usage: UsageEvent[] = [];
+  const onUsage: OnUsage = (run) => usage.push(openaiEvent(owner, 'analyze', run));
   try {
-    const analysis = await analyzeForm(schema);
+    const analysis = await analyzeForm(schema, { onUsage });
     const fields = sanitizeAnalysis(analysis, schema);
     const detectedRequired = new Map(schema.fields.map((f) => [f.field_key, f.required]));
     // withNew: the columns of migrations 0006/0007 (Tamil label, upload rules).
@@ -155,5 +164,7 @@ export async function analyzeAndStore(sessionId: string, schema: FormSchema, opt
   } catch (e) {
     console.error('form analysis failed', e);
     if (!opts.partial) await db().from('form_sessions').update({ analysis_status: 'error' }).eq('id', sessionId);
+  } finally {
+    await recordUsage(usage);
   }
 }

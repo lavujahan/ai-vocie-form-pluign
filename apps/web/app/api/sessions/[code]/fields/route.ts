@@ -36,7 +36,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
   if (!fresh.length) return NextResponse.json({ fields: [] } satisfies AddFieldsResponse);
 
   const inserted = await insertFieldRows(fieldRows(session.id, fresh, startPosition, stepIndex));
-  after(() => analyzeAndStore(session.id, { ...schema, fields: fresh }, { partial: true }));
+  after(() => analyzeAndStore(session.id, { ...schema, fields: fresh }, { partial: true, userId: user.id }));
   return NextResponse.json({ fields: inserted.map(toSessionField) } satisfies AddFieldsResponse, { status: 201 });
 });
 
