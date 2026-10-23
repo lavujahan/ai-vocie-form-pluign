@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql` and `0007_file_uploads.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql` and `0008_usage_billing.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -99,6 +99,17 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
   2. **Join before mapping** (`lib/recordings.ts`): pieces share a `recording_id` and a `part` number (migration `0003`). For piece N, the server maps the joined transcript of pieces 0…N. A sentence or number cut across pieces ("mobile number 95432 | 49890") is read whole, and the later piece's higher seq replaces the earlier partial values.
 - **Interpretation is done by the AI.** The mapping agent interprets everything: Tanglish fillers, Tamil script, numbers listed piece by piece as `number_parts`, and option choice. Its only tool is `validate_value`, a format and option checker. The server re-checks every value and marks doubtful ones "Check this".
 - **Timings:** the Vercel logs show one line per recording: `utterance seq=… stt=…ms map=…ms values=…`.
+
+## Usage and billing (migration `0008`)
+
+Every paid AI call adds a row to `usage_events`, charged to the user who owns the session:
+- **Sarvam:** one row per speech-to-text call, with `audio_ms`. Sarvam's reply doesn't include the audio length, so the phone sends how long it recorded (`duration_ms`, at most 30 s).
+- **OpenAI:** one row per agent run (`map`, `analyze` or `resolve`), with its requests, input/cached/output tokens and `cost_usd` at list price (`lib/usage/pricing.ts`). Runs that fail after reaching the model are counted too.
+- Retries are billed again, so they get their own rows. Rows stay when sessions and utterances are purged.
+
+**Admin → Usage** (`/admin/usage`) shows one row per user for a month (India time): minutes, tokens, Sarvam ₹, OpenAI ₹ and the total. The admin sets the USD→INR rate and Sarvam's ₹/minute there (stored in `billing_settings`; defaults are 88 and ₹0.49, the pay-as-you-go price). The ₹ amounts are worked out when the page loads, so a new rate re-prices the month shown.
+
+When OpenAI changes its prices or `AGENT_MODEL` changes to a new model, update `OPENAI_USD_PER_M`. A model that isn't in that table is logged with `cost_usd` null.
 
 ## Cascading dropdowns (State → District → Taluk → Village)
 

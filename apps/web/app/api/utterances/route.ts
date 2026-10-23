@@ -1,13 +1,15 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import type { UtteranceResponse } from '@vff/shared';
 import { mapTranscript } from '@/lib/agents/fieldMapper';
 import { isEmptyTranscript } from '@/lib/agents/guardrails';
-import { transcribe } from '@/lib/sarvam/stt';
+import { STT_MAX_SECONDS, sttConfig, transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
 import { assertPhoneCanWrite, getFieldRows, getSessionById, getValues, recentSpeech, upsertValue } from '@/lib/sessions';
 import { recordingTranscriptSoFar } from '@/lib/recordings';
 import { db } from '@/lib/supabase-admin';
+import { openaiEvent, sttEvent, type UsageEvent } from '@/lib/usage/events';
+import { recordUsage } from '@/lib/usage/record';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -52,6 +54,11 @@ export const POST = route(async (req) => {
   if (!(audio instanceof Blob) || audio.size === 0) throw fail(400, 'Missing audio');
   if (audio.size > MAX_AUDIO_BYTES) throw fail(413, 'Recording is too long');
   if (!Number.isInteger(seq) || seq < 1) throw fail(400, 'Invalid seq');
+  // Sarvam bills by audio length and its reply doesn't say it: the phone sends how long it recorded.
+  const durationMs = Number(form.get('duration_ms'));
+  const audioMs = form.get('duration_ms') !== null && Number.isFinite(durationMs) && durationMs > 0
+    ? Math.min(Math.round(durationMs), STT_MAX_SECONDS * 1000)
+    : null;
   // Desktop tab closed (nothing would be filled), or spoken before a Start over: don't spend AI on it.
   assertPhoneCanWrite(session, seq);
 
@@ -75,6 +82,11 @@ export const POST = route(async (req) => {
   if (error || !utt) throw fail(500, 'Database error');
   const utteranceId = (utt as { id: string }).id;
 
+  // Every paid call of this utterance, saved after the response is sent.
+  const owner = { user_id: session.user_id, session_id: session.id, utterance_id: utteranceId };
+  const usage: UsageEvent[] = [];
+  after(() => recordUsage(usage));
+
   const finish = async (patch: { status: 'done' | 'error'; transcript?: string | null; error?: string | null }) =>
     must(await db().from('utterances').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', utteranceId));
 
@@ -84,6 +96,7 @@ export const POST = route(async (req) => {
   try {
     transcript = await withRetry(() => transcribe(audio, fields));
     tStt = Date.now() - t0;
+    usage.push(sttEvent(owner, sttConfig().model, audioMs));
     // Show the transcript on the phone/popup while mapping runs.
     await db().from('utterances').update({ transcript }).eq('id', utteranceId);
 
@@ -112,7 +125,12 @@ export const POST = route(async (req) => {
     const tMap0 = Date.now();
     // What was said just before: corrections like "no, not Jahan, Jagan" point back to it.
     const recent = target ? [] : await recentSpeech(session, seq, recordingId, fields, values);
-    const outcome = await withRetry(() => mapTranscript({ fields, current, transcript: fullText, targetFieldKey: target, recent }));
+    const outcome = await withRetry(() =>
+      mapTranscript(
+        { fields, current, transcript: fullText, targetFieldKey: target, recent },
+        { onUsage: (run) => usage.push(openaiEvent(owner, 'map', run)) },
+      ),
+    );
     console.log(
       `utterance seq=${seq} part=${part} stt=${tStt}ms map=${Date.now() - tMap0}ms values=${outcome.empty ? 0 : outcome.values.length} chars=${fullText.length}`,
     );

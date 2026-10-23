@@ -25,6 +25,8 @@ export type LocalUtterance = {
   error: string | null;
   /** Kept for errored utterances so "tap to retry" can resend without re-recording. */
   blob?: Blob;
+  /** How long the piece is (the server logs it for billing); resent with a retry. */
+  durationMs?: number;
   /** Which long recording this piece belongs to, and its number (0, 1, 2…). */
   recording?: RecordingPiece;
 };
@@ -296,13 +298,14 @@ export function useVoiceSession(code: string) {
 
   /** Fire-and-forget: several utterances can be in flight; `seq` decides who wins. */
   const sendUtterance = useCallback(
-    async (blob: Blob, target: string | null, seq = takeSeq(), recording?: RecordingPiece) => {
-      setUtt(seq, { seq, target_field_key: target, status: 'processing', error: null, blob, recording });
+    async (blob: Blob, target: string | null, seq = takeSeq(), recording?: RecordingPiece, durationMs?: number) => {
+      setUtt(seq, { seq, target_field_key: target, status: 'processing', error: null, blob, recording, durationMs });
       const form = new FormData();
       const ext = blob.type.includes('mp4') ? 'mp4' : blob.type.includes('ogg') ? 'ogg' : 'webm';
       form.append('audio', blob, `utterance.${ext}`);
       form.append('seq', String(seq));
       if (target) form.append('target_field_key', target);
+      if (durationMs) form.append('duration_ms', String(Math.round(durationMs)));
       if (recording) {
         form.append('recording_id', recording.recordingId);
         form.append('part', String(recording.part));
@@ -341,7 +344,7 @@ export function useVoiceSession(code: string) {
         return next;
       });
       // Same recording and piece number, new seq: the server joins it with the earlier pieces again.
-      sendUtterance(u.blob, u.target_field_key, undefined, u.recording);
+      sendUtterance(u.blob, u.target_field_key, undefined, u.recording, u.durationMs);
     },
     [sendUtterance],
   );

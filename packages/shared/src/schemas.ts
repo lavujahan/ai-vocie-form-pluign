@@ -230,6 +230,39 @@ export type AdminUserRow = PublicUser & {
   created_at: string;
 };
 
+/** Admin-set billing rates: OpenAI bills in USD, Sarvam per minute of audio in ₹. */
+export const BillingSettings = z.object({
+  usd_inr_rate: z.number().positive().max(1000),
+  sarvam_inr_per_min: z.number().positive().max(100),
+});
+export type BillingSettings = z.infer<typeof BillingSettings>;
+
+/** One user's AI usage in a month, priced in ₹. */
+export type UsageSummaryRow = {
+  user_id: string | null;
+  name: string | null;
+  phone: string | null;
+  stt_calls: number;
+  minutes: number;
+  llm_calls: number;
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  tokens: number;
+  openai_usd: number;
+  sarvam_inr: number;
+  openai_inr: number;
+  total_inr: number;
+};
+
+export type UsageSummaryResponse = {
+  /** YYYY-MM, India time. */
+  month: string;
+  settings: BillingSettings;
+  rows: UsageSummaryRow[];
+  totals: Omit<UsageSummaryRow, 'user_id' | 'name' | 'phone'>;
+};
+
 export type CreateSessionResponse = {
   session_id: string;
   session_code: string;

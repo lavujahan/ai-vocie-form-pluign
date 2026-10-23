@@ -94,9 +94,9 @@ function SessionScreen({ code }: { code: string }) {
     ];
   };
 
-  const recorder = useRecorder((blob, { tag }) => {
+  const recorder = useRecorder((blob, { tag, durationMs }) => {
     const { seq, target, recordingId, part } = tag as PieceTag;
-    s.sendUtterance(blob, target, seq, { recordingId, part });
+    s.sendUtterance(blob, target, seq, { recordingId, part }, durationMs);
   });
 
   // Latest utterance per targeted field.

@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { ResolveOptionRequest, type ResolveOptionResponse } from '@vff/shared';
 import { resolveOption } from '@/lib/agents/optionResolver';
+import { openaiEvent, type UsageEvent } from '@/lib/usage/events';
+import { recordUsage } from '@/lib/usage/record';
 import { requireUser } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
 import { getSessionByCode } from '@/lib/sessions';
@@ -26,8 +28,14 @@ export const POST = route(async (req) => {
   ) as { label: string; clean_label: string | null } | null;
   if (!field) throw fail(404, 'Unknown field');
 
+  const usage: UsageEvent[] = [];
+  after(() => recordUsage(usage));
+  const owner = { user_id: user.id, session_id: session.id };
   const t0 = Date.now();
-  const result = await resolveOption({ label: field.clean_label || field.label, spoken: body.spoken, options: body.options });
+  const result = await resolveOption(
+    { label: field.clean_label || field.label, spoken: body.spoken, options: body.options },
+    { onUsage: (run) => usage.push(openaiEvent(owner, 'resolve', run)) },
+  );
   console.log(
     `resolve-option field=${body.field_key} options=${body.options.length} choice=${result.choice ?? '-'} ambiguous=${result.ambiguous} ${Date.now() - t0}ms`,
   );

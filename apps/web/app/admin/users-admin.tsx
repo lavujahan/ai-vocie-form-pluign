@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound, LogOut, Pencil, Plus, Power, Search, Unlock, X } from 'lucide-react';
-import type { AdminUserRow, ApiError, UserRole } from '@vff/shared';
+import type { AdminUserRow, UserRole } from '@vff/shared';
 import { Button, Card, Input, Pill } from '@/components/ui';
+import { AdminNav } from './admin-nav';
+import { api } from './api';
 
 type Status = 'Active' | 'Locked' | 'Inactive';
 
@@ -21,13 +23,6 @@ type Dialog =
   | { kind: 'edit'; user: AdminUserRow }
   | { kind: 'pin'; user: AdminUserRow }
   | null;
-
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, headers: { 'content-type': 'application/json', ...init?.headers } });
-  const body = await res.json();
-  if (!res.ok) throw new Error((body as ApiError).error);
-  return body as T;
-}
 
 export function UsersAdmin() {
   const router = useRouter();
@@ -76,7 +71,7 @@ export function UsersAdmin() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-6">
       <header className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold">Users</h1>
+        <AdminNav />
         <div className="flex gap-2">
           <Button onClick={() => setDialog({ kind: 'create' })}>
             <Plus size={16} /> Add user

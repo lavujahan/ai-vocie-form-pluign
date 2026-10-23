@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { assistantMessage, functionCall, ScriptedModel } from '@openai/agents/testing';
+import { Usage } from '@openai/agents';
 import type { FormSchema } from '@vff/shared';
 import { mapTranscript, buildMapperPrompt } from '@/lib/agents/fieldMapper';
 import { sanitizeAnalysis } from '@/lib/agents/formAnalyzer';
@@ -173,9 +174,33 @@ describe('Field Mapping Agent (scripted model)', () => {
 
   it('skips the model entirely for an empty transcript', async () => {
     const model = new ScriptedModel([]);
-    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: ' . ', targetFieldKey: null }, { model });
+    const onUsage = vi.fn();
+    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: ' . ', targetFieldKey: null }, { model, onUsage });
     expect(out).toEqual({ empty: true });
     expect(model.calls).toHaveLength(0);
+    expect(onUsage).not.toHaveBeenCalled();
+  });
+
+  it('reports the tokens of every request in the run, for billing', async () => {
+    const final = { values: [], unmapped_speech: 'hello', missing_required: [], command: null };
+    const model = new ScriptedModel([
+      {
+        output: [functionCall('validate_value', { field_key: 'gender', value: 'Male' }, { callId: 'c1' })],
+        usage: new Usage({ requests: 1, inputTokens: 4000, outputTokens: 40, inputTokensDetails: { cached_tokens: 3000 } }),
+      },
+      { output: [assistantMessage(JSON.stringify(final))], usage: new Usage({ requests: 1, inputTokens: 4100, outputTokens: 60 }) },
+    ]);
+    const onUsage = vi.fn();
+    await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello', targetFieldKey: null }, { model, onUsage });
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    const { usage, model: name, ok } = onUsage.mock.calls[0][0];
+    expect({ name, ok, requests: usage.requests, input: usage.inputTokens, output: usage.outputTokens }).toEqual({
+      name: 'custom',
+      ok: true,
+      requests: 2,
+      input: 8100,
+      output: 100,
+    });
   });
 
   it('puts only the target field and current values in the prompt', () => {

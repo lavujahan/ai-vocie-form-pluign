@@ -21,7 +21,7 @@ export type RecorderNotice = 'interrupted' | 'too_short' | null;
  * the next tap starts instantly (and mobile browsers don't re-prompt).
  * Each piece of a long recording is delivered through `onRecorded` with its own tag.
  */
-export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => void) {
+export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown; durationMs: number }) => void) {
   const [state, setState] = useState<RecorderState>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [notice, setNotice] = useState<RecorderNotice>(null);
@@ -58,7 +58,8 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown }) => 
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
       const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
-      if (Date.now() - segStart >= MIN_MS && blob.size > 0) onRecordedRef.current(blob, { tag });
+      const durationMs = Date.now() - segStart;
+      if (durationMs >= MIN_MS && blob.size > 0) onRecordedRef.current(blob, { tag, durationMs });
       // Only the first piece can be an accidental tap; later pieces just caught the stop.
       else if (segStart - startedAt.current < 1000) setNotice('too_short');
     };
