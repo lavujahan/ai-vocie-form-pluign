@@ -78,6 +78,8 @@ export type PopupRequest = (
   | { type: 'END_SESSION' }
   | { type: 'FILL' }
   | { type: 'UNDO' }
+  /** Show the QR code again for this tab's form (the phone page was closed); answers are kept. */
+  | { type: 'RECONNECT' }
 ) & { tab_id?: number };
 
 export type PopupResponse = { ok: true; state: ExtState } | { ok: false; error: string; state: ExtState };
@@ -88,6 +90,8 @@ export type ActiveSession = CreateSessionResponse & {
   /** siteOf() the scanned page. */
   page_site: string;
   snapshot: SessionSnapshot | null;
+  /** The QR code was shown again ("Connect phone again") for a form that already had a phone. */
+  reconnect?: boolean;
 };
 
 /** The popup's view: the session of its own tab. */

@@ -5,6 +5,7 @@ import { SESSION_JWT_TTL_MIN, USER_COOKIE, USER_JWT_TTL_HOURS, type PublicUser }
 import { env } from './env';
 import { fail } from './http';
 import { signJwt, verifyJwt, type PhoneClaims, type UserClaims } from './jwt';
+import { MSG, phoneTokenCurrent } from './session-rules';
 import { db } from './supabase-admin';
 
 export type DbUser = PublicUser & {
@@ -27,9 +28,9 @@ export function signUserJwt(user: PublicUser) {
   );
 }
 
-export function signSessionJwt(sessionId: string) {
+export function signSessionJwt(sessionId: string, pairedAt: string | null) {
   return signJwt(
-    { role: 'authenticated', scope: 'phone', session_id: sessionId },
+    { role: 'authenticated', scope: 'phone', session_id: sessionId, ...(pairedAt ? { paired_at: pairedAt } : {}) },
     sessionId,
     SESSION_JWT_TTL_MIN * 60,
     env.jwtSecret,
@@ -72,11 +73,14 @@ export async function requirePhone(req: NextRequest): Promise<PhoneClaims> {
 /** Either the owning user or the paired phone. */
 export async function requireSessionAccess(
   req: NextRequest,
-  session: { id: string; user_id: string },
+  session: { id: string; user_id: string; paired_at?: string | null },
 ): Promise<'user' | 'phone'> {
   const token = bearer(req);
   const claims = token ? await verifyJwt(token, env.jwtSecret) : null;
-  if (claims?.scope === 'phone' && claims.session_id === session.id) return 'phone';
+  if (claims?.scope === 'phone' && claims.session_id === session.id) {
+    if (!phoneTokenCurrent(claims.paired_at, session.paired_at ?? null)) throw fail(403, MSG.phoneReplaced, { code: 'phone_replaced' });
+    return 'phone';
+  }
   if (claims?.scope === 'user' && claims.sub === session.user_id) return 'user';
   throw fail(claims ? 403 : 401, 'Not allowed');
 }

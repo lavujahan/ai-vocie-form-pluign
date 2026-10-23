@@ -4,7 +4,7 @@ import { requirePhone } from '@/lib/auth';
 import { getUploadField, uploadName } from '@/lib/files/fields';
 import { inspectUpload, removeObjects } from '@/lib/files/storage';
 import { fail, must, route } from '@/lib/http';
-import { assertPhoneCanWrite, getSessionByCode } from '@/lib/sessions';
+import { assertPhoneCanWrite, assertPhoneOf, getSessionByCode } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -20,7 +20,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const { code } = await params;
   const claims = await requirePhone(req);
   const session = await getSessionByCode(code);
-  if (claims.session_id !== session.id) throw fail(403, 'Not allowed');
+  assertPhoneOf(claims, session);
   assertPhoneCanWrite(session);
 
   const body = FileCommitRequest.parse(await req.json());

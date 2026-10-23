@@ -12,6 +12,7 @@ export const MSG = {
   qrExpired: 'This QR code has expired. Generate a new one on the computer.',
   qrUsed: 'This QR code was already opened on another phone. Generate a new one on the computer.',
   qrUnknown: 'This QR code is not valid. Generate a new one on the computer.',
+  phoneReplaced: 'This phone was disconnected because the QR code was shown again on the computer. Scan it to continue.',
 } as const;
 
 type SessionState = { status: SessionStatus; desktop_state: DesktopState; reset_seq: number };
@@ -28,6 +29,17 @@ export function sendBlock(s: SessionState): string | null {
   if (s.desktop_state === 'closed') return MSG.tabClosed;
   if (s.desktop_state === 'moved') return MSG.tabMoved;
   return null;
+}
+
+/**
+ * A phone token belongs to the session's current pairing: "Connect phone again" on the computer pairs
+ * a new phone, and tokens from the earlier pairing stop working. Compared as times (the database may
+ * write the same moment differently). Tokens without the claim (issued before this check) still pass.
+ */
+export function phoneTokenCurrent(claimPairedAt: string | undefined, sessionPairedAt: string | null): boolean {
+  if (!claimPairedAt) return true;
+  if (!sessionPairedAt) return false;
+  return Date.parse(claimPairedAt) === Date.parse(sessionPairedAt);
 }
 
 /** Message for a QR code that couldn't be paired (the single-use, unexpired check failed). */

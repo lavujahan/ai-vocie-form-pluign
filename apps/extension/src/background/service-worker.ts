@@ -7,6 +7,7 @@ import type {
   FieldOption,
   LoginResponse,
   PublicUser,
+  ReconnectResponse,
   ResetScope,
   ResolveOptionResponse,
   UpdateFieldsRequest,
@@ -35,7 +36,21 @@ import {
   type UndoResult,
 } from '../messages';
 import { api, ApiError } from './api';
-import { assertRoom, changesSince, endTab, mergeFill, migrate, otherSessions, patchTab, startTab, tabOfSession, watermarkOf, type TabState, type Tabs } from './tabs';
+import {
+  assertRoom,
+  changesSince,
+  endTab,
+  mergeFill,
+  migrate,
+  otherSessions,
+  patchTab,
+  reopenQr,
+  startTab,
+  tabOfSession,
+  watermarkOf,
+  type TabState,
+  type Tabs,
+} from './tabs';
 
 // ---------- state (mirrored to chrome.storage.session so it survives worker restarts) ----------
 // One form session per tab: several forms can be filled at once, each paired with its own phone.
@@ -660,6 +675,15 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       if (tabId === undefined || !tabOf(tabId)) return;
       await sendToTab(tabId, { type: 'UNDO' }).catch(() => null);
       await setTab(tabId, { canUndo: false, lastFill: null });
+      return;
+    }
+
+    case 'RECONNECT': {
+      const s = tabId === undefined ? null : tabOf(tabId)?.session;
+      if (tabId === undefined || !s) return;
+      if (!state.auth) throw new Error('Please sign in');
+      const res = await api<ReconnectResponse>(`/api/sessions/${s.session_code}/reconnect`, { method: 'POST', token: state.auth.token });
+      await save({ tabs: reopenQr(state.tabs, tabId, res.expires_at) });
       return;
     }
   }

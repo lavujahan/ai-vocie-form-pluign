@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MSG, pairFailure, phoneWriteBlock, sendBlock } from '@/lib/session-rules';
+import { MSG, pairFailure, phoneTokenCurrent, phoneWriteBlock, sendBlock } from '@/lib/session-rules';
 import { newFieldsPlacement, nextSeq } from '@/lib/sessions';
 
 const session = (over: Partial<Parameters<typeof phoneWriteBlock>[0]> = {}) => ({
@@ -58,5 +58,20 @@ describe('QR pairing failures', () => {
     expect(pairFailure({ status: 'waiting' })).toBe(MSG.qrExpired);
     expect(pairFailure({ status: 'expired' })).toBe(MSG.qrExpired);
     expect(pairFailure(null)).toBe(MSG.qrUnknown);
+  });
+});
+
+describe('Connect phone again: only the newest phone may write', () => {
+  const paired = '2026-10-24T10:00:00.123Z';
+  it('accepts the current pairing, however the database writes the time', () => {
+    expect(phoneTokenCurrent(paired, '2026-10-24T10:00:00.123+00:00')).toBe(true);
+    expect(phoneTokenCurrent(paired, paired)).toBe(true);
+  });
+  it('refuses a phone from before the QR was shown again (re-armed or paired again)', () => {
+    expect(phoneTokenCurrent(paired, null)).toBe(false);
+    expect(phoneTokenCurrent(paired, '2026-10-24T10:05:00.000Z')).toBe(false);
+  });
+  it('lets tokens from before this check through (they expire within 30 minutes)', () => {
+    expect(phoneTokenCurrent(undefined, '2026-10-24T10:05:00.000Z')).toBe(true);
   });
 });

@@ -77,6 +77,10 @@ export type Phase = 'pairing' | 'ready' | 'error';
 export function useVoiceSession(code: string) {
   const [phase, setPhase] = useState<Phase>('pairing');
   const [fatal, setFatal] = useState<string | null>(null);
+  /** "Connect phone again" was used on the computer: another phone (or this one, rescanned) took over. */
+  const [replaced, setReplaced] = useState(false);
+  /** When this phone paired, to notice a newer pairing. */
+  const pairedAtRef = useRef<string | null>(null);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [fields, setFields] = useState<SessionField[]>([]);
   const [values, setValues] = useState<Map<string, SessionValue>>(new Map());
@@ -135,6 +139,9 @@ export function useVoiceSession(code: string) {
         const body = (await res.json().catch(() => ({}))) as ApiError;
         setFatal(body.error || 'This session has ended. Scan a new QR code.');
         setPhase('error');
+      } else if (res.status === 403) {
+        const body = (await res.clone().json().catch(() => ({}))) as ApiError;
+        if (body.code === 'phone_replaced') setReplaced(true);
       } else if (res.status === 409) {
         // The desktop form tab was closed or moved meanwhile: show it even if the Realtime event was missed.
         const body = (await res.clone().json().catch(() => ({}))) as ApiError;
@@ -159,6 +166,7 @@ export function useVoiceSession(code: string) {
             const snap = (await res.json()) as SessionSnapshot & { next_seq: number };
             if (cancelled) return;
             seqRef.current = Math.max(stored.seq, snap.next_seq);
+            pairedAtRef.current = snap.session.paired_at ?? null;
             applySnapshot(snap);
             setPhase('ready');
             return;
@@ -171,6 +179,7 @@ export function useVoiceSession(code: string) {
         const pair = body as PairResponse;
         tokenRef.current = { token: pair.token, expires_at: pair.token_expires_at, seq: pair.next_seq };
         seqRef.current = pair.next_seq;
+        pairedAtRef.current = pair.session.paired_at ?? null;
         writeStored(code, tokenRef.current);
         applySnapshot(pair);
         setPhase('ready');
@@ -244,6 +253,9 @@ export function useVoiceSession(code: string) {
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'form_sessions', filter: `id=eq.${sessionId}` }, (p) => {
         const row = p.new as SessionInfo;
+        // The QR was shown again on the computer (back to waiting), or another phone paired since.
+        const mine = pairedAtRef.current;
+        if (row.status === 'waiting' || (mine && row.paired_at && Date.parse(row.paired_at) !== Date.parse(mine))) setReplaced(true);
         applyReset(row.reset_seq ?? 0);
         setSession((s) =>
           s
@@ -474,6 +486,7 @@ export function useVoiceSession(code: string) {
   return {
     phase,
     fatal,
+    replaced,
     session,
     fields,
     valueByKey,

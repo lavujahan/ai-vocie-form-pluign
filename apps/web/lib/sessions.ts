@@ -16,7 +16,8 @@ import type {
 } from '@vff/shared';
 import { getFiles } from './files/storage';
 import { fail, must } from './http';
-import { phoneWriteBlock } from './session-rules';
+import type { PhoneClaims } from './jwt';
+import { MSG, phoneTokenCurrent, phoneWriteBlock } from './session-rules';
 import { db } from './supabase-admin';
 
 export type SessionRow = SessionInfo & {
@@ -170,6 +171,7 @@ export const toSessionInfo = (s: SessionRow): SessionInfo => ({
   reset_scope: s.reset_scope ?? null,
   desktop_state: s.desktop_state ?? 'open',
   desktop_report: s.desktop_report ?? null,
+  paired_at: s.paired_at ?? null,
 });
 
 export async function getValues(sessionId: string): Promise<SessionValue[]> {
@@ -251,6 +253,12 @@ export function assertWritable(session: SessionRow) {
 }
 
 /** The phone may speak / edit / start over: not expired, desktop tab not closed, seq newer than the last reset. */
+/** The phone's token is for this session and its current pairing (not a phone replaced by "Connect phone again"). */
+export function assertPhoneOf(claims: PhoneClaims, session: SessionRow) {
+  if (claims.session_id !== session.id) throw fail(403, 'Not allowed');
+  if (!phoneTokenCurrent(claims.paired_at, session.paired_at)) throw fail(403, MSG.phoneReplaced, { code: 'phone_replaced' });
+}
+
 export function assertPhoneCanWrite(session: SessionRow, seq?: number) {
   assertWritable(session);
   const block = phoneWriteBlock(session, seq);

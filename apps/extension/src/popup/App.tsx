@@ -56,7 +56,7 @@ export function App() {
     body = <SignIn send={send} />;
   } else if (!state.session) {
     body = <StartCard state={state} send={send} />;
-  } else if (!state.session.snapshot || state.session.snapshot.session.status === 'waiting') {
+  } else if (!state.session.snapshot || (state.session.snapshot.session.status === 'waiting' && !state.session.reconnect)) {
     body = <QrCard state={state} send={send} />;
   } else {
     body = <PairedCard state={state} send={send} />;
@@ -171,14 +171,30 @@ function useCountdown(until: string) {
   return { left, text: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` };
 }
 
+/** The QR code with its countdown; `expired` is shown in its place once it runs out. */
+function QrBlock({ url, expiresAt, hint, expired }: { url: string; expiresAt: string; hint: string; expired: React.ReactNode }) {
+  const [qr, setQr] = useState<string | null>(null);
+  const { left, text } = useCountdown(expiresAt);
+  useEffect(() => {
+    QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: 'M' }).then(setQr);
+  }, [url]);
+  if (left <= 0) return <>{expired}</>;
+  return (
+    <>
+      <div className="mt-3 grid place-items-center">
+        {qr ? <img src={qr} alt="QR code to open on your phone" className="size-44 rounded-md bg-white p-1" /> : <div className="size-44" />}
+      </div>
+      <p className="mt-2 text-center text-sm text-ink/80">{hint}</p>
+      <p className="mt-0.5 flex items-center justify-center gap-1 text-xs text-muted">
+        <Clock size={12} /> Expires in {text}
+      </p>
+    </>
+  );
+}
+
 function QrCard({ state, send }: { state: ExtState; send: Send }) {
   const s = state.session!;
-  const [qr, setQr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { left, text } = useCountdown(s.expires_at);
-  useEffect(() => {
-    QRCode.toDataURL(s.qr_url, { margin: 1, width: 360, errorCorrectionLevel: 'M' }).then(setQr);
-  }, [s.qr_url]);
   const name = s.snapshot?.session.form_name || s.form_name;
 
   return (
@@ -189,36 +205,27 @@ function QrCard({ state, send }: { state: ExtState; send: Send }) {
         </h1>
         <Pill tone="accent">{s.field_count} fields</Pill>
       </div>
-      {left > 0 ? (
-        <>
-          <div className="mt-3 grid place-items-center">
-            {qr ? (
-              <img src={qr} alt="QR code to open on your phone" className="size-44 rounded-md bg-white p-1" />
-            ) : (
-              <div className="size-44" />
-            )}
+      <QrBlock
+        url={s.qr_url}
+        expiresAt={s.expires_at}
+        hint="Scan with your phone"
+        expired={
+          <div className="mt-4 text-center">
+            <p className="text-sm text-muted">This QR code has expired.</p>
+            <Button
+              className="mt-3"
+              loading={busy}
+              onClick={async () => {
+                setBusy(true);
+                await send({ type: 'START_SESSION' });
+                setBusy(false);
+              }}
+            >
+              Regenerate
+            </Button>
           </div>
-          <p className="mt-2 text-center text-sm text-ink/80">Scan with your phone</p>
-          <p className="mt-0.5 flex items-center justify-center gap-1 text-xs text-muted">
-            <Clock size={12} /> Expires in {text}
-          </p>
-        </>
-      ) : (
-        <div className="mt-4 text-center">
-          <p className="text-sm text-muted">This QR code has expired.</p>
-          <Button
-            className="mt-3"
-            loading={busy}
-            onClick={async () => {
-              setBusy(true);
-              await send({ type: 'START_SESSION' });
-              setBusy(false);
-            }}
-          >
-            Regenerate
-          </Button>
-        </div>
-      )}
+        }
+      />
       <div className="mt-3 text-center">
         <LinkButton onClick={() => send({ type: 'END_SESSION' })}>Cancel</LinkButton>
       </div>
@@ -234,8 +241,10 @@ function displayValue(f: SessionField, v: string) {
 function PairedCard({ state, send }: { state: ExtState; send: Send }) {
   const s = state.session!;
   const snap = s.snapshot!;
-  const [busy, setBusy] = useState<'fill' | 'undo' | null>(null);
+  const [busy, setBusy] = useState<'fill' | 'undo' | 'reconnect' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The QR code is shown again ("Connect phone again") and no phone has scanned it yet. */
+  const waiting = snap.session.status === 'waiting';
 
   const valueOf = useMemo(() => new Map(snap.values.map((v) => [v.field_id, v])), [snap.values]);
   const fileOf = useMemo(() => new Map((snap.files ?? []).map((f) => [f.field_id, f])), [snap.files]);
@@ -247,8 +256,8 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
   const skipped = new Map((state.lastFill?.skipped ?? []).map((x) => [x.field_key, x.reason]));
   const hasValues = snap.values.some((v) => v.value) || (snap.files ?? []).some((f) => f.status === 'uploaded');
 
-  async function act(type: 'FILL' | 'UNDO') {
-    setBusy(type === 'FILL' ? 'fill' : 'undo');
+  async function act(type: 'FILL' | 'UNDO' | 'RECONNECT') {
+    setBusy(type === 'FILL' ? 'fill' : type === 'UNDO' ? 'undo' : 'reconnect');
     setError(await send({ type }));
     setBusy(null);
   }
@@ -257,7 +266,7 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
     <Card>
       <div className="flex items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-sm font-semibold">
-          <Smartphone size={16} /> Phone paired
+          <Smartphone size={16} /> {waiting ? 'Connect your phone' : 'Phone paired'}
         </h1>
         <div className="flex items-center gap-1.5">
           {processing > 0 && (
@@ -269,6 +278,24 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
         </div>
       </div>
       <p className="mt-0.5 truncate text-xs text-muted">{snap.session.form_name}</p>
+
+      {waiting && (
+        <div className="mt-1 border-b border-line pb-3">
+          <QrBlock
+            url={s.qr_url}
+            expiresAt={s.expires_at}
+            hint="Scan with your phone. Answers so far are kept."
+            expired={
+              <div className="mt-3 text-center">
+                <p className="text-sm text-muted">This QR code has expired.</p>
+                <Button className="mt-2" loading={busy === 'reconnect'} onClick={() => act('RECONNECT')}>
+                  Show QR again
+                </Button>
+              </div>
+            }
+          />
+        </div>
+      )}
 
       <div className="mt-2 max-h-72 overflow-y-auto">
         {snap.fields.map((f) => {
@@ -326,8 +353,10 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
         </p>
       )}
       {snap.session.status === 'filled' && <p className="mt-1 text-xs text-live-ink">Your phone marked the form as done.</p>}
-      <div className="mt-3 flex justify-between">
+      <div className="mt-3 flex flex-wrap justify-between gap-x-3 gap-y-1">
         <LinkButton onClick={() => send({ type: 'END_SESSION' })}>New form</LinkButton>
+        {/* The phone page was closed (back button, tab closed): same form, answers kept. */}
+        {!waiting && <LinkButton onClick={() => act('RECONNECT')}>Connect phone again</LinkButton>}
         <LinkButton onClick={() => send({ type: 'LOGOUT' })}>Sign out</LinkButton>
       </div>
     </Card>

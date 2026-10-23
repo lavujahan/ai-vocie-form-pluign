@@ -53,6 +53,24 @@ export function patchTab(tabs: Tabs, tabId: number, patch: Partial<TabState>): T
   return t ? { ...tabs, [tabId]: { ...t, ...patch } } : tabs;
 }
 
+/**
+ * "Connect phone again": the tab's QR code is shown again until `expiresAt` (the phone page was closed),
+ * with every answer kept. The popup then shows the QR above the fields instead of the first-scan screen.
+ */
+export function reopenQr(tabs: Tabs, tabId: number, expiresAt: string): Tabs {
+  const t = tabs[tabId];
+  if (!t) return tabs;
+  const snap = t.session.snapshot;
+  return patchTab(tabs, tabId, {
+    session: {
+      ...t.session,
+      expires_at: expiresAt,
+      reconnect: true,
+      snapshot: snap && { ...snap, session: { ...snap.session, status: 'waiting', paired_at: null } },
+    },
+  });
+}
+
 export function tabOfSession(tabs: Tabs, sessionId: string): number | null {
   const hit = Object.entries(tabs).find(([, t]) => t.session.session_id === sessionId);
   return hit ? Number(hit[0]) : null;

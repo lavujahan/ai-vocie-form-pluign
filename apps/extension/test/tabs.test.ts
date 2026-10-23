@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertRoom, changesSince, endTab, MAX_TABS, mergeFill, migrate, otherSessions, patchTab, startTab, tabOfSession, watermarkOf, type Tabs } from '../src/background/tabs';
+import { assertRoom, changesSince, endTab, MAX_TABS, mergeFill, migrate, otherSessions, patchTab, reopenQr, startTab, tabOfSession, watermarkOf, type Tabs } from '../src/background/tabs';
 import { siteOf, type ActiveSession } from '../src/messages';
 
 const session = (tab_id: number, id = `s${tab_id}`): ActiveSession => ({
@@ -95,5 +95,25 @@ describe('filling only on "Fill form"', () => {
   it('does not count answers emptied by a Start over, or uploads already filled', () => {
     const s = snap([value('a', null, 9, 4), value('b', 'Erode', 9, 6)], [{ id: 'f', status: 'filled', s: 9 }], 5);
     expect(changesSince(s, Date.parse(at(1)))).toBe(1);
+  });
+});
+
+describe('Connect phone again', () => {
+  it('shows the QR again for that tab only, keeping its answers and fill state', () => {
+    const snapshot = {
+      session: { id: 's1', form_name: 'CAN', page_url: 'https://x', status: 'filled', expires_at: '2030-01-01T00:00:00Z', reset_seq: 0, reset_scope: null, desktop_state: 'open', desktop_report: null, paired_at: '2030-01-01T00:01:00Z' },
+      fields: [],
+      values: [{ field_id: 'f1', value: 'Ramesh', confidence: 1, source_phrase: null, source_seq: 1, updated_at: '2030-01-01T00:02:00Z' }],
+      utterances: [],
+    } as unknown as NonNullable<ActiveSession['snapshot']>;
+    let tabs = startTab(startTab({}, 1, { ...session(1), snapshot }), 2, session(2));
+    tabs = patchTab(tabs, 1, { filledUpTo: 7, canUndo: true });
+    const next = reopenQr(tabs, 1, '2030-01-01T01:00:00Z');
+    expect(next[1].session).toMatchObject({ expires_at: '2030-01-01T01:00:00Z', reconnect: true });
+    expect(next[1].session.snapshot?.session).toMatchObject({ status: 'waiting', paired_at: null });
+    expect(next[1].session.snapshot?.values).toEqual(snapshot.values);
+    expect(next[1]).toMatchObject({ filledUpTo: 7, canUndo: true });
+    expect(next[2]).toBe(tabs[2]);
+    expect(reopenQr(tabs, 9, '2030-01-01T01:00:00Z')).toBe(tabs);
   });
 });

@@ -371,7 +371,12 @@ export type SessionInfo = {
   reset_scope: ResetScope | null;
   desktop_state: DesktopState;
   desktop_report: DesktopReport | null;
+  /** When the current phone paired (null while the QR waits to be scanned). */
+  paired_at?: string | null;
 };
+
+/** "Connect phone again": the same QR code works once more until `expires_at` (answers are kept). */
+export type ReconnectResponse = { expires_at: string };
 
 export type PairResponse = {
   token: string;

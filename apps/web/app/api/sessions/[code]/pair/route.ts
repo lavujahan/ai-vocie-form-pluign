@@ -32,7 +32,7 @@ export const POST = route<Ctx>(async (_req, { params }) => {
   }
   const session = withSessionDefaults(row);
 
-  const { token, expires_at } = await signSessionJwt(session.id);
+  const { token, expires_at } = await signSessionJwt(session.id, session.paired_at);
   const snapshot = await getSnapshot(session);
   return NextResponse.json({
     token,

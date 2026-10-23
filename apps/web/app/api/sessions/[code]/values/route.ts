@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { PatchValuesRequest, validateValue } from '@vff/shared';
 import { requirePhone } from '@/lib/auth';
-import { fail, route } from '@/lib/http';
-import { assertPhoneCanWrite, getFieldRows, getSessionByCode, upsertValue } from '@/lib/sessions';
+import { route } from '@/lib/http';
+import { assertPhoneCanWrite, assertPhoneOf, getFieldRows, getSessionByCode, upsertValue } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -14,7 +14,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
   const { code } = await params;
   const claims = await requirePhone(req);
   const session = await getSessionByCode(code);
-  if (claims.session_id !== session.id) throw fail(403, 'Not allowed');
+  assertPhoneOf(claims, session);
   const body = PatchValuesRequest.parse(await req.json());
   assertPhoneCanWrite(session, body.seq);
   const fields = new Map((await getFieldRows(session.id)).map((f) => [f.field_key, f]));

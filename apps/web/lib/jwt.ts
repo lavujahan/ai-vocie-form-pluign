@@ -14,6 +14,8 @@ export type PhoneClaims = {
   role: 'authenticated';
   scope: 'phone';
   session_id: string;
+  /** When this phone paired: "Connect phone again" pairs a new phone and makes older tokens invalid. */
+  paired_at?: string;
 };
 
 export type Claims = UserClaims | PhoneClaims;

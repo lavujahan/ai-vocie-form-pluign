@@ -112,6 +112,20 @@ try {
   const second = await pair();
   check('pairing code works once', !!first.data && !second.data);
 
+  // ---- Connect phone again: the same QR works once more, answers kept (as /reconnect does) ----
+  const reconnect = await admin
+    .from('form_sessions')
+    .update({ status: 'waiting', paired_at: null, expires_at: new Date(Date.now() + 10 * 60_000).toISOString() })
+    .eq('id', session.id)
+    .in('status', ['waiting', 'paired', 'filled'])
+    .neq('desktop_state', 'closed')
+    .select('id')
+    .maybeSingle();
+  const third = await pair();
+  const { data: kept } = await admin.from('field_values').select('value').eq('session_id', session.id).maybeSingle();
+  check('Connect phone again: the QR pairs once more', !!reconnect.data && !!third.data, reconnect.error?.message);
+  check('Connect phone again: answers are kept', kept?.value === 'from #11', JSON.stringify(kept));
+
   // ---- RLS ----
   const userToken = async (id: string) =>
     (await signJwt({ role: 'authenticated', scope: 'user', app_role: 'user' }, id, 300, secret)).token;

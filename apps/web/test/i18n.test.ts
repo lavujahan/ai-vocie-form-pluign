@@ -44,3 +44,11 @@ describe('PDF converter messages', () => {
     }
   });
 });
+
+describe('Connect phone again', () => {
+  it('the replaced-phone message from the server is shown in Tamil', () => {
+    const ta = serverText('ta', MSG.phoneReplaced);
+    expect(ta).not.toBe(MSG.phoneReplaced);
+    expect(ta).toMatch(/[஀-௿]/);
+  });
+});

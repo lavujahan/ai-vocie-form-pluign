@@ -214,6 +214,8 @@ Test page: `test-fixtures/wizard.html`.
 - The QR code must be scanned within 10 minutes and works once.
 - After scanning, the phone link lasts 30 minutes.
 - Reloading the phone page in the same browser tab resumes with all answers. Only a recording still in progress is lost, and the page warns before leaving.
+- **Phone back button:** the page opens from a QR scan with no history, so back would close it. After the first tap the page adds a history entry: back then closes whatever is open (photo sheet, typing box, Start over), or shows "Press back again to leave"; a second back leaves.
+- **Connect phone again** (popup, after pairing; `POST /api/sessions/[code]/reconnect`): when the phone page was closed, the popup shows the same QR code again above the fields, for 10 minutes. Scanning it opens the phone page with every answer kept. Tokens of the earlier phone stop working (they carry the old `paired_at`), and a phone page still open shows "Disconnected". Not possible once the form tab was closed.
 
 **Start over** is a phone button that opens a sheet with two choices:
 - **Clear phone answers:** clears the answers on the phone. The computer's form is left as it is, and auto-fill stops.

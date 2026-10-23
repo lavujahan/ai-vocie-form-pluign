@@ -293,6 +293,31 @@ function SessionScreen({ code }: { code: string }) {
     window.scrollTo(0, 0);
   };
 
+  // Back button: closes what is open; otherwise warns once (the next back leaves the page).
+  const [leaveWarn, setLeaveWarn] = useState(false);
+  useBackGuard(s.phase === 'ready' && !s.replaced, () => {
+    if (fileSheet) setFileSheet(null);
+    else if (editing) setEditing(null);
+    else if (resetOpen) setResetOpen(false);
+    else {
+      setLeaveWarn(true);
+      return false;
+    }
+    return true;
+  });
+  useEffect(() => {
+    if (!leaveWarn) return;
+    const off = () => setLeaveWarn(false);
+    window.addEventListener('pointerdown', off, { once: true });
+    return () => window.removeEventListener('pointerdown', off);
+  }, [leaveWarn]);
+
+  // Another phone took over ("Connect phone again" on the computer): stop listening here.
+  useEffect(() => {
+    if (s.replaced && recorder.state === 'recording') recorder.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.replaced]);
+
   if (s.phase === 'pairing') {
     return (
       <Shell>
@@ -310,6 +335,18 @@ function SessionScreen({ code }: { code: string }) {
             <AlertCircle size={18} className="text-danger" /> {t('cantContinue')}
           </h1>
           <p className="mt-2 text-sm text-muted">{srv(s.fatal)}</p>
+        </Card>
+      </Shell>
+    );
+  }
+  if (s.replaced) {
+    return (
+      <Shell>
+        <Card>
+          <h1 className="flex items-center gap-2 text-base font-semibold">
+            <MonitorX size={18} /> {t('replacedTitle')}
+          </h1>
+          <p className="mt-2 text-sm text-muted">{t('replacedBody')}</p>
         </Card>
       </Shell>
     );
@@ -429,12 +466,44 @@ function SessionScreen({ code }: { code: string }) {
         recording={recording}
         elapsed={recorder.elapsed}
         micDisabled={recorder.state === 'unsupported'}
-        notice={!recording && recorder.notice ? t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort') : null}
+        notice={
+          leaveWarn ? t('backAgainToLeave') : !recording && recorder.notice ? t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort') : null
+        }
         onMic={toggleMic}
         send={send}
       />
     </Page>
   );
+}
+
+/**
+ * The phone's back button. The page opens from a QR scan in a fresh tab with no history, so back would
+ * close it. After the first tap an extra history entry is added (Android Chrome skips entries added
+ * without a tap); back then lands on the page itself and `onBack` decides: true = something was closed,
+ * stay (guarded again); false = the user was warned, so the next back really leaves.
+ */
+function useBackGuard(active: boolean, onBack: () => boolean) {
+  const handler = useRef(onBack);
+  handler.current = onBack;
+  useEffect(() => {
+    if (!active) return;
+    let armed = false;
+    const arm = () => {
+      if (armed) return;
+      history.pushState({ vffGuard: true }, '');
+      armed = true;
+    };
+    const onPop = () => {
+      armed = false;
+      if (handler.current()) arm();
+    };
+    window.addEventListener('pointerdown', arm, true);
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('pointerdown', arm, true);
+      window.removeEventListener('popstate', onPop);
+    };
+  }, [active]);
 }
 
 // ---------- layout ----------

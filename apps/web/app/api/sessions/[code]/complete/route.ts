@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { requirePhone } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
 import { sendBlock } from '@/lib/session-rules';
-import { assertWritable, getSessionByCode } from '@/lib/sessions';
+import { assertPhoneOf, assertWritable, getSessionByCode } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -14,7 +14,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const { code } = await params;
   const claims = await requirePhone(req);
   const session = await getSessionByCode(code);
-  if (claims.session_id !== session.id) throw fail(403, 'Not allowed');
+  assertPhoneOf(claims, session);
   assertWritable(session);
   // The form tab on the computer is closed or on another site: nothing would be filled.
   const block = sendBlock(session);

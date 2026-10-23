@@ -5,7 +5,7 @@ import { isEmptyTranscript } from '@/lib/agents/guardrails';
 import { STT_MAX_SECONDS, sttConfig, transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
 import { fail, must, route } from '@/lib/http';
-import { assertPhoneCanWrite, getFieldRows, getSessionById, getValues, recentSpeech, upsertValue } from '@/lib/sessions';
+import { assertPhoneCanWrite, assertPhoneOf, getFieldRows, getSessionById, getValues, recentSpeech, upsertValue } from '@/lib/sessions';
 import { recordingTranscriptSoFar } from '@/lib/recordings';
 import { db } from '@/lib/supabase-admin';
 import { openaiEvent, sttEvent, type UsageEvent } from '@/lib/usage/events';
@@ -41,6 +41,7 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 export const POST = route(async (req) => {
   const claims = await requirePhone(req);
   const session = await getSessionById(claims.session_id);
+  assertPhoneOf(claims, session);
 
   const form = await req.formData();
   const audio = form.get('audio');
