@@ -94,8 +94,11 @@ export type ActiveSession = CreateSessionResponse & {
 export type ExtState = {
   auth: { user: PublicUser; expires_at: string } | null;
   session: ActiveSession | null;
-  /** After "Fill form", new values are filled into the page as they arrive. */
-  autoFill: boolean;
+  /**
+   * Answers / uploads from the phone that came after the last "Fill form" (not on the page yet);
+   * null before the first one. The page is only ever filled on "Fill form".
+   */
+  unfilledChanges: number | null;
   live: boolean;
   lastFill: FillReport | null;
   canUndo: boolean;

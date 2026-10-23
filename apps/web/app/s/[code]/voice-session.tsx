@@ -35,6 +35,7 @@ import { initialLang, saveLang, translate, type Lang } from '@/lib/i18n';
 import { Button, Card, Pill, cx } from '@/components/ui';
 import { FileSheet, FileStatusMarker } from './file-upload';
 import { LangCtx, useI18n, type T } from './lang';
+import { sendWatermark, unsentChanges } from './send-state';
 import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
 
@@ -106,6 +107,26 @@ function SessionScreen({ code }: { code: string }) {
   const [askSend, setAskSend] = useState(0);
   /** Upload field whose photo / file sheet is open. */
   const [fileSheet, setFileSheet] = useState<string | null>(null);
+  /** Newest answer / upload time at the last Send (server clock): anything newer is "not sent yet". */
+  const [sentUpTo, setSentUpToState] = useState<number | null>(null);
+  const sentKey = `vff:sent:${code}`;
+  useEffect(() => {
+    try {
+      const v = Number(sessionStorage.getItem(sentKey));
+      if (v) setSentUpToState(v);
+    } catch {
+      /* storage blocked: the computer's last fill time is used instead */
+    }
+  }, [sentKey]);
+  const setSentUpTo = (v: number | null) => {
+    setSentUpToState(v);
+    try {
+      if (v) sessionStorage.setItem(sentKey, String(v));
+      else sessionStorage.removeItem(sentKey);
+    } catch {
+      /* storage blocked */
+    }
+  };
 
   /**
    * Tags for one recording: the first piece gets `seq`; each extra piece (long recordings are cut
@@ -212,6 +233,7 @@ function SessionScreen({ code }: { code: string }) {
     setEditing(null);
     const err = await s.reset(scope);
     if (err) return srv(err);
+    setSentUpTo(null);
     setResetOpen(false);
     setView('main');
     setNotice(t(scope === 'both' ? 'clearedBoth' : 'clearedPhone'));
@@ -297,6 +319,12 @@ function SessionScreen({ code }: { code: string }) {
   }
 
   const desktop = s.session?.desktop_state ?? 'open';
+  const sent = s.session?.status === 'filled';
+  const resetSeq = s.session?.reset_seq ?? 0;
+  const values = [...s.valueByKey.values()];
+  const files = [...s.files.values()];
+  /** After a Send: answers / uploads changed since then (they can be sent again). */
+  const unsent = sent ? unsentChanges(values, files, resetSeq, sentUpTo, s.session?.desktop_report?.at) : 0;
   const sheetField = fileSheet ? s.fields.find((f) => f.field_key === fileSheet) : undefined;
   const attention = s.fields.filter((f) => needsAttention(f, statusOf(f)));
 
@@ -378,11 +406,18 @@ function SessionScreen({ code }: { code: string }) {
         <SendBar
           fields={s.fields}
           statusOf={statusOf}
-          sent={s.session?.status === 'filled'}
+          sent={sent}
+          unsent={unsent}
           desktop={desktop}
           report={s.session?.desktop_report ?? null}
           askSend={askSend}
-          onSend={s.complete}
+          onSend={async () => {
+            // What this Send covers: anything newer afterwards counts as "not sent yet".
+            const mark = sendWatermark(values, files, resetSeq);
+            const err = await s.complete();
+            if (!err) setSentUpTo(mark || Date.now());
+            return err;
+          }}
         />
       </Page>
     );
@@ -415,6 +450,7 @@ function SessionScreen({ code }: { code: string }) {
         total={s.fields.length}
         processing={processing}
         attention={attention.length}
+        unsent={unsent}
         failed={failedSpeech}
         onRetryFailed={() => failedSpeech.forEach((u) => u.blob && s.retry(u))}
         onAttention={() => {
@@ -713,6 +749,7 @@ function BottomBar({
   total,
   processing,
   attention,
+  unsent,
   failed,
   onRetryFailed,
   onAttention,
@@ -728,6 +765,8 @@ function BottomBar({
   total: number;
   processing: number;
   attention: number;
+  /** After a Send: changes not sent yet (tap: Review, to send them). */
+  unsent: number;
   failed: LocalUtterance[];
   onRetryFailed: () => void;
   onAttention: () => void;
@@ -764,6 +803,11 @@ function BottomBar({
         {attention > 0 && (
           <button onClick={onAttention} className="rounded-full bg-warn-bg px-2.5 py-0.5 font-semibold text-warn-ink">
             {t('needYou', { n: attention })}
+          </button>
+        )}
+        {unsent > 0 && (
+          <button onClick={onReview} className="rounded-full bg-accent-bg px-2.5 py-0.5 font-semibold text-accent-ink">
+            {t('notSentYet', { n: unsent })}
           </button>
         )}
       </div>
@@ -832,6 +876,7 @@ function SendBar({
   fields,
   statusOf,
   sent,
+  unsent,
   desktop,
   report,
   askSend,
@@ -840,6 +885,8 @@ function SendBar({
   fields: SessionField[];
   statusOf: (f: SessionField) => FieldStatus;
   sent: boolean;
+  /** Answers / uploads changed since the last Send. */
+  unsent: number;
   desktop: DesktopState;
   report: DesktopReport | null;
   /** Bumped when the user said "send it": ask before sending. */
@@ -855,8 +902,8 @@ function SendBar({
   const ack = useDesktopAck(sent, report, sends);
 
   const missing = fields.filter((f) => needsInput(f, statusOf(f))).length;
-  // Sent, but the computer didn't fill (asleep, or the form page changed): allow sending again.
-  const canResend = ack.kind === 'timeout' || ack.kind === 'nothing';
+  // Send again whenever something changed since the last Send (or the computer filled nothing).
+  const canResend = unsent > 0 || ack.kind === 'nothing';
   const canSend = desktop === 'open' && (!sent || canResend);
   const send = async () => {
     setConfirm(null);
@@ -899,11 +946,12 @@ function SendBar({
             <Loader2 size={18} className="animate-spin" />
           ) : sent && !canResend ? (
             <>
-              <Check size={18} /> {t('sentToDesktop')}
+              <Check size={18} /> {t('sentShort')}
             </>
           ) : (
             <>
-              <Send size={18} /> {t(sent ? 'sendAgain' : 'sendToDesktop')}
+              <Send size={18} />{' '}
+              {!sent ? t('sendToDesktop') : unsent === 1 ? t('sendOneChange') : unsent > 1 ? t('sendChanges', { n: unsent }) : t('sendAgain')}
             </>
           )}
         </button>
@@ -918,22 +966,18 @@ function SendBar({
 type Ack =
   | { kind: 'none' }
   | { kind: 'waiting' }
-  | { kind: 'timeout' }
   | { kind: 'filled'; report: DesktopReport }
   | { kind: 'nothing'; report: DesktopReport };
 
-const ACK_TIMEOUT_MS = 15_000;
-
 /**
- * After "Send to desktop": the extension reports each full fill (desktop_report). A new report means the
- * computer filled the form; none within 15 s means the browser is asleep, closed, or the extension is off.
+ * After "Send to desktop" the computer fills the page when the operator clicks "Fill form" (never by
+ * itself), so the phone waits without a time limit. Each fill sends a report (desktop_report): a newer
+ * one than at the Send means the page was filled.
  */
 function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: number): Ack {
   /** The report that was current when Send was pressed (undefined = not tracking, e.g. after a reload). */
   const sentWith = useRef<string | null | undefined>(undefined);
-  const [timedOut, setTimedOut] = useState(false);
   useEffect(() => {
-    setTimedOut(false);
     if (!sent) {
       sentWith.current = undefined;
       return;
@@ -942,8 +986,6 @@ function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: numbe
     // sent before this page loaded: any report counts.
     if (sends > 0) sentWith.current = report?.at ?? null;
     else if (sentWith.current === undefined) sentWith.current = null;
-    const timer = setTimeout(() => setTimedOut(true), ACK_TIMEOUT_MS);
-    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sent, sends]);
 
@@ -951,18 +993,14 @@ function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: numbe
   if (report && report.at !== sentWith.current) {
     return report.filled === 0 && report.total > 0 ? { kind: 'nothing', report } : { kind: 'filled', report };
   }
-  return timedOut ? { kind: 'timeout' } : { kind: 'waiting' };
+  return { kind: 'waiting' };
 }
 
 function AckLine({ ack }: { ack: Ack }) {
   const { t } = useI18n();
   switch (ack.kind) {
     case 'waiting':
-      return (
-        <p className="flex items-center gap-1.5 text-xs text-muted">
-          <Loader2 size={12} className="animate-spin" /> {t('ackWaiting')}
-        </p>
-      );
+      return <p className="text-xs text-accent-ink">{t('ackWaitingFill')}</p>;
     case 'filled':
       return (
         <p className="text-xs text-live-ink">
@@ -972,8 +1010,6 @@ function AckLine({ ack }: { ack: Ack }) {
       );
     case 'nothing':
       return <p className="text-xs text-danger-ink">{t('ackNothing')}</p>;
-    case 'timeout':
-      return <p className="text-xs text-danger-ink">{t('ackTimeout')}</p>;
     default:
       return null;
   }

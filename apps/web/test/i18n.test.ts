@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { cleanTamilLabel } from '@/lib/agents/formAnalyzer';
 import { fieldLabelFor, serverText, translate } from '@/lib/i18n';
 import { MSG } from '@/lib/session-rules';
+import { PDF_LOCKED, PDF_TOO_LONG } from '@/lib/files/convert';
 
 describe('phone screens in Tamil', () => {
   it('translates screen text and fills in values', () => {
@@ -30,5 +31,16 @@ describe('phone screens in Tamil', () => {
     expect(cleanTamilLabel("Father's name")).toBeNull();
     expect(cleanTamilLabel('')).toBeNull();
     expect(cleanTamilLabel('அ'.repeat(100))!.length).toBe(60);
+  });
+});
+
+describe('PDF converter messages', () => {
+  it('are shown in Tamil (the texts must match the converter word for word)', () => {
+    for (const msg of [PDF_LOCKED, PDF_TOO_LONG]) {
+      const ta = serverText('ta', msg);
+      expect(ta).not.toBe(msg);
+      expect(ta).toMatch(/[஀-௿]/);
+      expect(serverText('en', msg)).toBe(msg);
+    }
   });
 });

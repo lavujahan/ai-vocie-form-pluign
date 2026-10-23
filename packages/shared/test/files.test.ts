@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { checkFile, describeFileRules, effectiveFileRules, formatsFromAccept, sanitizeFileRules, sniffMime, targetFormat } from '../src';
+import { checkFile, describeFileRules, effectiveFileRules, formatsFromAccept, photoShape, sanitizeFileRules, sniffMime, targetFormat } from '../src';
 
 const rules = (over: Partial<Parameters<typeof sanitizeFileRules>[0] & object> = {}) =>
-  sanitizeFileRules({ kind: 'photo', formats: ['jpg'], max_kb: 50, min_kb: null, max_pages: null, width_px: null, height_px: null, note: null, ...over }, null);
+  sanitizeFileRules({ kind: 'photo', formats: ['jpg'], max_kb: 50, min_kb: null, max_pages: null, width_px: null, height_px: null, shape: null, note: null, ...over }, null);
 
 describe('file upload rules', () => {
   it('reads the accept attribute', () => {
@@ -38,5 +38,24 @@ describe('file upload rules', () => {
     expect(sniffMime(new TextEncoder().encode('%PDF-1.7'))).toBe('application/pdf');
     expect(sniffMime(new TextEncoder().encode('<html>'))).toBeNull();
     expect(describeFileRules(rules({ formats: ['pdf'], max_kb: 1024, max_pages: 3 }))).toBe('PDF · max 1.0 MB · up to 3 pages');
+  });
+});
+
+describe('photo shape (only when the page states a size)', () => {
+  it('uses an exact pixel size, or a cm / mm / inch size as the shape at 300 dpi', () => {
+    expect(photoShape(rules({ width_px: 200, height_px: 230 }))).toEqual({ ratio: 200 / 230, w: 200, h: 230, exact: true });
+    const cm = photoShape(rules({ shape: { w: 3.5, h: 4.5, unit: 'cm' } }))!;
+    expect(cm.ratio).toBeCloseTo(3.5 / 4.5);
+    expect([cm.w, cm.h, cm.exact]).toEqual([413, 531, false]);
+    expect(photoShape(rules({ shape: { w: 35, h: 45, unit: 'mm' } }))).toMatchObject({ w: 413, h: 531 });
+    // A big stated size stays within 1200 px on the long side.
+    expect(photoShape(rules({ shape: { w: 6, h: 8, unit: 'in' } }))).toMatchObject({ w: 900, h: 1200 });
+  });
+
+  it('assumes nothing when no size is stated, and turns a stated pixel shape into an exact size', () => {
+    expect(photoShape(rules({ note: 'Passport size' }))).toBeNull();
+    expect(sanitizeFileRules({ ...rules(), shape: { w: 200, h: 230, unit: 'px' } }, null)).toMatchObject({ width_px: 200, height_px: 230 });
+    expect(sanitizeFileRules({ ...rules(), shape: { w: 1, h: 20, unit: 'cm' } }, null).shape).toBeNull(); // absurd ratio dropped
+    expect(describeFileRules(rules({ shape: { w: 3.5, h: 4.5, unit: 'cm' } }))).toBe('JPG · max 50 KB · 3.5×4.5 cm');
   });
 });

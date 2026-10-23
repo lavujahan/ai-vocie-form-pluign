@@ -302,7 +302,7 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
 
       <div className="mt-3 flex gap-2">
         <Button className="flex-1" loading={busy === 'fill'} disabled={!hasValues} onClick={() => act('FILL')}>
-          Fill form
+          {state.unfilledChanges ? `Fill form (${state.unfilledChanges} new)` : 'Fill form'}
         </Button>
         <Button loading={busy === 'undo'} disabled={!state.canUndo} onClick={() => act('UNDO')}>
           Undo
@@ -310,7 +310,12 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
       </div>
       {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
       {state.notice && !error && <p className="mt-2 text-xs text-accent-ink">{state.notice}</p>}
-      {state.autoFill && !error &&<p className="mt-2 text-xs text-muted">New answers from your phone fill in automatically.</p>}
+      {!!state.unfilledChanges && !error && (
+        // The page only changes on "Fill form": newer answers wait here until then.
+        <p className="mt-2 text-xs text-accent-ink">
+          {state.unfilledChanges === 1 ? '1 new answer from the phone' : `${state.unfilledChanges} new answers from the phone`} · not on the page yet
+        </p>
+      )}
       {snap.session.status === 'filled' && <p className="mt-1 text-xs text-live-ink">Your phone marked the form as done.</p>}
       <div className="mt-3 flex justify-between">
         <LinkButton onClick={() => send({ type: 'END_SESSION' })}>New form</LinkButton>

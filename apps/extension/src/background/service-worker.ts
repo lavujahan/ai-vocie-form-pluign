@@ -19,7 +19,6 @@ import type {
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
 import {
   MOVED_REASON,
-  NOT_ON_PAGE,
   siteOf,
   type ActiveSession,
   type ContentRequest,
@@ -36,7 +35,7 @@ import {
   type UndoResult,
 } from '../messages';
 import { api, ApiError } from './api';
-import { assertRoom, endTab, mergeFill, migrate, otherSessions, patchTab, startTab, tabOfSession, type TabState, type Tabs } from './tabs';
+import { assertRoom, changesSince, endTab, mergeFill, migrate, otherSessions, patchTab, startTab, tabOfSession, watermarkOf, type TabState, type Tabs } from './tabs';
 
 // ---------- state (mirrored to chrome.storage.session so it survives worker restarts) ----------
 // One form session per tab: several forms can be filled at once, each paired with its own phone.
@@ -69,7 +68,7 @@ function publicState(tabId: number | undefined): ExtState {
   return {
     auth: state.auth ? { user: state.auth.user, expires_at: state.auth.expires_at } : null,
     session: t?.session ?? null,
-    autoFill: t?.autoFill ?? false,
+    unfilledChanges: t ? changesSince(t.session.snapshot, t.filledUpTo) : null,
     live: !!t && !!channels.get(t.session.session_id)?.live,
     lastFill: t?.lastFill ?? null,
     canUndo: t?.canUndo ?? false,
@@ -83,6 +82,33 @@ async function save(patch: Partial<Persisted> = {}) {
   state = { ...state, ...patch };
   await chrome.storage.session.set({ state });
   broadcast();
+  updateBadges();
+}
+
+/**
+ * The page is only filled on "Fill form". The extension icon shows, per tab, how many answers from the
+ * phone are not on the page yet: everything the phone sent before the first Fill form, then whatever
+ * changed since the last one.
+ */
+function pendingCount(t: TabState): number {
+  const snap = t.session.snapshot;
+  if (!snap) return 0;
+  const since = changesSince(snap, t.filledUpTo);
+  if (since !== null) return since;
+  if (snap.session.status !== 'filled') return 0; // the phone hasn't sent yet
+  return Object.values(valuesForFill(snap)).filter(Boolean).length + (snap.files ?? []).filter((f) => f.status === 'uploaded').length;
+}
+
+let badgeColorSet = false;
+function updateBadges() {
+  if (!badgeColorSet) {
+    badgeColorSet = true;
+    void chrome.action.setBadgeBackgroundColor({ color: '#1e4e9c' }).catch(() => null);
+  }
+  for (const [id, t] of Object.entries(state.tabs)) {
+    const n = pendingCount(t);
+    void chrome.action.setBadgeText({ tabId: Number(id), text: n ? String(n) : '' }).catch(() => null);
+  }
 }
 
 const setTab = (tabId: number, patch: Partial<TabState>) => save({ tabs: patchTab(state.tabs, tabId, patch) });
@@ -133,8 +159,8 @@ const withFields = (snap: SessionSnapshot, fields: SessionField[]): SessionSnaps
 });
 
 /**
- * The page watcher saw a change: new fields are added to the session (the phone shows them), and
- * values that were waiting for their field are filled now that it is on the page.
+ * The page watcher saw a change: new fields are added to the session (the phone shows them). Values
+ * waiting for their field are filled on the next "Fill form", like everything else.
  */
 async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
   await ready;
@@ -154,11 +180,6 @@ async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
       console.warn('could not add the new fields', e);
     }
   }
-  const cur = tabOf(tabId);
-  const waiting = (cur?.lastFill?.skipped ?? [])
-    .filter((x) => x.reason === NOT_ON_PAGE && change.present.includes(x.field_key))
-    .map((x) => x.field_key);
-  if (waiting.length && cur?.autoFill) await fillIntoPage(tabId, waiting);
 }
 
 // ---------- content script ----------
@@ -188,7 +209,10 @@ const fieldKeyById = (snap: SessionSnapshot) => new Map(snap.fields.map((f) => [
 function valuesForFill(snap: SessionSnapshot, only?: string[]): Record<string, string | null> {
   const keys = fieldKeyById(snap);
   const out: Record<string, string | null> = {};
+  const resetSeq = snap.session.reset_seq ?? 0;
   for (const v of snap.values) {
+    // Emptied by the phone's Start over: not typed into the page (Start over clears it itself, if asked to).
+    if (v.value === null && v.source_seq <= resetSeq) continue;
     const key = keys.get(v.field_id);
     if (key && (!only || only.includes(key))) out[key] = v.value;
   }
@@ -239,7 +263,7 @@ async function fillIntoPage(tabId: number, only?: string[]) {
     // Moved to another site: stop auto-filling there until the user scans again.
     await setTab(
       tabId,
-      moved ? { lastFill, autoFill: false, canUndo: false, desktop: 'moved', notice: null } : { lastFill, canUndo: true, notice: null },
+      moved ? { lastFill, canUndo: false, desktop: 'moved', notice: null } : { lastFill, canUndo: true, notice: null },
     );
     if (moved) await reportDesktop(s, { state: 'moved' });
     else await reportDropdowns(s, report);
@@ -346,7 +370,6 @@ async function phoneReset(tabId: number, scope: ResetScope | null, before: Sessi
           .map(([k]) => k)
       : []);
   await setTab(tabId, {
-    autoFill: false,
     lastFill: null,
     canUndo: false,
     notice: scope === 'both' ? 'The phone cleared this form. Ready for the next applicant.' : 'The phone started over. The form here was left as it is.',
@@ -385,14 +408,6 @@ async function refreshSnapshot(tabId: number) {
       await sentFromPhone(tabId);
       return;
     }
-    // Values that changed while we were disconnected.
-    if (tabOf(tabId)?.autoFill && before) {
-      const old = valuesForFill(before);
-      const now = valuesForFill(snap);
-      const changed = Object.keys(now).filter((k) => old[k] !== now[k]);
-      if (changed.length) await fillIntoPage(tabId, changed);
-    }
-    if (tabOf(tabId)?.autoFill) await fillFiles(tabId);
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) await logout();
     // Purged on the server (sessions live about 40 minutes): this tab has nothing to fill any more.
@@ -403,9 +418,19 @@ async function refreshSnapshot(tabId: number) {
   }
 }
 
-/** "Send to desktop" on the phone: fill everything now and keep filling later changes. */
+/**
+ * "Send to desktop" on the phone: the popup shows the answers and asks the operator to fill. The page
+ * itself is only ever filled by "Fill form" (the operator decides when the website changes).
+ */
 async function sentFromPhone(tabId: number) {
-  await setTab(tabId, { autoFill: true });
+  await setTab(tabId, { notice: 'The phone sent the form. Click “Fill form” to fill the page.' });
+}
+
+/** "Fill form": everything the phone has sent goes into the page now (answers and uploads). */
+async function fillNow(tabId: number) {
+  const snap = tabOf(tabId)?.session.snapshot;
+  // Anything newer than this arrives after the click and counts as "not filled yet".
+  await setTab(tabId, { filledUpTo: watermarkOf(snap) || Date.now(), notice: null });
   await fillIntoPage(tabId);
   await fillFiles(tabId);
 }
@@ -462,12 +487,8 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
         if (cur && cur.source_seq > row.source_seq) return snap;
         return { ...snap, values: [...snap.values.filter((v) => v.field_id !== row.field_id), row] };
       });
-      await save();
-      // Values cleared by the phone's Start over are never typed into the page (it handles clearing itself).
-      if (row.value === null && snap && row.source_seq <= (snap.session.reset_seq ?? 0)) return;
-      // Latest wins on the page too: re-fill a field when a newer value arrives.
-      const key = snap && fieldKeyById(snap).get(row.field_id);
-      if (tabOf(tabId)?.autoFill && key) await fillIntoPage(tabId, [key]);
+      // The popup shows it; the page gets it on the next "Fill form".
+      if (snap) await save();
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'utterances', filter }, async (p) => {
       const row = p.new as UtteranceRow | undefined;
@@ -492,9 +513,8 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
         }
         return { ...snap, files };
       });
+      // A new photo / PDF from the phone: shown in the popup, put into the page on the next "Fill form".
       await save();
-      // A new photo / PDF from the phone: into the page right away once filling has started.
-      if (row?.status === 'uploaded' && tabOf(tabId)?.autoFill) await fillFiles(tabId, [row.id]);
     })
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'form_fields', filter }, async (p) => {
       const row = p.new as SessionField & { clean_label: string | null };
@@ -633,15 +653,13 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
 
     case 'FILL':
       if (tabId === undefined || !tabOf(tabId)) return;
-      await setTab(tabId, { autoFill: true });
-      await fillIntoPage(tabId);
-      await fillFiles(tabId);
+      await fillNow(tabId);
       return;
 
     case 'UNDO': {
       if (tabId === undefined || !tabOf(tabId)) return;
       await sendToTab(tabId, { type: 'UNDO' }).catch(() => null);
-      await setTab(tabId, { autoFill: false, canUndo: false, lastFill: null });
+      await setTab(tabId, { canUndo: false, lastFill: null });
       return;
     }
   }
@@ -720,7 +738,7 @@ async function pageLoaded(tabId: number, site: string) {
   // Same site (the form's next page, or a postback): watch the new page for its fields.
   if (where === 'open') void watchTab(tabId);
   if (where === (t.desktop ?? 'open')) return;
-  await setTab(tabId, where === 'moved' ? { desktop: where, autoFill: false, canUndo: false } : { desktop: where });
+  await setTab(tabId, where === 'moved' ? { desktop: where, canUndo: false } : { desktop: where });
   await reportDesktop(t.session, { state: where });
 }
 

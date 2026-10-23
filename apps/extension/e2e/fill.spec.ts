@@ -316,7 +316,7 @@ test('uploads: the phone’s file goes into plain, button-hidden and drop-zone i
   await page.close();
 });
 
-test('phone converter: photo under the size limit, photos into one PDF, rotate, crop, exact size', async () => {
+test('phone converter: photo under the size limit, photos into one PDF, rotate, crop, exact size, PDF made smaller', async () => {
   test.setTimeout(60_000);
   const page = await context.newPage();
   await page.goto(`${BASE}/convert.html`);
@@ -334,8 +334,48 @@ test('phone converter: photo under the size limit, photos into one PDF, rotate, 
   expect(r.rotated).toEqual({ w: 200, h: 400 }); // 400×200 turned 90°
   expect(r.cropped).toEqual({ w: 200, h: 200 }); // left half kept
   expect(r.exact).toMatchObject({ w: 200, h: 230, problem: null }); // the field's exact pixel size
-  expect(r.tooBigPdf.pages).toBe(3);
-  expect(r.tooBigPdf.problem as string).toMatch(/limit is 100 KB\. Take photos of the pages instead\./);
+  // Page states 3.5 × 4.5 cm: that shape (413 × 531 at 300 dpi, smaller if needed), within 50 KB.
+  const passport = r.passport as { w: number; h: number; bytes: number; problem: string | null };
+  expect(passport.problem).toBeNull();
+  expect(passport.w / passport.h).toBeCloseTo(3.5 / 4.5, 2);
+  expect(passport.h).toBeLessThanOrEqual(531);
+  expect(passport.bytes).toBeLessThanOrEqual(50 * 1024);
+  // No size stated: the photo keeps its own shape (3000 × 2000 → 3:2).
+  const noSize = r.noSize as { w: number; h: number };
+  expect(noSize.w / noSize.h).toBeCloseTo(1.5, 1);
+  // A picked PDF over the limit is made smaller on the phone, keeping every page.
+  expect(r.tooBigPdf).toMatchObject({ pages: 3, problem: null });
+  expect(r.tooBigPdf.bytes as number).toBeLessThanOrEqual(100 * 1024);
+  expect(r.shrunk.from as number).toBeGreaterThan(1024 * 1024);
+  expect(r.shrunk).toMatchObject({ pages: 3, problem: null, shrunkFrom: r.shrunk.from, seen: [1, 2, 3] });
+  expect(r.shrunk.bytes as number).toBeLessThanOrEqual(300 * 1024);
+  // More pages than the field takes: said plainly, no page is dropped. A locked PDF can't be redrawn.
+  expect(r.tooLong).toEqual({ problem: 'The PDF has 5 pages; at most 3 are allowed.', pages: 5 });
+  expect(r.locked.problem).toBe('This PDF is locked with a password. Take photos of the pages instead.');
+  await page.close();
+});
+
+test('phone converter: a document photo is found, straightened and cleaned (scan look)', async () => {
+  test.setTimeout(60_000);
+  const page = await context.newPage();
+  await page.goto(`${BASE}/convert.html`);
+  await page.waitForFunction(() => typeof (window as unknown as { convertTests?: unknown }).convertTests === 'function');
+  const { scan } = (await page.evaluate(() => (window as unknown as { convertTests: () => Promise<unknown> }).convertTests())) as {
+    scan: { quad: { x: number; y: number }[]; truth: { x: number; y: number }[]; w: number; h: number; bytes: number; problem: string | null; white: number; plainWhite: number };
+  };
+  // The sheet's corners on the table, within 2% of the photo.
+  expect(scan.quad).toHaveLength(4);
+  scan.quad.forEach((p, i) => {
+    expect(Math.abs(p.x - scan.truth[i].x)).toBeLessThan(0.02);
+    expect(Math.abs(p.y - scan.truth[i].y)).toBeLessThan(0.02);
+  });
+  // Straightened to an upright A4 page, within the field's 300 KB.
+  expect(scan.h / scan.w).toBeCloseTo(Math.SQRT2, 2);
+  expect(scan.problem).toBeNull();
+  expect(scan.bytes).toBeLessThanOrEqual(300 * 1024);
+  // Scan look: the shaded paper turns white (without it, none of it is).
+  expect(scan.white).toBeGreaterThan(0.8);
+  expect(scan.plainWhite).toBeLessThan(0.1);
   await page.close();
 });
 

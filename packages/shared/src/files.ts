@@ -44,17 +44,58 @@ export function sanitizeFileRules(rules: FileRules | null | undefined, accept: s
   if (!formats.length) formats = [...ALL];
   const max_kb = clamp(rules?.max_kb, 1, 20_480);
   const min = clamp(rules?.min_kb, 0, max_kb ?? 20_480);
+  const shape = cleanShape(rules?.shape);
+  let width_px = clamp(rules?.width_px, 16, 5000);
+  let height_px = clamp(rules?.height_px, 16, 5000);
+  // A size stated in pixels is an exact size.
+  if (shape?.unit === 'px' && !(width_px && height_px)) {
+    width_px = clamp(Math.round(shape.w), 16, 5000);
+    height_px = clamp(Math.round(shape.h), 16, 5000);
+  }
   return {
     kind: rules?.kind ?? (formats.length === 1 && formats[0] === 'pdf' ? 'document' : 'photo'),
     formats: [...new Set(formats)],
     max_kb,
     min_kb: min ? min : null,
     max_pages: clamp(rules?.max_pages, 1, 200),
-    width_px: clamp(rules?.width_px, 16, 5000),
-    height_px: clamp(rules?.height_px, 16, 5000),
+    width_px: width_px && height_px ? width_px : null,
+    height_px: width_px && height_px ? height_px : null,
+    shape,
     note: rules?.note?.trim().slice(0, 200) || null,
   };
 }
+
+/** A stated photo size that makes sense (positive, not absurdly thin), or null. */
+function cleanShape(shape: FileRules['shape'] | undefined): FileRules['shape'] {
+  if (!shape || !(shape.w > 0) || !(shape.h > 0)) return null;
+  const ratio = shape.w / shape.h;
+  if (ratio < 0.2 || ratio > 5) return null;
+  return { w: shape.w, h: shape.h, unit: shape.unit };
+}
+
+const PER_INCH: Record<'mm' | 'cm' | 'in', number> = { mm: 25.4, cm: 2.54, in: 1 };
+/** Print resolution for a size stated in cm / mm / inches; capped so the file stays small. */
+const DPI = 300;
+const MAX_SHAPE_PX = 1200;
+
+/**
+ * The shape the photo must have, only when the page states a size (never assumed, not even for
+ * "passport size"): `ratio` = width / height for the crop frame, and the pixel size to produce.
+ * `exact` sizes (stated in px) must be met exactly; others may shrink to fit the KB limit.
+ */
+export function photoShape(rules: FileRules): { ratio: number; w: number; h: number; exact: boolean } | null {
+  if (rules.width_px && rules.height_px) return { ratio: rules.width_px / rules.height_px, w: rules.width_px, h: rules.height_px, exact: true };
+  const s = rules.shape;
+  if (!s || s.unit === 'px') return null;
+  let w = (s.w / PER_INCH[s.unit]) * DPI;
+  let h = (s.h / PER_INCH[s.unit]) * DPI;
+  const scale = Math.min(1, MAX_SHAPE_PX / Math.max(w, h));
+  w = Math.round(w * scale);
+  h = Math.round(h * scale);
+  return { ratio: s.w / s.h, w, h, exact: false };
+}
+
+const trim = (n: number) => String(Math.round(n * 100) / 100);
 
 /** The rules to apply for a field: the analyzer's (sanitized), else what `accept` says. */
 export function effectiveFileRules(field: { accept?: string | null; file_rules?: FileRules | null }): FileRules {
@@ -98,5 +139,6 @@ export function describeFileRules(rules: FileRules): string {
   if (rules.max_kb) parts.push(`max ${formatSize(rules.max_kb * 1024)}`);
   if (rules.max_pages && rules.formats.includes('pdf')) parts.push(`up to ${rules.max_pages} ${rules.max_pages === 1 ? 'page' : 'pages'}`);
   if (rules.width_px && rules.height_px) parts.push(`${rules.width_px}×${rules.height_px} px`);
+  else if (rules.shape && rules.shape.unit !== 'px') parts.push(`${trim(rules.shape.w)}×${trim(rules.shape.h)} ${rules.shape.unit}`);
   return parts.join(' · ');
 }

@@ -116,6 +116,10 @@ export const FileRules = z.object({
   max_pages: z.number().int().nullable().describe('PDFs: most pages allowed, if stated'),
   width_px: z.number().int().nullable().describe('Required image width in pixels, if stated'),
   height_px: z.number().int().nullable(),
+  shape: z
+    .object({ w: z.number(), h: z.number(), unit: z.enum(['px', 'mm', 'cm', 'in']) })
+    .nullable()
+    .describe('The photo size stated on the page, width then height, with its unit ("3.5 x 4.5 cm"); null if no size is stated'),
   note: z.string().nullable().describe('Other stated requirements, e.g. "Passport size, white background"'),
 });
 export type FileRules = z.infer<typeof FileRules>;

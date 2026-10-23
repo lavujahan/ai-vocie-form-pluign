@@ -1,15 +1,26 @@
-import { checkFile, mimeOf, targetFormat, type FileFormat, type FileRules } from '@vff/shared';
+import { checkFile, mimeOf, photoShape, targetFormat, type FileFormat, type FileRules } from '@vff/shared';
+import { cleanScan, findDocument, straightSize, warp, type Quad } from './docscan';
 
 /**
  * Runs on the phone (browser only). Turns camera photos into what the website's upload field takes:
  * a JPG / PNG under the size limit, or one PDF made of several photos under the size limit. Re-encoding
- * through a canvas also drops EXIF data (including the GPS location). Nothing is sent anywhere here.
+ * through a canvas also drops EXIF data (including the GPS location). Document photos can be straightened
+ * from the sheet's 4 corners and given a white "scan look". Nothing is sent anywhere here.
  */
 
 /** Part of the photo to keep, as fractions of its width / height (after rotation). */
 export type Crop = { x: number; y: number; w: number; h: number };
 export type Rotation = 0 | 90 | 180 | 270;
-export type Page = { id: string; file: Blob; rotate: Rotation; crop: Crop | null };
+export type Page = {
+  id: string;
+  file: Blob;
+  rotate: Rotation;
+  crop: Crop | null;
+  /** Corners of the document (fractions of the turned photo): the sheet is cut out and straightened. */
+  quad?: Quad | null;
+  /** Scan look: white paper, darker writing. */
+  clean?: boolean;
+};
 
 export type Prepared = {
   file: File;
@@ -17,14 +28,20 @@ export type Prepared = {
   pages: number;
   /** Why it still doesn't fit the field (English, shown translated), or null. */
   problem: string | null;
+  /** A picked PDF that was made smaller: its size before. */
+  shrunkFrom?: number;
 };
+
+/** Messages for a picked PDF that can't be made smaller (shown translated). */
+export const PDF_LOCKED = 'This PDF is locked with a password. Take photos of the pages instead.';
+export const PDF_TOO_LONG = 'This PDF has too many pages to make smaller on the phone. Take photos of the pages instead.';
 
 const MAX_SIDE = 1600;
 /** A4 portrait in PDF points. */
 const A4 = { w: 595.28, h: 841.89 };
 const MARGIN = 18;
 
-type Source = ImageBitmap | HTMLImageElement;
+type Source = ImageBitmap | HTMLImageElement | HTMLCanvasElement;
 
 async function decode(blob: Blob): Promise<Source> {
   if (typeof createImageBitmap === 'function') {
@@ -49,10 +66,12 @@ async function decode(blob: Blob): Promise<Source> {
 const sizeOf = (s: Source) => ({ w: 'naturalWidth' in s ? s.naturalWidth : s.width, h: 'naturalHeight' in s ? s.naturalHeight : s.height });
 
 /**
- * Draws the page rotated and cropped onto a white canvas: at most `maxSide` px on the long side, or
- * exactly `exact` px (filling it and trimming the overflow evenly) when the field asks for a size.
+ * Draws the page rotated and cropped (or cut out along the document's corners) onto a white canvas: at
+ * most `maxSide` px on the long side, or exactly `exact` px (filling it and trimming the overflow evenly)
+ * when the field asks for a size.
  */
 function render(src: Source, page: Page, maxSide: number, exact?: { w: number; h: number }): HTMLCanvasElement {
+  if (page.quad) return render(straighten(src, page, maxSide), { ...page, rotate: 0, crop: null, quad: null }, maxSide, exact);
   const { w: sw, h: sh } = sizeOf(src);
   const turned = page.rotate === 90 || page.rotate === 270;
   // Rotated size, then the crop (fractions of the rotated photo).
@@ -96,7 +115,38 @@ function render(src: Source, page: Page, maxSide: number, exact?: { w: number; h
   ctx.rotate((page.rotate * Math.PI) / 180);
   ctx.drawImage(src as CanvasImageSource, 0, 0);
   ctx.restore();
+  if (page.clean) {
+    const img = ctx.getImageData(0, 0, outW, outH);
+    cleanScan(img.data, outW, outH);
+    ctx.putImageData(img, 0, 0);
+  }
   return canvas;
+}
+
+/** The document inside the page's corners, straightened (perspective corrected), at most `maxSide` px. */
+function straighten(src: Source, page: Page, maxSide: number): HTMLCanvasElement {
+  const q = page.quad!;
+  const xs = q.map((p) => p.x);
+  const ys = q.map((p) => p.y);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  // The turned photo, drawn large enough that the document keeps about the result's sharpness.
+  const turned = render(src, { ...page, crop: null, quad: null, clean: false }, Math.min(3000, Math.round(maxSide / Math.max(0.25, span))));
+  const img = turned.getContext('2d')!.getImageData(0, 0, turned.width, turned.height);
+  const corners = q.map((p) => ({ x: p.x * turned.width, y: p.y * turned.height })) as Quad;
+  const { w, h } = straightSize(corners, maxSide);
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  out.getContext('2d')!.putImageData(new ImageData(warp(img, corners, w, h), w, h), 0, 0);
+  turned.width = turned.height = 0; // frees the canvas memory now
+  return out;
+}
+
+/** Where the sheet of paper is in a document photo (after the user's rotation), or null when unclear. */
+export async function detectQuad(page: Page): Promise<Quad | null> {
+  const canvas = render(await decode(page.file), { ...page, crop: null, quad: null, clean: false }, 480);
+  const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+  return findDocument(data, canvas.width, canvas.height);
 }
 
 const toBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
@@ -123,13 +173,31 @@ async function jpegUnder(canvas: HTMLCanvasElement, maxBytes: number | null, flo
   return bottom.size <= maxBytes ? bottom : null;
 }
 
-const exactSize = (rules: FileRules) => (rules.width_px && rules.height_px ? { w: rules.width_px, h: rules.height_px } : undefined);
-
-/** One image: as large and sharp as the size limit allows, shrinking the photo only when needed. */
+/**
+ * One image: as large and sharp as the size limit allows, shrinking the photo only when needed. When
+ * the page states a size, the photo gets that shape: exactly the stated pixels, or (for cm / mm / inch)
+ * the stated proportions at print resolution, made smaller if needed to fit the KB limit.
+ */
 async function makeImage(page: Page, rules: FileRules, format: 'jpg' | 'png'): Promise<Blob> {
   const src = await decode(page.file);
-  const exact = exactSize(rules);
+  const shape = photoShape(rules);
   const max = rules.max_kb ? rules.max_kb * 1024 : null;
+  if (shape && !shape.exact) {
+    for (let scale = 1; scale > 0.2; scale *= 0.85) {
+      const size = { w: Math.max(16, Math.round(shape.w * scale)), h: Math.max(16, Math.round(shape.h * scale)) };
+      const canvas = render(src, page, MAX_SIDE, size);
+      if (format === 'png') {
+        const png = await toBlob(canvas, 'image/png');
+        if (!max || png.size <= max) return png;
+      }
+      const blob = await jpegUnder(canvas, max);
+      if (blob) return blob;
+    }
+    // Still too big: keep the shape at the smallest size; the field's rule check reports the size.
+    const tiny = { w: Math.max(16, Math.round(shape.w * 0.2)), h: Math.max(16, Math.round(shape.h * 0.2)) };
+    return toBlob(render(src, page, MAX_SIDE, tiny), 'image/jpeg', 0.3);
+  }
+  const exact = shape?.exact ? { w: shape.w, h: shape.h } : undefined;
   if (format === 'png') {
     const png = await toBlob(render(src, page, MAX_SIDE, exact), 'image/png');
     if (!max || png.size <= max) return png;
@@ -145,10 +213,12 @@ async function makeImage(page: Page, rules: FileRules, format: 'jpg' | 'png'): P
   return toBlob(render(src, page, Math.min(side, 400), exact), 'image/jpeg', 0.3);
 }
 
-/** Several photos as one PDF, one per A4 page; re-built smaller until it fits the limit. */
-async function makePdf(pages: Page[], rules: FileRules): Promise<Blob> {
+/**
+ * Several photos as one PDF, one per A4 page (or per page of `paper`, its size in points, filled edge to
+ * edge); re-built smaller until it fits the limit.
+ */
+async function makePdf(pages: Page[], rules: FileRules, paper?: { w: number; h: number }[]): Promise<Blob> {
   const { PDFDocument } = await import('pdf-lib');
-  const sources = await Promise.all(pages.map((p) => decode(p.file)));
   const max = rules.max_kb ? rules.max_kb * 1024 : null;
   const steps: [number, number][] = [
     [1600, 0.8],
@@ -164,8 +234,16 @@ async function makePdf(pages: Page[], rules: FileRules): Promise<Blob> {
   for (const [side, quality] of steps) {
     const doc = await PDFDocument.create();
     for (const [i, page] of pages.entries()) {
-      const canvas = render(sources[i], page, side);
+      // One photo decoded at a time: a dozen full-size camera photos at once can run a phone out of memory.
+      const src = await decode(page.file);
+      const canvas = render(src, page, side);
+      if ('close' in src) src.close();
       const jpg = await doc.embedJpg(await (await toBlob(canvas, 'image/jpeg', quality)).arrayBuffer());
+      if (paper) {
+        const { w, h } = paper[i];
+        doc.addPage([w, h]).drawImage(jpg, { x: 0, y: 0, width: w, height: h });
+        continue;
+      }
       const landscape = jpg.width > jpg.height;
       const pw = landscape ? A4.h : A4.w;
       const ph = landscape ? A4.w : A4.h;
@@ -191,25 +269,54 @@ export async function pdfPageCount(blob: Blob): Promise<number | null> {
 
 /** The photo turned the way the user rotated it (no crop), small, for the crop screen. */
 export async function rotatedPreview(page: Page, maxSide = 900): Promise<string> {
-  const canvas = render(await decode(page.file), { ...page, crop: null }, maxSide);
+  const canvas = render(await decode(page.file), { ...page, crop: null, quad: null, clean: false }, maxSide);
   return canvas.toDataURL('image/jpeg', 0.8);
 }
 
-/** A PDF the user picked on the phone: checked as it is (shrinking an existing PDF comes later). */
-export async function checkPickedPdf(file: File, rules: FileRules): Promise<Prepared> {
+/** The page as it will be sent (turned, cropped or straightened, scan look), small, for the thumbnails. */
+export async function pagePreview(page: Page, maxSide = 360): Promise<string> {
+  return render(await decode(page.file), page, maxSide).toDataURL('image/jpeg', 0.8);
+}
+
+/**
+ * A PDF the user picked on the phone. Sent as it is when it fits; when only its size is over the limit,
+ * it is made smaller here (re-saved, else its pages redrawn as images), keeping every page.
+ */
+export async function checkPickedPdf(file: File, rules: FileRules, onPage?: (n: number, of: number) => void): Promise<Prepared> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (String.fromCharCode(...bytes.slice(0, 4)) !== '%PDF') {
     return { file, format: 'pdf', pages: 0, problem: 'This is not a PDF file.' };
   }
   // Unreadable structure: count it as one page and let the size check speak.
   const pages = (await pdfPageCount(file)) ?? 1;
-  const problem = checkFile(rules, { mime: 'application/pdf', bytes: file.size, pages });
-  return {
-    file: new File([bytes], 'upload.pdf', { type: 'application/pdf' }),
-    format: 'pdf',
-    pages,
-    problem: problem && rules.max_kb && file.size > rules.max_kb * 1024 ? `${problem} Take photos of the pages instead.` : problem,
+  const mime = 'application/pdf';
+  const problem = checkFile(rules, { mime, bytes: file.size, pages });
+  const asIs: Prepared = { file: new File([bytes], 'upload.pdf', { type: mime }), format: 'pdf', pages, problem };
+  const max = rules.max_kb ? rules.max_kb * 1024 : null;
+  if (!problem || !max || file.size <= max) return asIs; // fits, or the problem isn't its size
+  // Too many pages as well: say that (pages are never dropped). Checked as if the size were at the limit.
+  const pageProblem = checkFile(rules, { mime, bytes: max, pages });
+  if (pageProblem) return { ...asIs, problem: pageProblem };
+
+  const smaller = (blob: Blob, n: number): Prepared => {
+    const left = checkFile(rules, { mime, bytes: blob.size, pages: n });
+    return {
+      file: new File([blob], 'upload.pdf', { type: mime }),
+      format: 'pdf',
+      pages: n,
+      problem: left && blob.size > max ? `${left} Take photos of the pages instead.` : left,
+      shrunkFrom: file.size,
+    };
   };
+  const { drawPdfPages, resavePdf } = await import('./pdf-shrink');
+  const resaved = await resavePdf(bytes);
+  if (resaved && resaved.size <= max) return smaller(resaved, pages);
+  const drawn = await drawPdfPages(bytes, onPage);
+  if (drawn === 'locked') return { ...asIs, problem: PDF_LOCKED };
+  if (drawn === 'too_many') return { ...asIs, problem: PDF_TOO_LONG };
+  if (drawn === 'unreadable') return { ...asIs, problem: `${problem} Take photos of the pages instead.` };
+  const asPages = drawn.images.map((image, i): Page => ({ id: String(i), file: image, rotate: 0, crop: null }));
+  return smaller(await makePdf(asPages, rules, drawn.sizes), asPages.length);
 }
 
 /** Turns the photos into the field's format, within its size limit. */

@@ -3,6 +3,68 @@
 Copy each section into the matching field in the Chrome Web Store developer dashboard.
 The store shows the description as plain text, so the description below uses `•` bullets and no Markdown.
 
+This plan follows Google's guides:
+- [best listing](https://developer.chrome.com/docs/webstore/best-listing)
+- [store listing tab](https://developer.chrome.com/docs/webstore/cws-dashboard-listing)
+- [privacy tab](https://developer.chrome.com/docs/webstore/cws-dashboard-privacy)
+- [user data FAQ](https://developer.chrome.com/docs/webstore/program-policies/user-data-faq)
+
+---
+
+## Plan
+
+Status key: ☐ to do · ◐ in progress · ☑ done. Steps marked **blocker** will get the extension rejected if skipped.
+
+### Decisions needed first
+
+| # | Decision | Options | Affects |
+| --- | --- | --- | --- |
+| D1 | Store title | ☑ **"Voice Form Filler: Fill web forms by speaking on your phone"** | Step 1.4, all images |
+| D2 | Content script | ☐ Open: (a) inject only when Scan is clicked, which has less risk of rejection but needs testing; (b) keep it on all sites, but drop `file:///*` | Step 1.3 |
+| D3 | Public pages | ☑ Homepage, privacy and support pages go on your other existing site. ☐ Still needed: that site's address and the support email/phone, to fill the `{{…}}` placeholders. | Steps 1.2, 2.x, 4.2 |
+| D4 | Regions | ☐ Open: all regions, or India only | Step 4.2 |
+
+### Phase 1: Extension changes (`apps/extension`)
+
+| # | Step | Files | Status |
+| --- | --- | --- | --- |
+| 1.1 | **Blocker:** store and toolbar icon. White Lucide `mic` on a `#1e4e9c` rounded square, 96 px artwork in 128 px. Export 16, 32, 48 and 128 px PNGs, and add `icons` and `action.default_icon` to the manifest. | `public/icons/*`, `vite.config.ts` | ☐ |
+| 1.2 | **Blocker:** consent notice on the sign-in card, linked to the privacy page on your other site (see **Consent inside the extension**). Put the link in a `VITE_PRIVACY_URL` build setting rather than hard-coding it. | `src/popup/App.tsx`, `src/env.ts` | ☐ |
+| 1.3 | **Minimum permissions**, per D2. For (a), inject from the service worker on Scan and keep the watcher and tab-moved checks working; re-run `pnpm --filter extension e2e` and the `watch` and `tabs` unit tests. For (b), only remove `file:///*`. | `vite.config.ts`, `src/background/*`, `src/content/index.ts` | ☐ |
+| 1.4 | Use the D1 title in the manifest `name` and `default_title`. Keep the popup heading short ("Voice form filler"). | `vite.config.ts` | ☐ |
+| 1.5 | Bump `version` to `1.0.0` for the first public release. | `vite.config.ts`, `package.json` | ☐ |
+| 1.6 | **Blocker:** make data retention match the privacy policy. The purge job (`0002_cron.sql`) deletes answers and transcripts, but keeps `form_sessions` (page URL, title, form name) and `form_fields` forever. `form_fields.choice_hint` even holds what the person said for an unclear dropdown. New migration `0009`: on expiry, set `choice_hint` to null; delete sessions older than 30 days (fields cascade, usage rows keep their numbers with `session_id` set to null). Add the check to `check:db`. | `supabase/migrations/0009_retention.sql` | ☐ |
+
+### Phase 2: Public pages (on your other site)
+
+The content is written in `store/pages/`. Copy it to your other site and fill in the `{{…}}` placeholders.
+
+| # | Page | Content | Status |
+| --- | --- | --- | --- |
+| 2.1 | **Blocker:** privacy policy | [pages/privacy.md](pages/privacy.md). Section 5 assumes step 1.6 is done; the comment at the top says what to change if you publish earlier. | ◐ written, not published |
+| 2.2 | Homepage (the dashboard's Homepage URL) | [pages/home.md](pages/home.md). Add screenshots after Phase 3. | ◐ written, not published |
+| 2.3 | Support (the dashboard's Support URL) | [pages/support.md](pages/support.md). Every answer uses the app's real on-screen messages. | ◐ written, not published |
+| 2.4 | Change `apps/web/app/page.tsx` to link to the new homepage, or leave it. Optional. | — | ☐ |
+
+### Phase 3: Images (`store/images`)
+
+| # | Step | Status |
+| --- | --- | --- |
+| 3.1 | Made in **Claude Design** using the prompts in [design-brief.md](design-brief.md): Prompt 0 (shared brief), then the icon, 5 screenshots, promo tile, marquee and video. | ◐ prompts written |
+| 3.2 | Export the PNGs at the exact sizes and save them to `store/images/`; the icons go to `apps/extension/public/icons/`. | ☐ |
+| 3.3 | Check every image: exact size; full bleed with square corners; promo tile readable at 220×140; no real portal names or logos; only made-up data; only features that exist. | ☐ |
+
+The images can be built in parallel with Phases 1 and 2, but they need the D1 title and the 1.1 icon.
+
+### Phase 4: Submit
+
+| # | Step | Status |
+| --- | --- | --- |
+| 4.1 | Build with the production `VITE_API_BASE` and Supabase URL. Load the unpacked build once and test sign-in, scan, fill and upload against production. Zip the contents of `apps/extension/dist`. | ☐ |
+| 4.2 | Dashboard, **Store listing:** title, summary, description, category, language, icon, screenshots, promo tile, homepage and support URLs, mature content off. | ☐ |
+| 4.3 | Dashboard, **Privacy:** single purpose, permission justifications (rewritten if 1.3 changed the manifest), remote code "No", data boxes, the three certifications, and the privacy policy URL. Put the same URL on the developer account page. | ☐ |
+| 4.4 | Dashboard, **Distribution:** regions (D4), public visibility. Submit for review. | ☐ |
+
 ---
 
 ## Name (max 75 characters)
@@ -110,7 +172,7 @@ WHO IT'S FOR
 PRIVACY
 
 • Your voice recording is never stored. It is processed and discarded within the same request.
-• Answers and transcripts are deleted automatically about 40 minutes after the session starts.
+• Your spoken answers and their text are deleted automatically within about an hour.
 • Uploaded photos and PDFs are stored privately and deleted as soon as the computer receives them, or when the tab closes.
 • QR codes work once and expire after 10 minutes. A phone link lasts 30 minutes.
 • The extension never submits a form for you. You review and submit.
@@ -178,7 +240,7 @@ Then tick all three certifications:
 The User Data FAQ requires a **clear notice inside the extension, and a user action to agree, before any data is collected**. A notice that is only in the privacy policy or on the store page doesn't count.
 - **Currently:** the sign-in and Scan cards have no notice, so this has to be fixed before you submit.
 - **Fix:** add a short notice to the sign-in card (`SignIn` in `apps/extension/src/popup/App.tsx`), linked to the privacy policy. Signing in then counts as agreeing. Example wording:
-  > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about 40 minutes. [Privacy policy]
+  > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about an hour. [Privacy policy]
 - Clicking "Scan form on this page" afterwards is the action that starts collection, so the notice must appear before the first scan.
 
 ## Minimum permissions (reviewers check this)
@@ -207,7 +269,7 @@ The store will not accept the listing without a privacy policy URL. Host one (fo
 
 It must also say:
 - **What is collected, how it is used and when it is shared:** match the data table above.
-- **How long it is kept:** audio is never stored; transcripts and values are deleted after about 40 minutes; files are deleted when the computer has them.
+- **How long it is kept:** audio is never stored; transcripts and values are deleted within about an hour; files are deleted when the computer has them; session records are kept 30 days (after step 1.6).
 - **How it is protected:** HTTPS/WSS for every connection; Supabase encrypts data at rest; QR codes work once and expire.
 - **Limited Use:** "The use of information received from this extension follows the Chrome Web Store User Data Policy, including the Limited Use requirements."
 - **Who to contact** about access or deletion.
@@ -245,7 +307,7 @@ Each one has a short headline on the left and the real UI on the right.
 | 2 | **Speak Tamil, English or Tanglish** | The phone mid-recording ("Listening… 0:07", red mic, transcript quote) next to the form, with a newly filled field outlined in yellow `#f2b705` (the filler's real highlight). The popup shows "Phone paired · Live" and the values. |
 | 3 | **Dependent dropdowns, filled in order** | State → District → Taluk → Village on the form, and the phone's review screen with a "Pick one" row: "You said “…”. Which one did you mean?" and option buttons. |
 | 4 | **Photos sized to the site's rules** | The phone's file sheet ("Applicant photo", "JPG · max 50 KB", thumbnail with rotate/crop, "Ready: JPG · 38 KB", "Send to computer"), and the popup row "✓ 38 KB". |
-| 5 | **Phone screens in தமிழ்** | The phone in Tamil with bilingual labels ("தந்தை பெயர் · Father's name"), the "English" switch, and "கணினியில் நிரப்பப்பட்டது ✓ 14/16". |
+| 5 | **Paper documents to one PDF** | The phone's document sheet ("Address proof", "JPG / PDF · max 500 KB · up to 3 pages", two page photos with rotate/crop/delete, "Add page", "Ready: PDF (2 pages) · 412 KB", "Send to computer"). The site's own Upload button is outlined in yellow, and the popup shows "✓ 412 KB" and "Click “Upload” next to this field on the page". |
 
 Tamil versions of the screenshots can only be uploaded if the extension itself supports Tamil. That needs a `_locales/ta/messages.json` in the extension, and the extension has no `_locales` yet. The promo tile and marquee can't be localized. Optional; skip it for the first release.
 
@@ -278,14 +340,6 @@ A 30 to 45 second screen recording on YouTube. Show: scan QR → speak a Tanglis
 | Mature content | Off |
 | Distribution → regions | All regions by default. Set it to India if the service is only for Indian forms. |
 
-## To-do before submitting
-
-1. Make the store icon and add `icons` to the manifest.
-2. Add the consent notice to the popup (see **Consent inside the extension**).
-3. Decide on `content_scripts` versus injecting on demand, and remove `file:///*` if you don't need it.
-4. Publish the privacy policy, homepage and support pages on the web app.
-5. Make the screenshots and the promo tile.
-6. Build with the production `VITE_API_BASE`, and zip `apps/extension/dist`.
 
 ---
 
@@ -300,7 +354,7 @@ Don't paste this table or name these extensions anywhere in the listing: Google'
 | Tamil / Tanglish | No | No | No | **Yes** |
 | File/photo uploads | No | No | No | **Yes, resized to site rules** |
 | Cascading dropdowns | Delays only | No | No | **Yes** |
-| Stores your personal data | Yes, synced online | Yes, synced | Locally | **Auto-deleted in ~40 min** |
+| Stores your personal data | Yes, synced online | Yes, synced | Locally | **Answers auto-deleted within ~1 hour** |
 | Multi-step forms | Auto-click | — | Click Fill on each step | **New fields appear on phone automatically** |
 
 Competitor descriptions focus on saving data so it can be reused. Our listing leads with what they can't do: filling a form for a new person by voice, in Tamil, including photos, without storing anything.

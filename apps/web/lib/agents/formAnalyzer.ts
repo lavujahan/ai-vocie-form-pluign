@@ -26,6 +26,7 @@ For every field in the input (use the exact field_key; include every field once)
   formats = the allowed file types (jpg / png / pdf), empty if not stated;
   max_kb / min_kb = stated size limits in KB (1 MB = 1024 KB), null if not stated; never guess a size;
   max_pages = for PDFs, if stated; width_px / height_px = only if stated in pixels;
+  shape = the photo size if the page states one, width then height, with its unit: "3.5 x 4.5 cm" → {w:3.5,h:4.5,unit:"cm"}, "35mm x 45mm" → mm, "2 x 2 inch" → in, "200 x 230 pixels" → px (also fill width_px/height_px). null when no size is written; never assume one, not even for "passport size" alone;
   note = any other stated requirement, short ("white background", "self-attested").
 
 Use get_field_context when a field's label is unclear.`;

@@ -142,7 +142,8 @@ Upload fields are filled from the phone's camera or files, never by voice.
 3. **Phone:** a "Photos and documents" card lists the upload fields, like "Applicant photo · JPG · max 50 KB". **Take photo** or **Choose file**; rotate, crop, **Add page**; then **Make file**.
    - Conversion happens on the phone (`apps/web/lib/files/convert.ts`): a JPG within the size limit (quality search, then resize), several photos as one A4 PDF within the limit (pdf-lib, loaded only when needed), or the exact pixel size if the page asks for one.
    - Re-encoding drops EXIF/GPS data.
-   - A PDF picked on the phone is sent as it is; if it is too big, the phone asks for photos of the pages instead.
+   - **Document photos** (certificates, ID cards): the phone finds the sheet on the table (`lib/files/docscan.ts`: brightest large area, its 4 corners) and opens a 4-corner editor to adjust them. The page is then cut out and straightened (perspective correction, snapped to A4 / ID card / Letter proportions within 3%). **Scan look** (on by default) evens out shadows so the paper turns white and the writing darker; colours such as stamps and photos are kept. If the sheet isn't found (light table, sheet filling the photo), the user places the corners.
+   - **A PDF picked on the phone** is sent as it is when it fits. When it is over the size limit, the phone makes it smaller (`lib/files/pdf-shrink.ts`): first a plain re-save with pdf-lib, else every page is redrawn with pdf.js (about 150 dpi) and rebuilt within the limit, at the original page sizes. The text then becomes part of the image. Pages are never dropped: a PDF with more pages than the field allows gets a message, and so does a password-locked PDF or one with more than 30 pages. pdf.js loads only when a PDF has to be made smaller, and runs on the page (no worker file).
 4. **Upload:** `POST /api/sessions/[code]/files/upload-url` checks the file against the rules and returns a one-time signed URL. The phone uploads straight to the private Storage bucket `form-files`, which avoids API body limits. Then `POST /files` makes the server check what arrived (real type from the first bytes, real size) before the computer sees it. A newer upload replaces the older one.
 5. **Desktop:** the extension downloads the file through a 60-second signed link and puts it into the page as a real file (`DataTransfer` + `input.files` + change events), so the site's own checks run.
    - If the site shows an error or drops the file, the phone shows "The website refused it: …".
@@ -152,7 +153,7 @@ Upload fields are filled from the phone's camera or files, never by voice.
    - It is also deleted on Start over and when the form tab closes.
    - Files from expired sessions are purged after each new session, plus a daily Vercel Cron (`/api/cron/purge-files`, needs `CRON_SECRET`).
 
-**Not supported:** in-page webcam widgets, upload fields inside another site's iframe, shrinking an existing PDF that is too big, and automatic document edge detection.
+**Not supported:** in-page webcam widgets and upload fields inside another site's iframe.
 
 Test pages: `test-fixtures/upload.html` (plain input with its own size check, hidden input + Upload button, drop zone) and `test-fixtures/convert.html` (the phone converter in a real browser).
 
