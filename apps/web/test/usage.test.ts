@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Usage } from '@openai/agents';
 import { cachedTokens, openaiEvent, sttEvent } from '@/lib/usage/events';
 import { openaiCostUsd } from '@/lib/usage/pricing';
-import { currentMonth, monthBounds, priceSummary, type RawUsageRow } from '@/lib/usage/summary';
+import { currentMonth, isDate, monthBounds, priceDays, priceSummary, rangeBounds, rangeDays, todayIst, type RawUsageRow } from '@/lib/usage/summary';
 
 describe('openaiCostUsd', () => {
   it('prices gpt-4o input, cached input and output separately', () => {
@@ -54,13 +54,42 @@ describe('monthly summary', () => {
       { user_id: 'b', name: 'Bala', phone: '9000000002', stt_calls: 2, audio_ms: 30_000, llm_calls: 3, input_tokens: 1000, cached_input_tokens: 0, output_tokens: 100, openai_usd: 0.01 },
     ];
     const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, output_usd_per_m: 10 };
-    const s = priceSummary(raw, settings, '2026-10');
+    const s = priceSummary(raw, settings);
     // Anu: 50k input × $2.50/1M = $0.125, 5k output × $10/1M = $0.05 → $0.175 → ₹15.40 (the stored list-price cost is not used).
     expect(s.rows[0]).toMatchObject({ minutes: 10, tokens: 55_000, input_usd: 0.125, output_usd: 0.05, openai_usd: 0.175, sarvam_inr: 4.9, openai_inr: 15.4, total_inr: 20.3 });
     expect(s.rows[1]).toMatchObject({ input_usd: 0.0025, output_usd: 0.001, openai_usd: 0.0035, openai_inr: 0.31 });
     expect(s.totals).toMatchObject({ tokens: 56_100, input_usd: 0.1275, output_usd: 0.051, openai_usd: 0.1785, openai_inr: 15.71 });
     // A new price applies straight away: input $1, output $4 per 1M.
-    const cheaper = priceSummary(raw, { ...settings, input_usd_per_m: 1, output_usd_per_m: 4 }, '2026-10');
+    const cheaper = priceSummary(raw, { ...settings, input_usd_per_m: 1, output_usd_per_m: 4 });
     expect(cheaper.rows[0]).toMatchObject({ input_usd: 0.05, output_usd: 0.02, openai_usd: 0.07, openai_inr: 6.16 });
+  });
+});
+
+describe('date range and day by day', () => {
+  it('covers whole India-time days, both dates included', () => {
+    expect(rangeBounds('2026-10-01', '2026-10-24')).toEqual({ from: '2026-09-30T18:30:00.000Z', to: '2026-10-24T18:30:00.000Z' });
+    expect(rangeBounds('2026-10-24', '2026-10-24').to).toBe('2026-10-24T18:30:00.000Z');
+    expect(rangeDays('2026-10-01', '2026-10-31')).toBe(31);
+    expect(rangeDays('2026-12-31', '2027-01-01')).toBe(2);
+    // 19:00 UTC on the 24th is already the 25th in India.
+    expect(todayIst(new Date('2026-10-24T19:00:00Z'))).toBe('2026-10-25');
+  });
+  it('accepts only real dates', () => {
+    expect(isDate('2026-02-28')).toBe(true);
+    expect(isDate('2026-02-30')).toBe(false);
+    expect(isDate('2026-10')).toBe(false);
+  });
+  it('prices each day with the same prices as the user table, with totals', () => {
+    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, output_usd_per_m: 10 };
+    const d = priceDays(
+      [
+        { day: '2026-10-01', stt_calls: 3, audio_ms: 120_000, llm_calls: 3, input_tokens: 20_000, cached_input_tokens: 0, output_tokens: 2_000 },
+        { day: '2026-10-02', stt_calls: '1', audio_ms: '60000', llm_calls: '1', input_tokens: '30000', cached_input_tokens: '0', output_tokens: '3000' },
+      ],
+      settings,
+    );
+    expect(d.days[0]).toMatchObject({ day: '2026-10-01', minutes: 2, input_usd: 0.05, output_usd: 0.02, openai_usd: 0.07 });
+    expect(d.days[1]).toMatchObject({ day: '2026-10-02', minutes: 1, input_usd: 0.075, output_usd: 0.03 });
+    expect(d.day_totals).toMatchObject({ minutes: 3, input_tokens: 50_000, output_tokens: 5_000, input_usd: 0.125, output_usd: 0.05, openai_usd: 0.175 });
   });
 });

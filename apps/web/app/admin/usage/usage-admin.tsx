@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LogOut } from 'lucide-react';
-import type { BillingSettings, UsageSummaryResponse, UsageSummaryRow } from '@vff/shared';
+import type { BillingSettings, UsageCosts, UsageSummaryResponse } from '@vff/shared';
 import { Button, Card, Input } from '@/components/ui';
 import { AdminNav } from '../admin-nav';
 import { api } from '../api';
@@ -14,23 +14,35 @@ const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD',
 const num = new Intl.NumberFormat('en-IN');
 const mins = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-/** This month in India time, YYYY-MM. */
-function thisMonth(): string {
-  return new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 7);
+const IST_MS = 330 * 60_000;
+/** Today in India time, YYYY-MM-DD. */
+const todayIst = () => new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
+/** First and last day of the month `back` months before this one (India time). */
+function monthRange(back: number): { from: string; to: string } {
+  const now = new Date(Date.now() + IST_MS);
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1));
+  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back + 1, 0));
+  const to = back === 0 ? todayIst() : last.toISOString().slice(0, 10);
+  return { from: first.toISOString().slice(0, 10), to };
 }
+const dayLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 export function UsageAdmin() {
   const router = useRouter();
-  const [month, setMonth] = useState(thisMonth);
+  const [range, setRange] = useState(() => monthRange(0));
+  /** The day table's user ('' = all users). */
+  const [user, setUser] = useState('');
   const [data, setData] = useState<UsageSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (m: string) => {
+    async (from: string, to: string, who: string) => {
       setLoading(true);
       try {
-        setData(await api<UsageSummaryResponse>(`/api/admin/usage?month=${encodeURIComponent(m)}`));
+        const q = new URLSearchParams({ from, to, ...(who ? { user: who } : {}) });
+        setData(await api<UsageSummaryResponse>(`/api/admin/usage?${q}`));
         setError(null);
       } catch (e) {
         setError((e as Error).message);
@@ -43,16 +55,21 @@ export function UsageAdmin() {
   );
 
   useEffect(() => {
-    if (/^\d{4}-\d{2}$/.test(month)) void load(month);
-  }, [month, load]);
+    if (isDay(range.from) && isDay(range.to) && range.from <= range.to) void load(range.from, range.to, user);
+  }, [range, user, load]);
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     router.replace('/admin/login');
   }
 
+  const presets = [
+    { label: 'This month', ...monthRange(0) },
+    { label: 'Last month', ...monthRange(1) },
+  ];
+
   return (
-    <main className="mx-auto max-w-5xl px-4 py-6">
+    <main className="mx-auto max-w-6xl px-4 py-6">
       <header className="mb-4 flex items-center justify-between gap-3">
         <AdminNav />
         <Button variant="ghost" onClick={logout} aria-label="Sign out">
@@ -62,31 +79,45 @@ export function UsageAdmin() {
 
       <div className="mb-4 grid gap-3 lg:grid-cols-[auto_1fr]">
         <Card>
-          <label className="block text-xs font-medium text-muted" htmlFor="month">
-            Month
-          </label>
-          <Input id="month" type="month" value={month} max={thisMonth()} onChange={(e) => setMonth(e.target.value)} className="mt-1" />
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="block">
+              <span className="text-xs font-medium text-muted">From</span>
+              <Input type="date" value={range.from} max={range.to} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="mt-1" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-muted">To</span>
+              <Input
+                type="date"
+                value={range.to}
+                min={range.from}
+                max={todayIst()}
+                onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
+                className="mt-1"
+              />
+            </label>
+          </div>
+          <div className="mt-2 flex gap-3">
+            {presets.map((p) => (
+              <button
+                key={p.label}
+                onClick={() => setRange({ from: p.from, to: p.to })}
+                className={`text-xs underline-offset-2 hover:underline ${range.from === p.from && range.to === p.to ? 'font-semibold text-ink' : 'text-muted'}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </Card>
-        {data && <RatesCard settings={data.settings} onSaved={() => load(month)} />}
+        {data && <RatesCard settings={data.settings} onSaved={() => load(range.from, range.to, user)} />}
       </div>
 
+      {error && <p className="mb-3 rounded-lg bg-danger-bg px-4 py-2 text-sm text-danger-ink">{error}</p>}
+
+      <h2 className="mb-2 text-sm font-semibold">By user</h2>
       <Card className="p-0">
-        {error && <p className="border-b border-line px-4 py-2 text-sm text-danger-ink">{error}</p>}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-muted">
-                <th className="px-4 py-2 font-medium">User</th>
-                <th className="px-4 py-2 text-right font-medium">Minutes</th>
-                <th className="px-4 py-2 text-right font-medium">Input tokens</th>
-                <th className="px-4 py-2 text-right font-medium">Input cost</th>
-                <th className="px-4 py-2 text-right font-medium">Output tokens</th>
-                <th className="px-4 py-2 text-right font-medium">Output cost</th>
-                <th className="px-4 py-2 text-right font-medium">OpenAI</th>
-                <th className="px-4 py-2 text-right font-medium">Sarvam</th>
-                <th className="px-4 py-2 text-right font-medium">Total</th>
-              </tr>
-            </thead>
+            <UsageHead first="User" />
             <tbody>
               {data?.rows.map((r) => (
                 <tr key={r.user_id ?? 'unknown'} className="border-t border-line">
@@ -97,36 +128,66 @@ export function UsageAdmin() {
                   <UsageCells row={r} />
                 </tr>
               ))}
-              {data && !data.rows.length && !loading && (
+              <EmptyRow data={data} loading={loading} empty={!data?.rows.length} />
+            </tbody>
+            {data && data.rows.length > 0 && <TotalRow row={data.totals} />}
+          </table>
+        </div>
+      </Card>
+
+      <div className="mt-6 mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">By day</h2>
+        <label className="flex items-center gap-2 text-xs text-muted">
+          User
+          <select
+            value={user}
+            onChange={(e) => setUser(e.target.value)}
+            className="min-h-9 rounded-lg border border-line bg-card px-2 text-sm text-ink focus:border-accent-ink focus:outline-none"
+          >
+            <option value="">All users</option>
+            {data?.rows
+              .filter((r) => r.user_id)
+              .map((r) => (
+                <option key={r.user_id} value={r.user_id!}>
+                  {r.name ?? r.phone ?? 'User'}
+                </option>
+              ))}
+            {/* Keep a chosen user listed even if they have no usage in the new dates. */}
+            {user && data && !data.rows.some((r) => r.user_id === user) && <option value={user}>Chosen user</option>}
+          </select>
+        </label>
+      </div>
+      <Card className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <UsageHead first="Date" />
+            <tbody>
+              {data?.days === null ? (
                 <tr>
                   <td colSpan={COLUMNS} className="px-4 py-8 text-center text-sm text-muted">
-                    No AI usage in this month.
+                    Apply migration 0011_usage_daily.sql in Supabase to see usage by day.
                   </td>
                 </tr>
-              )}
-              {!data && loading && (
-                <tr>
-                  <td colSpan={COLUMNS} className="px-4 py-8 text-center text-sm text-muted">
-                    Loading…
-                  </td>
-                </tr>
+              ) : (
+                <>
+                  {data?.days?.map((d) => (
+                    <tr key={d.day} className="border-t border-line">
+                      <td className="px-4 py-2.5 whitespace-nowrap">{dayLabel.format(new Date(`${d.day}T00:00:00Z`))}</td>
+                      <UsageCells row={d} />
+                    </tr>
+                  ))}
+                  <EmptyRow data={data} loading={loading} empty={!data?.days?.length} />
+                </>
               )}
             </tbody>
-            {data && data.rows.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-line bg-subtle/50 font-semibold">
-                  <td className="px-4 py-2.5">Total</td>
-                  <UsageCells row={data.totals} />
-                </tr>
-              </tfoot>
-            )}
+            {data?.day_totals && !!data.days?.length && <TotalRow row={data.day_totals} />}
           </table>
         </div>
       </Card>
 
       <p className="mt-3 text-xs text-muted">
-        OpenAI cost per user = input tokens × your input price + output tokens × your output price (per 1M tokens, in $; cached
-        input tokens count as input), shown in ₹ at your rate. A new price applies to every month. Check the{' '}
+        OpenAI cost = input tokens × your input price + output tokens × your output price (per 1M tokens, in $; cached input
+        tokens count as input), shown in ₹ at your rate. A new price applies to all dates. Check the{' '}
         <a className="underline" href="https://developers.openai.com/api/docs/pricing" target="_blank" rel="noreferrer">
           OpenAI prices
         </a>{' '}
@@ -134,15 +195,56 @@ export function UsageAdmin() {
         <a className="underline" href="https://www.sarvam.ai/api-pricing" target="_blank" rel="noreferrer">
           Sarvam speech-to-text
         </a>{' '}
-        (per minute of audio). Months follow India time.
+        (per minute of audio). Dates follow India time.
       </p>
     </main>
   );
 }
 
+function UsageHead({ first }: { first: string }) {
+  return (
+    <thead>
+      <tr className="text-left text-xs text-muted">
+        <th className="px-4 py-2 font-medium">{first}</th>
+        <th className="px-4 py-2 text-right font-medium">Minutes</th>
+        <th className="px-4 py-2 text-right font-medium">Input tokens</th>
+        <th className="px-4 py-2 text-right font-medium">Input cost</th>
+        <th className="px-4 py-2 text-right font-medium">Output tokens</th>
+        <th className="px-4 py-2 text-right font-medium">Output cost</th>
+        <th className="px-4 py-2 text-right font-medium">OpenAI</th>
+        <th className="px-4 py-2 text-right font-medium">Sarvam</th>
+        <th className="px-4 py-2 text-right font-medium">Total</th>
+      </tr>
+    </thead>
+  );
+}
+
+function TotalRow({ row }: { row: UsageCosts }) {
+  return (
+    <tfoot>
+      <tr className="border-t-2 border-line bg-subtle/50 font-semibold">
+        <td className="px-4 py-2.5">Total</td>
+        <UsageCells row={row} />
+      </tr>
+    </tfoot>
+  );
+}
+
+function EmptyRow({ data, loading, empty }: { data: UsageSummaryResponse | null; loading: boolean; empty: boolean }) {
+  if (data && !empty) return null;
+  if (!data && !loading) return null;
+  return (
+    <tr>
+      <td colSpan={COLUMNS} className="px-4 py-8 text-center text-sm text-muted">
+        {!data ? 'Loading…' : 'No AI usage in these dates.'}
+      </td>
+    </tr>
+  );
+}
+
 const COLUMNS = 9;
 
-function UsageCells({ row }: { row: Omit<UsageSummaryRow, 'user_id' | 'name' | 'phone'> }) {
+function UsageCells({ row }: { row: UsageCosts }) {
   return (
     <>
       <td className="px-4 py-2.5 text-right tabular-nums" title={`${num.format(row.stt_calls)} recordings`}>

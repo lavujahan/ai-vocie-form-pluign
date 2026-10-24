@@ -245,11 +245,8 @@ export const BillingSettings = z.object({
 });
 export type BillingSettings = z.infer<typeof BillingSettings>;
 
-/** One user's AI usage in a month, priced in ₹. */
-export type UsageSummaryRow = {
-  user_id: string | null;
-  name: string | null;
-  phone: string | null;
+/** AI usage and its cost (for one user, one day, or a total), with the admin's prices. */
+export type UsageCosts = {
   stt_calls: number;
   minutes: number;
   llm_calls: number;
@@ -268,12 +265,31 @@ export type UsageSummaryRow = {
   total_inr: number;
 };
 
+/** One user's AI usage in the chosen dates. */
+export type UsageSummaryRow = UsageCosts & {
+  user_id: string | null;
+  name: string | null;
+  phone: string | null;
+};
+
+/** One day's AI usage (India time), for all users or the chosen one. */
+export type UsageDayRow = UsageCosts & {
+  /** YYYY-MM-DD. */
+  day: string;
+};
+
 export type UsageSummaryResponse = {
-  /** YYYY-MM, India time. */
-  month: string;
+  /** First and last day, inclusive, YYYY-MM-DD in India time. */
+  from: string;
+  to: string;
   settings: BillingSettings;
   rows: UsageSummaryRow[];
-  totals: Omit<UsageSummaryRow, 'user_id' | 'name' | 'phone'>;
+  totals: UsageCosts;
+  /** The user the day table is for (null: all users). */
+  user: string | null;
+  /** Days with usage, oldest first; null until migration 0011 is applied. */
+  days: UsageDayRow[] | null;
+  day_totals: UsageCosts | null;
 };
 
 export type CreateSessionResponse = {
