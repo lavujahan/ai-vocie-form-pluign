@@ -84,7 +84,7 @@ function SignIn({ send }: { send: Send }) {
   return (
     <Card>
       <h1 className="flex items-center gap-2 text-sm font-semibold">
-        <Mic size={16} /> Fill by Kural
+        <Mic size={16} /> Voice2Fill
       </h1>
       <p className="mt-1.5 text-sm text-muted">Sign in with the account your admin created.</p>
       <form
@@ -122,7 +122,7 @@ function SignIn({ send }: { send: Send }) {
       </form>
       {/* Chrome Web Store: data use must be disclosed in the product, before collection, and agreed to by an action. */}
       <p className="mt-3 border-t border-line pt-3 text-xs text-muted">
-        When you scan a form, its page address and fields are sent to Fill by Kural. Your spoken answers are turned
+        When you scan a form, its page address and fields are sent to Voice2Fill. Your spoken answers are turned
         into text by Sarvam AI and OpenAI and deleted within about an hour. By signing in you agree to this.{' '}
         <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="text-accent-ink underline underline-offset-2">
           Privacy policy
@@ -138,7 +138,7 @@ function StartCard({ state, send }: { state: ExtState; send: Send }) {
   return (
     <Card>
       <h1 className="flex items-center gap-2 text-sm font-semibold">
-        <Mic size={16} /> Fill by Kural
+        <Mic size={16} /> Voice2Fill
       </h1>
       <p className="mt-1.5 text-sm text-muted">Open the page with the form, then scan it to pair your phone.</p>
       <Button

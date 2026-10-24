@@ -16,12 +16,12 @@ export default defineConfig(({ mode }) => {
 
   const manifest = defineManifest({
     manifest_version: 3,
-    name: 'Fill by Kural: Speak Tamil or English to fill web forms',
-    short_name: 'Fill by Kural',
+    name: 'Voice2Fill: Speak Tamil or English to fill web forms',
+    short_name: 'Voice2Fill',
     version: '1.0.0',
     description: 'Fill the form on this page by speaking on your phone in Tamil, English or Tanglish.',
     ...(haveIcons ? { icons } : {}),
-    action: { default_popup: 'src/popup/index.html', default_title: 'Fill by Kural', ...(haveIcons ? { default_icon: icons } : {}) },
+    action: { default_popup: 'src/popup/index.html', default_title: 'Voice2Fill', ...(haveIcons ? { default_icon: icons } : {}) },
     background: { service_worker: 'src/background/service-worker.ts', type: 'module' },
     permissions: ['storage', 'activeTab', 'scripting'],
     // The service worker calls the API and Supabase Realtime directly (no CORS from the worker).

@@ -1,4 +1,4 @@
-// Packs dist/ into release/fill-by-kural-<version>.zip for the Chrome Web Store (`pnpm zip`).
+// Packs dist/ into release/voice2fill-<version>.zip for the Chrome Web Store (`pnpm zip`).
 // Checks the build first: production API address (the default is localhost:3000), icons, privacy link,
 // no source maps.
 // A small zip writer of its own: Windows PowerShell's Compress-Archive writes "\" in paths, which the
@@ -82,7 +82,7 @@ end.writeUInt32LE(dir.length, 12);
 end.writeUInt32LE(offset, 16);
 
 mkdirSync(join(root, 'release'), { recursive: true });
-const out = join(root, 'release', `fill-by-kural-${manifest.version}.zip`);
+const out = join(root, 'release', `voice2fill-${manifest.version}.zip`);
 writeFileSync(out, Buffer.concat([...locals, dir, end]));
 console.log(`✓ ${relative(root, out)} · ${files.length} files · ${(statSync(out).size / 1024).toFixed(0)} KB · v${manifest.version}`);
 console.log(`  API: ${manifest.host_permissions.join(', ')}`);
