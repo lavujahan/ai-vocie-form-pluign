@@ -9,6 +9,8 @@ import { AdminNav } from '../admin-nav';
 import { api } from '../api';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Token costs are often fractions of a cent: up to 4 decimals.
+const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const num = new Intl.NumberFormat('en-IN');
 const mins = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
@@ -58,7 +60,7 @@ export function UsageAdmin() {
         </Button>
       </header>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-[auto_1fr]">
+      <div className="mb-4 grid gap-3 lg:grid-cols-[auto_1fr]">
         <Card>
           <label className="block text-xs font-medium text-muted" htmlFor="month">
             Month
@@ -76,9 +78,12 @@ export function UsageAdmin() {
               <tr className="text-left text-xs text-muted">
                 <th className="px-4 py-2 font-medium">User</th>
                 <th className="px-4 py-2 text-right font-medium">Minutes</th>
-                <th className="px-4 py-2 text-right font-medium">Tokens</th>
-                <th className="px-4 py-2 text-right font-medium">Sarvam</th>
+                <th className="px-4 py-2 text-right font-medium">Input tokens</th>
+                <th className="px-4 py-2 text-right font-medium">Input cost</th>
+                <th className="px-4 py-2 text-right font-medium">Output tokens</th>
+                <th className="px-4 py-2 text-right font-medium">Output cost</th>
                 <th className="px-4 py-2 text-right font-medium">OpenAI</th>
+                <th className="px-4 py-2 text-right font-medium">Sarvam</th>
                 <th className="px-4 py-2 text-right font-medium">Total</th>
               </tr>
             </thead>
@@ -94,14 +99,14 @@ export function UsageAdmin() {
               ))}
               {data && !data.rows.length && !loading && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted">
+                  <td colSpan={COLUMNS} className="px-4 py-8 text-center text-sm text-muted">
                     No AI usage in this month.
                   </td>
                 </tr>
               )}
               {!data && loading && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted">
+                  <td colSpan={COLUMNS} className="px-4 py-8 text-center text-sm text-muted">
                     Loading…
                   </td>
                 </tr>
@@ -120,19 +125,22 @@ export function UsageAdmin() {
       </Card>
 
       <p className="mt-3 text-xs text-muted">
-        Estimates from official list prices (checked 23 Oct 2026):{' '}
+        OpenAI cost per user = input tokens × your input price + output tokens × your output price (per 1M tokens, in $; cached
+        input tokens count as input), shown in ₹ at your rate. A new price applies to every month. Check the{' '}
+        <a className="underline" href="https://developers.openai.com/api/docs/pricing" target="_blank" rel="noreferrer">
+          OpenAI prices
+        </a>{' '}
+        and{' '}
         <a className="underline" href="https://www.sarvam.ai/api-pricing" target="_blank" rel="noreferrer">
           Sarvam speech-to-text
         </a>{' '}
-        is billed per minute of audio;{' '}
-        <a className="underline" href="https://developers.openai.com/api/docs/pricing" target="_blank" rel="noreferrer">
-          OpenAI
-        </a>{' '}
-        per token in USD, converted at your rate. Months follow India time.
+        (per minute of audio). Months follow India time.
       </p>
     </main>
   );
 }
+
+const COLUMNS = 9;
 
 function UsageCells({ row }: { row: Omit<UsageSummaryRow, 'user_id' | 'name' | 'phone'> }) {
   return (
@@ -140,46 +148,52 @@ function UsageCells({ row }: { row: Omit<UsageSummaryRow, 'user_id' | 'name' | '
       <td className="px-4 py-2.5 text-right tabular-nums" title={`${num.format(row.stt_calls)} recordings`}>
         {mins.format(row.minutes)}
       </td>
-      <td
-        className="px-4 py-2.5 text-right tabular-nums"
-        title={`Input ${num.format(row.input_tokens)} (cached ${num.format(row.cached_input_tokens)}) · Output ${num.format(row.output_tokens)} · ${num.format(row.llm_calls)} runs`}
-      >
-        {num.format(row.tokens)}
+      <td className="px-4 py-2.5 text-right tabular-nums" title={`${num.format(row.cached_input_tokens)} of them cached · ${num.format(row.llm_calls)} runs`}>
+        {num.format(row.input_tokens)}
+      </td>
+      <td className="px-4 py-2.5 text-right tabular-nums">{usd.format(row.input_usd)}</td>
+      <td className="px-4 py-2.5 text-right tabular-nums">{num.format(row.output_tokens)}</td>
+      <td className="px-4 py-2.5 text-right tabular-nums">{usd.format(row.output_usd)}</td>
+      <td className="px-4 py-2.5 text-right tabular-nums">
+        <div>{usd.format(row.openai_usd)}</div>
+        <div className="text-xs text-muted">{inr.format(row.openai_inr)}</div>
       </td>
       <td className="px-4 py-2.5 text-right tabular-nums">{inr.format(row.sarvam_inr)}</td>
-      <td className="px-4 py-2.5 text-right tabular-nums" title={`$${row.openai_usd.toFixed(4)}`}>
-        {inr.format(row.openai_inr)}
-      </td>
       <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{inr.format(row.total_inr)}</td>
     </>
   );
 }
 
+/** One price field: `min` / `max` as in the server's check. */
+type Rate = { key: keyof BillingSettings; label: string; min: number; max: number };
+
+const RATES: Rate[] = [
+  { key: 'input_usd_per_m', label: 'Input tokens · $ per 1M', min: 0, max: 1000 },
+  { key: 'output_usd_per_m', label: 'Output tokens · $ per 1M', min: 0, max: 1000 },
+  { key: 'usd_inr_rate', label: '1 USD in ₹', min: 0.01, max: 1000 },
+  { key: 'sarvam_inr_per_min', label: 'Sarvam ₹ per minute', min: 0.01, max: 100 },
+];
+
+const asText = (s: BillingSettings) => Object.fromEntries(RATES.map((r) => [r.key, String(s[r.key])])) as Record<keyof BillingSettings, string>;
+
+/** The admin's prices: OpenAI input / output tokens in $ per 1M, the $→₹ rate, Sarvam ₹ per minute. */
 function RatesCard({ settings, onSaved }: { settings: BillingSettings; onSaved: () => void }) {
-  const [usd, setUsd] = useState(String(settings.usd_inr_rate));
-  const [sarvam, setSarvam] = useState(String(settings.sarvam_inr_per_min));
+  const [text, setText] = useState(() => asText(settings));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  useEffect(() => {
-    setUsd(String(settings.usd_inr_rate));
-    setSarvam(String(settings.sarvam_inr_per_min));
-  }, [settings.usd_inr_rate, settings.sarvam_inr_per_min]);
+  useEffect(() => setText(asText(settings)), [settings]);
 
-  const usdN = Number(usd);
-  const sarvamN = Number(sarvam);
-  const valid = usdN > 0 && usdN <= 1000 && sarvamN > 0 && sarvamN <= 100;
-  const changed = usdN !== settings.usd_inr_rate || sarvamN !== settings.sarvam_inr_per_min;
+  const values = Object.fromEntries(RATES.map((r) => [r.key, Number(text[r.key])])) as BillingSettings;
+  const valid = RATES.every((r) => text[r.key].trim() !== '' && values[r.key] >= r.min && values[r.key] <= r.max);
+  const changed = RATES.some((r) => values[r.key] !== settings[r.key]);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setMsg(null);
     try {
-      await api('/api/admin/billing-settings', {
-        method: 'PATCH',
-        body: JSON.stringify({ usd_inr_rate: usdN, sarvam_inr_per_min: sarvamN }),
-      });
+      await api('/api/admin/billing-settings', { method: 'PATCH', body: JSON.stringify(values) });
       setMsg({ ok: true, text: 'Saved' });
       onSaved();
     } catch (err) {
@@ -191,19 +205,26 @@ function RatesCard({ settings, onSaved }: { settings: BillingSettings; onSaved: 
 
   return (
     <Card>
-      <form onSubmit={save} className="flex flex-wrap items-end gap-3">
-        <label className="block min-w-36 flex-1">
-          <span className="text-xs font-medium text-muted">1 USD in ₹ (OpenAI)</span>
-          <Input type="number" inputMode="decimal" step="0.01" min="0.01" value={usd} onChange={(e) => setUsd(e.target.value)} className="mt-1" />
-        </label>
-        <label className="block min-w-36 flex-1">
-          <span className="text-xs font-medium text-muted">Sarvam ₹ per minute</span>
-          <Input type="number" inputMode="decimal" step="0.01" min="0.01" value={sarvam} onChange={(e) => setSarvam(e.target.value)} className="mt-1" />
-        </label>
+      <form onSubmit={save} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_auto] lg:items-end">
+        {RATES.map((r) => (
+          <label key={r.key} className="block">
+            <span className="text-xs font-medium text-muted">{r.label}</span>
+            <Input
+              type="number"
+              inputMode="decimal"
+              step="any"
+              min={r.min}
+              max={r.max}
+              value={text[r.key]}
+              onChange={(e) => setText((t) => ({ ...t, [r.key]: e.target.value }))}
+              className="mt-1"
+            />
+          </label>
+        ))}
         <Button type="submit" variant="primary" loading={busy} disabled={!valid || !changed}>
-          Save rates
+          Save prices
         </Button>
-        {msg && <p className={`w-full text-xs ${msg.ok ? 'text-live-ink' : 'text-danger-ink'}`}>{msg.text}</p>}
+        {msg && <p className={`text-xs sm:col-span-2 lg:col-span-5 ${msg.ok ? 'text-live-ink' : 'text-danger-ink'}`}>{msg.text}</p>}
       </form>
     </Card>
   );

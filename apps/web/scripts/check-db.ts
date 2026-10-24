@@ -126,6 +126,10 @@ try {
   check('Connect phone again: the QR pairs once more', !!reconnect.data && !!third.data, reconnect.error?.message);
   check('Connect phone again: answers are kept', kept?.value === 'from #11', JSON.stringify(kept));
 
+  // ---- Token prices (admin panel → Usage) ----
+  const prices = await admin.from('billing_settings').select('input_usd_per_m, output_usd_per_m').eq('id', true).maybeSingle();
+  check('Billing: input / output token prices exist (apply migration 0010)', !prices.error && prices.data != null, prices.error?.message);
+
   // ---- RLS ----
   const userToken = async (id: string) =>
     (await signJwt({ role: 'authenticated', scope: 'user', app_role: 'user' }, id, 300, secret)).token;

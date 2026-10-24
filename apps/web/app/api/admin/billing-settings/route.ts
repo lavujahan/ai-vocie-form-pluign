@@ -11,7 +11,7 @@ export const GET = route(async (req) => {
   return NextResponse.json({ settings: await getBillingSettings() });
 });
 
-/** The admin sets the USD→INR rate (for OpenAI) and Sarvam's ₹ per minute. */
+/** The admin sets OpenAI's input / output token prices ($ per 1M), the USD→INR rate and Sarvam's ₹ per minute. */
 export const PATCH = route(async (req) => {
   const admin = await requireAdmin(req);
   const body = BillingSettings.parse(await req.json());

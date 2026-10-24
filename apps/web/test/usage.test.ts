@@ -48,14 +48,19 @@ describe('monthly summary', () => {
     expect(currentMonth(new Date('2026-10-31T20:00:00Z'))).toBe('2026-11');
   });
 
-  it('prices Sarvam by minutes and OpenAI by USD × rate, with totals', () => {
+  it("prices tokens at the admin's $ per 1M (input and output), Sarvam by minutes, with totals", () => {
     const raw: RawUsageRow[] = [
       { user_id: 'a', name: 'Anu', phone: '9000000001', stt_calls: '10', audio_ms: '600000', llm_calls: '10', input_tokens: '50000', cached_input_tokens: '10000', output_tokens: '5000', openai_usd: '0.5' },
       { user_id: 'b', name: 'Bala', phone: '9000000002', stt_calls: 2, audio_ms: 30_000, llm_calls: 3, input_tokens: 1000, cached_input_tokens: 0, output_tokens: 100, openai_usd: 0.01 },
     ];
-    const s = priceSummary(raw, { usd_inr_rate: 88, sarvam_inr_per_min: 0.49 }, '2026-10');
-    expect(s.rows[0]).toMatchObject({ minutes: 10, tokens: 55_000, sarvam_inr: 4.9, openai_inr: 44, total_inr: 48.9 });
-    expect(s.rows[1]).toMatchObject({ minutes: 0.5, sarvam_inr: 0.25, openai_inr: 0.88, total_inr: 1.13 });
-    expect(s.totals).toMatchObject({ minutes: 10.5, tokens: 56_100, sarvam_inr: 5.15, openai_inr: 44.88, total_inr: 50.03 });
+    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, output_usd_per_m: 10 };
+    const s = priceSummary(raw, settings, '2026-10');
+    // Anu: 50k input × $2.50/1M = $0.125, 5k output × $10/1M = $0.05 → $0.175 → ₹15.40 (the stored list-price cost is not used).
+    expect(s.rows[0]).toMatchObject({ minutes: 10, tokens: 55_000, input_usd: 0.125, output_usd: 0.05, openai_usd: 0.175, sarvam_inr: 4.9, openai_inr: 15.4, total_inr: 20.3 });
+    expect(s.rows[1]).toMatchObject({ input_usd: 0.0025, output_usd: 0.001, openai_usd: 0.0035, openai_inr: 0.31 });
+    expect(s.totals).toMatchObject({ tokens: 56_100, input_usd: 0.1275, output_usd: 0.051, openai_usd: 0.1785, openai_inr: 15.71 });
+    // A new price applies straight away: input $1, output $4 per 1M.
+    const cheaper = priceSummary(raw, { ...settings, input_usd_per_m: 1, output_usd_per_m: 4 }, '2026-10');
+    expect(cheaper.rows[0]).toMatchObject({ input_usd: 0.05, output_usd: 0.02, openai_usd: 0.07, openai_inr: 6.16 });
   });
 });

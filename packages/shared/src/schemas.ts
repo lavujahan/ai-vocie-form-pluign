@@ -238,6 +238,10 @@ export type AdminUserRow = PublicUser & {
 export const BillingSettings = z.object({
   usd_inr_rate: z.number().positive().max(1000),
   sarvam_inr_per_min: z.number().positive().max(100),
+  /** OpenAI price set by the admin, USD per 1M input tokens. */
+  input_usd_per_m: z.number().min(0).max(1000),
+  /** OpenAI price set by the admin, USD per 1M output tokens. */
+  output_usd_per_m: z.number().min(0).max(1000),
 });
 export type BillingSettings = z.infer<typeof BillingSettings>;
 
@@ -253,6 +257,11 @@ export type UsageSummaryRow = {
   cached_input_tokens: number;
   output_tokens: number;
   tokens: number;
+  /** Input tokens × the admin's input price. */
+  input_usd: number;
+  /** Output tokens × the admin's output price. */
+  output_usd: number;
+  /** input_usd + output_usd. */
   openai_usd: number;
   sarvam_inr: number;
   openai_inr: number;
