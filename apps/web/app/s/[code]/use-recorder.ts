@@ -19,9 +19,10 @@ export type RecorderNotice = 'interrupted' | 'too_short' | null;
 /**
  * Tap-to-toggle recorder. The mic stream is kept open between recordings so
  * the next tap starts instantly (and mobile browsers don't re-prompt).
- * Each piece of a long recording is delivered through `onRecorded` with its own tag.
+ * Each piece of a long recording is delivered through `onRecorded` with its own tag; `last` marks the
+ * piece that ended the recording (Stop, screen lock, call, app switch), not a 28 s cut.
  */
-export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown; durationMs: number }) => void) {
+export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown; durationMs: number; last: boolean }) => void) {
   const [state, setState] = useState<RecorderState>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [notice, setNotice] = useState<RecorderNotice>(null);
@@ -55,13 +56,19 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown; durat
     const rec = new MediaRecorder(streamRef.current!, mimeType ? { mimeType } : undefined);
     const chunks: Blob[] = [];
     const segStart = Date.now();
+    let cut = false;
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
-      const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
+      const type = rec.mimeType || mimeType || 'audio/webm';
+      const blob = new Blob(chunks, { type });
       const durationMs = Date.now() - segStart;
-      if (durationMs >= MIN_MS && blob.size > 0) onRecordedRef.current(blob, { tag, durationMs });
-      // Only the first piece can be an accidental tap; later pieces just caught the stop.
-      else if (segStart - startedAt.current < 1000) setNotice('too_short');
+      const later = segStart - startedAt.current >= 1000;
+      if (durationMs >= MIN_MS && blob.size > 0) onRecordedRef.current(blob, { tag, durationMs, last: !cut });
+      // A later piece just caught the stop: still sent, as it tells the server the recording ended (the
+      // server maps the pieces before it without transcribing this sliver).
+      else if (later && !cut) onRecordedRef.current(blob.size > 0 ? blob : new Blob([new Uint8Array(1)], { type }), { tag, durationMs, last: true });
+      // Only the first piece can be an accidental tap.
+      else if (!later) setNotice('too_short');
     };
     recRef.current = rec;
     rec.start();
@@ -70,6 +77,7 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown; durat
       const next = nextTagRef.current ? nextTagRef.current() : tag;
       // Start the next piece first, then stop this one: a few ms of overlap instead of a gap.
       beginSegment(next);
+      cut = true;
       rec.stop();
     }, SEGMENT_MS);
   }, []);

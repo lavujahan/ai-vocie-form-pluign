@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { assistantMessage, functionCall, ScriptedModel } from '@openai/agents/testing';
 import { Usage } from '@openai/agents';
 import type { FormSchema } from '@vff/shared';
-import { mapTranscript, buildMapperPrompt } from '@/lib/agents/fieldMapper';
+import { mapTranscript, buildMapperPrompt, mapperInstructions } from '@/lib/agents/fieldMapper';
+import { agentModel, modelName } from '@/lib/agents/usage';
+import { baseModel } from '@/lib/usage/pricing';
 import { sanitizeAnalysis } from '@/lib/agents/formAnalyzer';
 import { isEmptyTranscript, sanitizeMapping } from '@/lib/agents/guardrails';
 import { mapperTools, validateForField, type AgentField } from '@/lib/agents/tools';
@@ -159,7 +161,7 @@ describe('Field Mapping Agent (scripted model)', () => {
     ]);
     const out = await mapTranscript(
       { fields: EVAL_FORM, current: {}, transcript: 'en peru Ramesh Kumar, naan aan', targetFieldKey: null },
-      { model },
+      { model, validateTool: true },
     );
     expect(out.empty).toBe(false);
     if (out.empty) return;
@@ -191,7 +193,7 @@ describe('Field Mapping Agent (scripted model)', () => {
       { output: [assistantMessage(JSON.stringify(final))], usage: new Usage({ requests: 1, inputTokens: 4100, outputTokens: 60 }) },
     ]);
     const onUsage = vi.fn();
-    await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello', targetFieldKey: null }, { model, onUsage });
+    await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello', targetFieldKey: null }, { model, onUsage, validateTool: true });
     expect(onUsage).toHaveBeenCalledTimes(1);
     const { usage, model: name, ok } = onUsage.mock.calls[0][0];
     expect({ name, ok, requests: usage.requests, input: usage.inputTokens, output: usage.outputTokens }).toEqual({
@@ -256,5 +258,47 @@ describe('spoken corrections and commands', () => {
       values: [{ field_key: 'city', value: 'Salem', confidence: 0.9, source_phrase: null, number_parts: null }],
     };
     expect(sanitizeMapping(withValue, EVAL_FORM, null).command).toBeNull();
+  });
+});
+
+describe('model per AI step', () => {
+  it('uses the step setting, then AGENT_MODEL, then gpt-5.4-mini at low effort', () => {
+    vi.stubEnv('MAPPER_MODEL', '');
+    vi.stubEnv('ANALYZER_MODEL', '');
+    vi.stubEnv('RESOLVER_MODEL', '');
+    vi.stubEnv('AGENT_MODEL', '');
+    vi.stubEnv('AGENT_REASONING', '');
+    for (const step of ['mapper', 'analyzer', 'resolver'] as const) {
+      expect(agentModel(step)).toMatchObject({ model: 'gpt-5.4-mini', modelSettings: { reasoning: { effort: 'low' } } });
+    }
+    vi.stubEnv('AGENT_MODEL', 'gpt-4.1-mini');
+    expect(agentModel('analyzer')).toMatchObject({ model: 'gpt-4.1-mini', modelSettings: { maxTokens: 16_000 } });
+    vi.stubEnv('MAPPER_MODEL', 'gpt-5-mini');
+    expect(agentModel('mapper')).toMatchObject({ model: 'gpt-5-mini', modelSettings: { reasoning: { effort: 'minimal' } } });
+    vi.unstubAllEnvs();
+  });
+  it('every step has an output-token limit and a timeout, so a runaway reply fails fast', () => {
+    expect(agentModel('mapper', 'gpt-4o')).toEqual({ model: 'gpt-4o', modelSettings: { maxTokens: 4_000 }, timeoutMs: 30_000 });
+    expect(agentModel('analyzer', 'gpt-4o')).toMatchObject({ modelSettings: { maxTokens: 16_000 }, timeoutMs: 90_000 });
+    expect(agentModel('resolver', 'gpt-4o')).toMatchObject({ modelSettings: { maxTokens: 2_000 }, timeoutMs: 20_000 });
+  });
+  it('the mapper has no validate_value tool unless asked for', async () => {
+    const final = { values: [], unmapped_speech: 'hello', missing_required: [], command: null };
+    const model = new ScriptedModel([[assistantMessage(JSON.stringify(final))]]);
+    await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello', targetFieldKey: null }, { model });
+    expect(model.lastCall?.request.tools ?? []).toHaveLength(0);
+    expect(JSON.stringify(model.lastCall?.request.systemInstructions)).not.toContain('validate_value');
+  });
+  it('reasoning models get a low effort; "@" sets it; billing uses the bare model name', () => {
+    expect(agentModel('mapper', 'gpt-5.4-mini').modelSettings).toEqual({ maxTokens: 4_000, reasoning: { effort: 'low' } });
+    expect(agentModel('mapper', 'gpt-5.4-mini@none').modelSettings).toEqual({ maxTokens: 4_000, reasoning: { effort: 'none' } });
+    expect(agentModel('mapper', 'gpt-4.1-mini@low').modelSettings).toEqual({ maxTokens: 4_000 }); // not a reasoning model
+    expect(modelName('gpt-5-mini@minimal')).toBe('gpt-5-mini');
+    expect(baseModel('gpt-5-mini@minimal')).toBe('gpt-5-mini');
+  });
+  it('the validate_value rule is in the instructions only when the agent has the tool', () => {
+    expect(mapperInstructions(true)).toContain('Call validate_value');
+    expect(mapperInstructions(false)).not.toContain('validate_value');
+    expect(mapperInstructions(false)).not.toContain('{{');
   });
 });

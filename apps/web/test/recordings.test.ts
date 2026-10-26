@@ -20,8 +20,16 @@ describe('joining pieces of a long recording', () => {
     expect(joinPieces(rows, 2, 'Jagadeesan')).toBe('father name Jagadeesan');
   });
 
-  it('ignores pieces that come after this one', () => {
-    expect(joinPieces([row(0, 'one'), row(2, 'three')], 1, 'two')).toBe('one two');
+  it('includes pieces after this one: a retried middle piece maps the whole recording', () => {
+    expect(joinPieces([row(0, 'one'), row(2, 'three')], 1, 'two')).toBe('one two three');
+  });
+
+  it('a last piece that caught only silence still joins the pieces before it', () => {
+    expect(joinPieces([row(0, 'Name Jagan'), row(1, 'mobile 95432')], 2, '')).toBe('Name Jagan mobile 95432');
+  });
+
+  it('uses this piece, not its own failed earlier try', () => {
+    expect(joinPieces([row(0, 'one'), row(1, null, 'error')], 1, 'two')).toBe('one two');
   });
 
   it('waits until every earlier piece has arrived and finished transcribing', () => {

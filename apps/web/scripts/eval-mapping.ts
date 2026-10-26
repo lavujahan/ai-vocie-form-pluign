@@ -2,13 +2,15 @@
  * Runs the Field Mapping Agent against the Tamil / English / Tanglish fixtures with the real API.
  *   pnpm eval:mapping                       (needs OPENAI_API_KEY in apps/web/.env.local)
  *   pnpm eval:mapping --only can,corrections   (tags: english tanglish tamil field can corrections commands)
- *   pnpm eval:mapping --model gpt-4o-mini      (compare models)
+ *   pnpm eval:mapping --model gpt-4o           (compare models; default: the app's model)
+ *   pnpm eval:mapping --validate               (with the model's validate_value round trips, off in the app)
  * Prints per-field accuracy, per tag, and saves a JSON report in apps/web/eval-results/.
  * Not part of CI: it costs tokens and model output varies.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { normalizeText } from '@vff/shared';
 import { mapTranscript } from '../lib/agents/fieldMapper';
+import { DEFAULT_AGENT_MODEL } from '../lib/agents/usage';
 import { CAN_FORM, EVAL_CASES, EVAL_FORM, type EvalTag } from './eval-fixtures';
 
 if (!process.env.OPENAI_API_KEY) {
@@ -21,7 +23,8 @@ const arg = (name: string) => {
   return i > 0 ? process.argv[i + 1] : undefined;
 };
 const only = arg('only')?.split(',').map((s) => s.trim()) as EvalTag[] | undefined;
-const model = arg('model') ?? process.env.AGENT_MODEL ?? 'gpt-4o';
+const model = arg('model') ?? (process.env.MAPPER_MODEL || process.env.AGENT_MODEL || DEFAULT_AGENT_MODEL);
+const validateTool = process.argv.includes('--validate');
 
 const same = (a: string, b: string) => normalizeText(a) === normalizeText(b) || a.trim() === b.trim();
 
@@ -29,7 +32,7 @@ type Miss = { field: string; expected: string; got: string };
 const results: { n: number; speech: string; tags: EvalTag[]; checks: number; passed: number; misses: Miss[]; ms: number }[] = [];
 
 const cases = EVAL_CASES.map((c, i) => ({ ...c, n: i + 1 })).filter((c) => !only || c.tags.some((t) => only.includes(t)));
-console.log(`Model ${model} · ${cases.length} cases${only ? ` (${only.join(', ')})` : ''}\n`);
+console.log(`Model ${model}${validateTool ? ' · with validate_value' : ''} · ${cases.length} cases${only ? ` (${only.join(', ')})` : ''}\n`);
 
 for (const c of cases) {
   const t0 = Date.now();
@@ -41,7 +44,7 @@ for (const c of cases) {
       targetFieldKey: c.target ?? null,
       recent: c.recent,
     },
-    { model },
+    { model, validateTool },
   );
   const got = new Map(outcome.empty ? [] : outcome.values.map((v) => [v.field_key, v.value ?? '']));
   const misses: Miss[] = [];

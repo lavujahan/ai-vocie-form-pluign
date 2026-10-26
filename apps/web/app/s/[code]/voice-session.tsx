@@ -75,6 +75,25 @@ function fmtTime(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+/**
+ * A recording is mapped once, after Stop (a few seconds): these messages take turns meanwhile, so the
+ * user sees work going on and keeps the page open.
+ */
+const WAIT_STEPS = ['waitPlease', 'waitThinking', 'waitPlanning', 'waitMapping', 'waitFilling', 'waitDontClose', 'waitLoading'] as const;
+const WAIT_STEP_MS = 1800;
+
+/** Which wait message to show while `active` (cycles through WAIT_STEPS); null while not active. */
+function useWaitStep(active: boolean): (typeof WAIT_STEPS)[number] | null {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    setStep(0);
+    if (!active) return;
+    const t = setInterval(() => setStep((s) => s + 1), WAIT_STEP_MS);
+    return () => clearInterval(t);
+  }, [active]);
+  return active ? WAIT_STEPS[step % WAIT_STEPS.length] : null;
+}
+
 export function VoiceSession({ code }: { code: string }) {
   const [lang, setLangState] = useState<Lang>('en');
   // Read after mount (localStorage / phone language) so server and client render the same first.
@@ -139,9 +158,9 @@ function SessionScreen({ code }: { code: string }) {
     ];
   };
 
-  const recorder = useRecorder((blob, { tag, durationMs }) => {
+  const recorder = useRecorder((blob, { tag, durationMs, last }) => {
     const { seq, target, recordingId, part } = tag as PieceTag;
-    s.sendUtterance(blob, target, seq, { recordingId, part }, durationMs);
+    s.sendUtterance(blob, target, seq, { recordingId, part, last }, durationMs);
   });
   const recording = recorder.state === 'recording';
 
@@ -173,6 +192,8 @@ function SessionScreen({ code }: { code: string }) {
   };
 
   const processing = [...s.utterances.values()].filter((u) => u.status === 'processing').length;
+  /** After Stop, while the answers are on their way: the wait message to show (null when not waiting). */
+  const waitStep = useWaitStep(!recording && processing > 0);
   /** Whole-form recordings the server couldn't use (no field of their own to show the error on). */
   const failedSpeech = [...s.utterances.values()].filter((u) => u.status === 'error' && !u.target_field_key).sort((a, b) => b.seq - a.seq);
   const latestTranscript = [...s.utterances.values()]
@@ -454,6 +475,7 @@ function SessionScreen({ code }: { code: string }) {
         filled={filledCount}
         total={s.fields.length}
         processing={processing}
+        waitStep={waitStep}
         attention={attention.length}
         unsent={unsent}
         failed={failedSpeech}
@@ -773,6 +795,7 @@ function BottomBar({
   filled,
   total,
   processing,
+  waitStep,
   attention,
   unsent,
   failed,
@@ -789,6 +812,8 @@ function BottomBar({
   filled: number;
   total: number;
   processing: number;
+  /** After Stop, while the answers are on their way: the wait message (null when not waiting). */
+  waitStep: (typeof WAIT_STEPS)[number] | null;
   attention: number;
   /** After a Send: changes not sent yet. */
   unsent: number;
@@ -820,10 +845,16 @@ function BottomBar({
       )}
       <div className="flex flex-wrap items-center gap-2 text-[13.5px]">
         <span className="font-bold tabular-nums">{t('filledCount', { n: filled, total })}</span>
-        {processing > 0 && (
-          <span className="inline-flex items-center gap-1.5 text-muted">
-            · <Loader2 size={14} className="animate-spin" /> {t('processing', { n: processing })}
+        {waitStep ? (
+          <span className="inline-flex items-center gap-1.5 font-semibold text-accent-ink" aria-live="polite">
+            · <Loader2 size={14} className="animate-spin" /> {t(waitStep)}
           </span>
+        ) : (
+          processing > 0 && (
+            <span className="inline-flex items-center gap-1.5 text-muted">
+              · <Loader2 size={14} className="animate-spin" /> {t('processing', { n: processing })}
+            </span>
+          )
         )}
         {attention > 0 && (
           <button onClick={onAttention} className="rounded-full bg-warn-bg px-2.5 py-0.5 font-semibold text-warn-ink">
@@ -861,7 +892,9 @@ function BottomBar({
             {recording ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
             {recording && <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />}
           </button>
-          <span className="text-[11.5px] text-muted tabular-nums">{recording ? fmtTime(elapsed) : t('tapToSpeak')}</span>
+          <span className="text-[11.5px] text-muted tabular-nums">
+            {recording ? fmtTime(elapsed) : waitStep ? t('waitPlease') : t('tapToSpeak')}
+          </span>
         </div>
         {/* While speech is still being turned into answers, Send waits (else they'd miss this Send). */}
         <SendButton send={send} waiting={recording || processing > 0} />

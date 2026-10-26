@@ -3,8 +3,11 @@ import type { BillingSettings } from '@vff/shared';
 import { fail, must } from '../http';
 import { db } from '../supabase-admin';
 
-/** Same as the migrations' column defaults (Sarvam pay-as-you-go; gpt-4o list price per 1M tokens). */
-export const DEFAULT_BILLING: BillingSettings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, output_usd_per_m: 10 };
+/**
+ * Used until the admin saves prices: Sarvam pay-as-you-go and gpt-5.4-mini's list price per 1M tokens
+ * (the AI model since Oct 2026; the migration's column defaults are gpt-4o's).
+ */
+export const DEFAULT_BILLING: BillingSettings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 0.75, output_usd_per_m: 4.5 };
 
 type Row = Partial<Record<keyof BillingSettings, number | string>>;
 

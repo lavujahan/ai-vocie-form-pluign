@@ -31,7 +31,8 @@ export type LocalUtterance = {
   recording?: RecordingPiece;
 };
 
-export type RecordingPiece = { recordingId: string; part: number };
+/** `last`: the piece that ended the recording; the server maps the whole recording then. */
+export type RecordingPiece = { recordingId: string; part: number; last: boolean };
 
 type Stored = { token: string; expires_at: string; seq: number };
 const storeKey = (code: string) => `vff:${code}`;
@@ -321,6 +322,7 @@ export function useVoiceSession(code: string) {
       if (recording) {
         form.append('recording_id', recording.recordingId);
         form.append('part', String(recording.part));
+        form.append('last', recording.last ? '1' : '0');
       }
       try {
         const res = await authFetch('/api/utterances', { method: 'POST', body: form });
@@ -355,8 +357,8 @@ export function useVoiceSession(code: string) {
         next.delete(u.seq);
         return next;
       });
-      // Same recording and piece number, new seq: the server joins it with the earlier pieces again.
-      sendUtterance(u.blob, u.target_field_key, undefined, u.recording, u.durationMs);
+      // Same recording and piece number, new seq, marked last: the server maps the whole recording again.
+      sendUtterance(u.blob, u.target_field_key, undefined, u.recording && { ...u.recording, last: true }, u.durationMs);
     },
     [sendUtterance],
   );

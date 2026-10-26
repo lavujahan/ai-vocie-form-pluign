@@ -15,31 +15,36 @@ export function earlierPiecesReady(rows: PieceRow[], part: number): boolean {
   return done.size >= part;
 }
 
-/** Earlier pieces' transcripts + this one, in spoken order. Failed pieces are skipped. */
+/**
+ * Every piece's transcript with this one in its place, in spoken order. Failed pieces are skipped.
+ * Later pieces count too: a retried middle piece is mapped after the last one, and covers the whole recording.
+ */
 export function joinPieces(rows: PieceRow[], part: number, transcript: string): string {
   // One transcript per piece number (a retried piece has two rows; the failed one has none).
   const byPart = new Map<number, string>();
-  for (const r of rows) if (r.part < part && r.transcript?.trim()) byPart.set(r.part, r.transcript.trim());
-  const earlier = [...byPart.entries()].sort(([a], [b]) => a - b).map(([, t]) => t);
-  return [...earlier, transcript.trim()].filter(Boolean).join(' ');
+  for (const r of rows) if (r.part !== part && r.transcript?.trim()) byPart.set(r.part, r.transcript.trim());
+  byPart.set(part, transcript.trim());
+  return [...byPart.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([, t]) => t)
+    .filter(Boolean)
+    .join(' ');
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Full transcript of a recording so far: waits briefly for earlier pieces' transcripts, then joins
- * them with this piece's. Mapping the whole text lets a sentence or number that was cut across
- * pieces ("mobile number 95432 | 49890") resolve correctly; the later piece has the higher seq,
- * so its complete reading replaces the earlier partial one.
+ * Full transcript of a recording: waits briefly for earlier pieces' transcripts, then joins every
+ * piece's with this one's. A recording is mapped once, on its last piece (or a retried piece), so a
+ * sentence or number cut across pieces ("mobile number 95432 | 49890") is read whole.
  */
-export async function recordingTranscriptSoFar(
+export async function recordingTranscript(
   sessionId: string,
   recordingId: string,
   part: number,
   transcript: string,
   opts: { timeoutMs?: number; pollMs?: number } = {},
 ): Promise<string> {
-  if (part <= 0) return transcript;
   const deadline = Date.now() + (opts.timeoutMs ?? 10_000);
   let rows: PieceRow[] = [];
   for (;;) {
@@ -48,7 +53,7 @@ export async function recordingTranscriptSoFar(
       .select('part, status, transcript')
       .eq('session_id', sessionId)
       .eq('recording_id', recordingId)
-      .lt('part', part);
+      .neq('part', part);
     rows = (data ?? []) as PieceRow[];
     if (earlierPiecesReady(rows, part) || Date.now() >= deadline) break;
     await sleep(opts.pollMs ?? 400);

@@ -1,7 +1,7 @@
 import { Agent, run, setTracingDisabled, type Model } from '@openai/agents';
 import { FormAnalysis, sanitizeFileRules, type FieldAnalysis, type FormSchema } from '@vff/shared';
 import { analyzerTools } from './tools';
-import { modelName, runWithUsage, type OnUsage } from './usage';
+import { agentModel, modelName, runWithUsage, type OnUsage } from './usage';
 import { openaiEvent, type UsageEvent } from '../usage/events';
 
 setTracingDisabled(process.env.NODE_ENV === 'production');
@@ -59,15 +59,16 @@ export async function analyzeForm(
   schema: FormSchema,
   opts: { model?: Model | string; onUsage?: OnUsage } = {},
 ): Promise<FormAnalysis> {
-  const model = opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o';
+  const { model, modelSettings, timeoutMs } = agentModel('analyzer', opts.model);
   const agent = new Agent({
     name: 'Form Analyzer Agent',
     instructions: ANALYZER_INSTRUCTIONS,
     model,
+    modelSettings,
     outputType: FormAnalysis,
     tools: analyzerTools(schema.fields),
   });
-  const result = await runWithUsage(opts.onUsage, modelName(model), () => run(agent, describeSchema(schema), { maxTurns: 6 }));
+  const result = await runWithUsage(opts.onUsage, modelName(model), () => run(agent, describeSchema(schema), { maxTurns: 6, signal: AbortSignal.timeout(timeoutMs) }));
   if (!result.finalOutput) throw new Error('Form analyzer returned no output');
   return result.finalOutput;
 }

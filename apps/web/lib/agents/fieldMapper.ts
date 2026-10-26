@@ -9,11 +9,11 @@ import {
   type SanitizedMapping,
 } from './guardrails';
 import { fieldLabel, mapperTools, type AgentField } from './tools';
-import { modelName, runWithUsage, type OnUsage } from './usage';
+import { agentModel, modelName, runWithUsage, type OnUsage } from './usage';
 
 setTracingDisabled(process.env.NODE_ENV === 'production');
 
-export const MAPPER_INSTRUCTIONS = `You fill web forms from a person's speech.
+const MAPPER_TEMPLATE = `You fill web forms from a person's speech.
 The speech may be Tamil, English or Tanglish (code-mixed, Tamil words in Latin letters). The form needs English values.
 
 The transcript comes from Sarvam speech-to-text in "codemix" form: English words are in English letters, Tamil words are in Tamil script, and numbers usually arrive as digits already. Keep Tamil script only for fields marked output_script=ta; transliterate or translate everything else to English.
@@ -41,8 +41,7 @@ Rules
 - Output is English/Latin script, except fields marked output_script=ta, which keep Tamil script.
 - Numbers spoken as words (phone, Aadhaar, PIN, account numbers): fill number_parts with EVERY spoken piece in order — one entry per word or digit group, exactly as transcribed — and the digits for that piece ("rendu"→"2", "double two"→"22", "triple zero"→"000", "ஒன்பது"→"9", "98"→"98"). Never skip, merge or reorder pieces; the value is built from these parts. Use number_parts: null for everything else (and for numbers already written as digits). Then count the digits against the field (mobile 10, Aadhaar 12, PIN 6). If the count is off, re-read the speech once; if it is still off, keep EXACTLY the digits that were spoken — never add or remove a digit to make it fit — and set confidence to 0.5 or lower so the user checks it.
 - Do all conversions yourself (number words in any language or accent to digits, spoken emails/dates to their written form, transliteration, translation). There are no conversion tools.
-- Call validate_value for every value before finalizing. It only checks format and options; if it fails, re-read the speech, fix the value and validate again. If you still can't fix it, return your best guess with low confidence.
-- confidence is 0..1: how sure you are that this is what the speaker meant for this field.
+{{VALIDATE_RULE}}- confidence is 0..1: how sure you are that this is what the speaker meant for this field.
 - source_phrase is the part of the speech the value came from, in its original script.
 - unmapped_speech: speech that didn't belong to any field (null if none).
 - missing_required: required field keys that still have no value after this speech (consider current values too).
@@ -50,6 +49,14 @@ Rules
 Illustrative form: ${EXAMPLE_FORM}
 
 ${renderFewShot()}`;
+
+const VALIDATE_RULE =
+  "- Call validate_value for every value before finalizing. It only checks format and options; if it fails, re-read the speech, fix the value and validate again. If you still can't fix it, return your best guess with low confidence.\n";
+
+/** The instructions, with the validate_value rule only when the agent has that tool. */
+export function mapperInstructions(withValidateTool = true): string {
+  return MAPPER_TEMPLATE.replace('{{VALIDATE_RULE}}', withValidateTool ? VALIDATE_RULE : '');
+}
 
 /** The agent picks options by meaning, so it needs to see them; 300 short labels is a few thousand tokens. */
 const MAX_OPTIONS_IN_PROMPT = 300;
@@ -111,16 +118,27 @@ export type MapOutcome = (SanitizedMapping & { empty: false }) | { empty: true }
 
 export async function mapTranscript(
   input: MapInput,
-  opts: { model?: Model | string; onUsage?: OnUsage } = {},
+  opts: {
+    model?: Model | string;
+    onUsage?: OnUsage;
+    /**
+     * Let the model check its values with validate_value (extra requests that re-send the prompt).
+     * The server checks every value afterwards either way (sanitizeMapping). Default: off (on real
+     * recordings it cost about 40% more and was no more accurate).
+     */
+    validateTool?: boolean;
+  } = {},
 ): Promise<MapOutcome> {
   const fields = input.targetFieldKey ? input.fields.filter((f) => f.field_key === input.targetFieldKey) : input.fields;
-  const model = opts.model ?? process.env.AGENT_MODEL ?? 'gpt-4o';
+  const { model, modelSettings, timeoutMs } = agentModel('mapper', opts.model);
+  const withTool = opts.validateTool ?? false;
   const agent = new Agent<MapperContext, typeof MappingResult>({
     name: 'Field Mapping Agent',
-    instructions: MAPPER_INSTRUCTIONS,
+    instructions: mapperInstructions(withTool),
     model,
+    modelSettings,
     outputType: MappingResult,
-    tools: mapperTools(fields),
+    tools: withTool ? mapperTools(fields) : [],
     inputGuardrails: [emptyTranscriptGuardrail],
     outputGuardrails: [unknownKeysGuardrail],
   });
@@ -130,6 +148,7 @@ export async function mapTranscript(
       run(agent, buildMapperPrompt(input), {
         context: { transcript: input.transcript, fieldKeys: new Set(fields.map((f) => f.field_key)) },
         maxTurns: 10,
+        signal: AbortSignal.timeout(timeoutMs),
       }),
     );
     if (!result.finalOutput) throw new Error('Mapping agent returned no output');
