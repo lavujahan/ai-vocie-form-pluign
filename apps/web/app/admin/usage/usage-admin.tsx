@@ -7,26 +7,14 @@ import type { BillingSettings, UsageCosts, UsageSummaryResponse } from '@vff/sha
 import { Button, Card, Input } from '@/components/ui';
 import { AdminNav } from '../admin-nav';
 import { api } from '../api';
+import { inr, isDay, monthRange, todayIst } from '../dates';
 
-const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // Token costs are often fractions of a cent: up to 4 decimals.
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const num = new Intl.NumberFormat('en-IN');
 const mins = new Intl.NumberFormat('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
-const IST_MS = 330 * 60_000;
-/** Today in India time, YYYY-MM-DD. */
-const todayIst = () => new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
-/** First and last day of the month `back` months before this one (India time). */
-function monthRange(back: number): { from: string; to: string } {
-  const now = new Date(Date.now() + IST_MS);
-  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back, 1));
-  const last = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - back + 1, 0));
-  const to = back === 0 ? todayIst() : last.toISOString().slice(0, 10);
-  return { from: first.toISOString().slice(0, 10), to };
-}
 const dayLabel = new Intl.DateTimeFormat('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 export function UsageAdmin() {
   const router = useRouter();

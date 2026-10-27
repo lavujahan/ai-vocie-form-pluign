@@ -1,4 +1,5 @@
 import type {
+  AccountResponse,
   CreateSessionResponse,
   FieldOption,
   ResolveOptionResponse,
@@ -97,6 +98,8 @@ export type ActiveSession = CreateSessionResponse & {
 /** The popup's view: the session of its own tab. */
 export type ExtState = {
   auth: { user: PublicUser; expires_at: string } | null;
+  /** The signed-in user's plan and voice minutes left; null until loaded. */
+  account: AccountResponse | null;
   session: ActiveSession | null;
   /**
    * Answers / uploads from the phone that came after the last "Fill form" (not on the page yet);

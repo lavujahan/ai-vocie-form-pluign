@@ -146,6 +146,8 @@ const en = {
   // Messages that come from the server (matched by their English text, see `serverText`).
   srvTabClosed: MSG.tabClosed,
   srvPhoneReplaced: MSG.phoneReplaced,
+  srvPlanEnded: MSG.planEnded,
+  srvMinutesUsed: MSG.minutesUsed,
   srvTabMoved: MSG.tabMoved,
   srvCleared: MSG.cleared,
   srvQrExpired: MSG.qrExpired,
@@ -307,6 +309,8 @@ const ta: Partial<Record<TextKey, string>> = {
   notSentYet: '{n} இன்னும் அனுப்பப்படவில்லை',
   ackWaitingFill: 'அனுப்பப்பட்டது. கணினியில் “Fill form” கிளிக் செய்யவும்.',
   srvPhoneReplaced: 'கணினியில் QR குறியீடு மீண்டும் காட்டப்பட்டதால் இந்த போன் துண்டிக்கப்பட்டது. தொடர அதை ஸ்கேன் செய்யவும்.',
+  srvPlanEnded: 'உங்கள் திட்டம் முடிந்துவிட்டது. குரல் மூலம் படிவங்களைத் தொடர்ந்து நிரப்ப, திட்டத்தைப் புதுப்பிக்கவும்.',
+  srvMinutesUsed: 'உங்கள் திட்டத்தின் எல்லா குரல் நிமிடங்களையும் பயன்படுத்திவிட்டீர்கள். தொடர, திட்டத்தைப் புதுப்பிக்கவும் அல்லது நிமிடங்களைச் சேர்க்கவும்.',
   srvTabClosed: 'டேப் மூடப்பட்டது. கணினியில் படிவம் உள்ள டேப் மூடப்பட்டது. எதுவும் அனுப்பப்படாது. தொடர, கணினியிலிருந்து புதிய QR குறியீட்டை ஸ்கேன் செய்யவும்.',
   srvTabMoved: 'கணினியில் படிவ டேப் வேறு இணையதளத்திற்கு மாறிவிட்டது. அனுப்ப, கணினியில் படிவத்தை மீண்டும் திறக்கவும்.',
   srvCleared: '"புதிதாகத் தொடங்கு" மூலம் இது அழிக்கப்பட்டது.',

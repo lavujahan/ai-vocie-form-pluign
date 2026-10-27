@@ -6,14 +6,17 @@ import { cx } from '@/components/ui';
 
 const TABS = [
   { href: '/admin', label: 'Users' },
+  { href: '/admin/billing', label: 'Billing' },
+  { href: '/admin/plans', label: 'Plans' },
   { href: '/admin/usage', label: 'Usage' },
+  { href: '/admin/forms', label: 'Forms' },
 ];
 
-/** Users · Usage tabs at the top of the admin pages. */
+/** Users · Billing · Plans · Usage · Forms tabs at the top of the admin pages. */
 export function AdminNav() {
   const path = usePathname();
   return (
-    <nav className="flex gap-1" aria-label="Admin">
+    <nav className="flex flex-wrap gap-1" aria-label="Admin">
       {TABS.map((t) => {
         const active = path === t.href;
         return (

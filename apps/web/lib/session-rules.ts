@@ -13,6 +13,8 @@ export const MSG = {
   qrUsed: 'This QR code was already opened on another phone. Generate a new one on the computer.',
   qrUnknown: 'This QR code is not valid. Generate a new one on the computer.',
   phoneReplaced: 'This phone was disconnected because the QR code was shown again on the computer. Scan it to continue.',
+  planEnded: 'Your plan has ended. Renew it to keep filling forms by voice.',
+  minutesUsed: 'You have used all the voice minutes in your plan. Renew it or add minutes to continue.',
 } as const;
 
 type SessionState = { status: SessionStatus; desktop_state: DesktopState; reset_seq: number };

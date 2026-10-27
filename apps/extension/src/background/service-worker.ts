@@ -1,5 +1,6 @@
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import type {
+  AccountResponse,
   AddFieldsResponse,
   CreateSessionResponse,
   FieldFile,
@@ -59,6 +60,8 @@ type Auth = { token: string; expires_at: string; user: PublicUser };
 type Persisted = { auth: Auth | null; tabs: Tabs };
 
 let state: Persisted = { auth: null, tabs: {} };
+/** The signed-in user's plan; fetched when a popup opens, after sign-in and when the server refuses for the plan. */
+let account: AccountResponse | null = null;
 /** Open popups, and the tab each one was opened on. */
 const ports = new Map<chrome.runtime.Port, number | undefined>();
 
@@ -82,6 +85,7 @@ function publicState(tabId: number | undefined): ExtState {
   const t = tabOf(tabId);
   return {
     auth: state.auth ? { user: state.auth.user, expires_at: state.auth.expires_at } : null,
+    account: state.auth ? account : null,
     session: t?.session ?? null,
     unfilledChanges: t ? changesSince(t.session.snapshot, t.filledUpTo) : null,
     live: !!t && !!channels.get(t.session.session_id)?.live,
@@ -136,7 +140,22 @@ async function logout() {
   // Phones of these forms stop sending (nothing would be filled any more).
   await Promise.all(Object.values(state.tabs).map((t) => reportDesktop(t.session, { state: 'closed' })));
   stopRealtime();
+  account = null;
   await save({ auth: null, tabs: {} });
+}
+
+/** Reloads the plan and minutes left shown in the popup. Errors keep the last one. */
+async function refreshAccount() {
+  const auth = state.auth;
+  if (!auth) return;
+  try {
+    const a = await api<AccountResponse>('/api/account', { token: auth.token });
+    if (state.auth?.token !== auth.token) return; // signed out meanwhile
+    account = a;
+    broadcast();
+  } catch {
+    // offline, or an older server without /api/account
+  }
 }
 
 /** Tells the phone where the form tab is ('open' / 'moved' / 'closed') and how the last full fill went. */
@@ -622,8 +641,10 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
 
     case 'LOGIN': {
       const r = await api<LoginResponse>('/api/auth/login', { body: { phone: req.phone, pin: req.pin } });
+      account = null;
       await save({ auth: { token: r.token, expires_at: r.expires_at, user: r.user } });
       await ensureRealtime();
+      await refreshAccount();
       return;
     }
 
@@ -725,6 +746,8 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage |
       return { ok: true, state: publicState(tabId) } satisfies PopupResponse;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401 && req.type !== 'LOGIN') await logout();
+      // Plan ended or minutes used up: the popup shows it from the refreshed plan.
+      if (e instanceof ApiError && e.status === 402) await refreshAccount();
       const error =
         e instanceof ApiError && e.body.attempts_left !== undefined
           ? `${e.message}. ${e.body.attempts_left} ${e.body.attempts_left === 1 ? 'try' : 'tries'} left.`
@@ -745,6 +768,7 @@ chrome.runtime.onConnect.addListener((port) => {
   ready.then(async () => {
     await ensureRealtime();
     port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
+    void refreshAccount();
     // Opening the popup always shows the latest values, even if a live event was missed.
     if (tabId !== undefined) await refreshSnapshot(tabId);
   });

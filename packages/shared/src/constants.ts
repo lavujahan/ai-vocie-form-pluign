@@ -14,3 +14,7 @@ export const IP_ATTEMPT_LIMIT = 20;
 export const LOW_CONFIDENCE = 0.6;
 
 export const USER_COOKIE = 'vf_session';
+
+/** Admin → Users → Add minutes: the default top-up. */
+export const TOPUP_MINUTES = 100;
+export const TOPUP_PRICE_INR = 99;

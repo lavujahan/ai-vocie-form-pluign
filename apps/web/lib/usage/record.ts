@@ -9,7 +9,10 @@ import type { UsageEvent } from './events';
 export async function recordUsage(events: UsageEvent[]): Promise<void> {
   if (!events.length) return;
   try {
-    const { error } = await db().from('usage_events').insert(events);
+    // A speech-to-text row has no token columns and an AI row no audio column. In a multi-row insert a
+    // missing column is sent as null (a not-null violation that loses the whole batch) unless it is told to
+    // use the column's default.
+    const { error } = await db().from('usage_events').insert(events, { defaultToNull: false });
     if (!error) return;
     if (error.code === '42P01' || error.code === 'PGRST205') console.warn('usage_events missing: apply migration 0008');
     else console.error('usage record failed', error);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Agent, InputGuardrailTripwireTriggered, run, setTracingDisabled, type Model } from '@openai/agents';
 import { MappingResult } from '@vff/shared';
 import { EXAMPLE_FORM, renderFewShot } from './examples.ta-en';
@@ -19,6 +20,7 @@ The speech may be Tamil, English or Tanglish (code-mixed, Tamil words in Latin l
 The transcript comes from Sarvam speech-to-text in "codemix" form: English words are in English letters, Tamil words are in Tamil script, and numbers usually arrive as digits already. Keep Tamil script only for fields marked output_script=ta; transliterate or translate everything else to English.
 
 Rules
+- field_key is the field's id exactly as it starts its line in "Fields" (f1, f2, …): never its label, name or semantic type.
 - Never invent values. Only return fields the speech actually mentions. A field not mentioned is simply left out (or value null).
 - To clear a field the user asked to clear, return value "" (empty string).
 - Corrections like "change the phone to …" or "and the city is …" update that field; use the current values only as context.
@@ -42,9 +44,7 @@ Rules
 - Numbers spoken as words (phone, Aadhaar, PIN, account numbers): fill number_parts with EVERY spoken piece in order — one entry per word or digit group, exactly as transcribed — and the digits for that piece ("rendu"→"2", "double two"→"22", "triple zero"→"000", "ஒன்பது"→"9", "98"→"98"). Never skip, merge or reorder pieces; the value is built from these parts. Use number_parts: null for everything else (and for numbers already written as digits). Then count the digits against the field (mobile 10, Aadhaar 12, PIN 6). If the count is off, re-read the speech once; if it is still off, keep EXACTLY the digits that were spoken — never add or remove a digit to make it fit — and set confidence to 0.5 or lower so the user checks it.
 - Do all conversions yourself (number words in any language or accent to digits, spoken emails/dates to their written form, transliteration, translation). There are no conversion tools.
 {{VALIDATE_RULE}}- confidence is 0..1: how sure you are that this is what the speaker meant for this field.
-- source_phrase is the part of the speech the value came from, in its original script.
-- unmapped_speech: speech that didn't belong to any field (null if none).
-- missing_required: required field keys that still have no value after this speech (consider current values too).
+- source_phrase: only the spoken words of the value itself, in their original script, without the field's label or filler words ("தன்னார்வலர் முகவரி வணிகம் பலயம்" → "வணிகம் பலயம்"; "en mobile number ஒன்பது ஐந்து…" → "ஒன்பது ஐந்து…"). Use null when those words are the same as the value, ignoring case ("Jagan" → null).
 
 Illustrative form: ${EXAMPLE_FORM}
 
@@ -116,6 +116,28 @@ export type MapInput = {
 
 export type MapOutcome = (SanitizedMapping & { empty: false }) | { empty: true };
 
+/**
+ * The prompt names fields f1, f2, … (form order) instead of the site's keys ("radio-group-1790337220827-0"
+ * is 12 tokens, written again for every value in the answer). Numbered over all fields, so a field has the
+ * same id in single-field mode. `realKey` turns the answer's ids back into the site's keys.
+ */
+export function withShortIds(input: MapInput): { input: MapInput; realKey: (id: string) => string | undefined } {
+  const ids = new Map(input.fields.map((f, i) => [f.field_key, `f${i + 1}`]));
+  const keys = new Map([...ids].map(([key, id]) => [id, key]));
+  const id = (key: string) => ids.get(key) ?? key;
+  const renameKeys = <T,>(o: Record<string, T>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [id(k), v]));
+  return {
+    input: {
+      ...input,
+      fields: input.fields.map((f) => ({ ...f, field_key: id(f.field_key) })),
+      current: renameKeys(input.current),
+      targetFieldKey: input.targetFieldKey && id(input.targetFieldKey),
+      recent: input.recent?.map((r) => ({ ...r, set: renameKeys(r.set) })),
+    },
+    realKey: (i) => keys.get(i),
+  };
+}
+
 export async function mapTranscript(
   input: MapInput,
   opts: {
@@ -129,8 +151,16 @@ export async function mapTranscript(
     validateTool?: boolean;
   } = {},
 ): Promise<MapOutcome> {
+  // Same form, same prompt start (instructions + its fields): one cache key per form.
+  const formKey = createHash('sha256')
+    .update((input.targetFieldKey ? [input.targetFieldKey] : input.fields.map((f) => f.field_key)).join('|'))
+    .digest('hex')
+    .slice(0, 16);
+  // From here on the fields are f1, f2, …; the answer's ids are turned back into the site's keys at the end.
+  const short = withShortIds(input);
+  input = short.input;
   const fields = input.targetFieldKey ? input.fields.filter((f) => f.field_key === input.targetFieldKey) : input.fields;
-  const { model, modelSettings, timeoutMs } = agentModel('mapper', opts.model);
+  const { model, modelSettings, timeoutMs } = agentModel('mapper', opts.model, formKey);
   const withTool = opts.validateTool ?? false;
   const agent = new Agent<MapperContext, typeof MappingResult>({
     name: 'Field Mapping Agent',
@@ -152,7 +182,8 @@ export async function mapTranscript(
       }),
     );
     if (!result.finalOutput) throw new Error('Mapping agent returned no output');
-    return { empty: false, ...sanitizeMapping(result.finalOutput, fields, input.targetFieldKey) };
+    const mapped = sanitizeMapping(result.finalOutput, fields, input.targetFieldKey);
+    return { empty: false, ...mapped, values: mapped.values.map((v) => ({ ...v, field_key: short.realKey(v.field_key)! })) };
   } catch (e) {
     if (e instanceof InputGuardrailTripwireTriggered) return { empty: true };
     throw e;

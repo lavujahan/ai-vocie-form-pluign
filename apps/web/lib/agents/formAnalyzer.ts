@@ -1,5 +1,6 @@
 import { Agent, run, setTracingDisabled, type Model } from '@openai/agents';
 import { FormAnalysis, sanitizeFileRules, type FieldAnalysis, type FormSchema } from '@vff/shared';
+import { fieldSnapshot, formFingerprint, isFresh, isMissingTable, pageOf, promptVersion, type CachedReading } from './formCache';
 import { analyzerTools } from './tools';
 import { agentModel, modelName, runWithUsage, type OnUsage } from './usage';
 import { openaiEvent, type UsageEvent } from '../usage/events';
@@ -116,6 +117,66 @@ export function sanitizeAnalysis(analysis: FormAnalysis, schema: FormSchema): Fi
   return out;
 }
 
+/** The analyzer's model as saved with a reading: "gpt-5.4-mini@low". */
+export function analyzerModelSpec(): string {
+  const { model, modelSettings } = agentModel('analyzer');
+  const effort = modelSettings.reasoning?.effort;
+  return typeof model === 'string' ? `${model}${effort ? `@${effort}` : ''}` : 'custom';
+}
+
+/**
+ * The form's reading: the shared saved one when it is fresh (no AI call, nothing billed), else a new
+ * one from the AI, saved for the next scan of this form by anyone.
+ */
+async function readForm(schema: FormSchema, partial: boolean, onUsage: OnUsage, usage: UsageEvent[]): Promise<FormAnalysis> {
+  const { db } = await import('../supabase-admin');
+  const fingerprint = formFingerprint(schema);
+  const current = { model: analyzerModelSpec(), promptVersion: promptVersion(ANALYZER_INSTRUCTIONS) };
+
+  const { data, error } = await db()
+    .from('form_cache')
+    .select('fingerprint, analysis, model, prompt_version, created_at, edited_at')
+    .eq('fingerprint', fingerprint)
+    .maybeSingle();
+  const noTable = isMissingTable(error?.code);
+  if (error && !noTable) console.warn('form cache lookup failed', error);
+  const saved = data as CachedReading | null;
+  if (saved && isFresh(saved, current)) {
+    const hit = await db().rpc('form_cache_hit', { p_fingerprint: fingerprint });
+    if (hit.error) console.warn('form cache hit not counted', hit.error);
+    return saved.analysis;
+  }
+
+  const analysis = await analyzeForm(schema, { onUsage });
+  if (!noTable) {
+    const reading = { form_purpose: analysis.form_purpose, fields: sanitizeAnalysis(analysis, schema) };
+    const res = await db()
+      .from('form_cache')
+      .upsert(
+        {
+          fingerprint,
+          form_name: (analysis.form_purpose.trim() || schema.form_title || schema.page_title || pageOf(schema.page_url)).slice(0, 120),
+          page_url: pageOf(schema.page_url),
+          field_count: schema.fields.length,
+          partial,
+          fields: fieldSnapshot(schema),
+          analysis: reading,
+          model: current.model,
+          prompt_version: current.promptVersion,
+          cost_usd: usage.reduce((a, e) => a + (e.cost_usd ?? 0), 0),
+          uses: 0,
+          last_used_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          edited_at: null,
+          edited_by: null,
+        },
+        { onConflict: 'fingerprint' },
+      );
+    if (res.error) console.warn('form cache save failed', res.error);
+  }
+  return analysis;
+}
+
 /** Runs after the session is created (Next.js `after()`); writes the analysis into form_fields. */
 /**
  * `partial`: only fields that appeared later (a wizard's next step, a revealed field). Their step was set
@@ -132,7 +193,7 @@ export async function analyzeAndStore(
   const usage: UsageEvent[] = [];
   const onUsage: OnUsage = (run) => usage.push(openaiEvent(owner, 'analyze', run));
   try {
-    const analysis = await analyzeForm(schema, { onUsage });
+    const analysis = await readForm(schema, !!opts.partial, onUsage, usage);
     const fields = sanitizeAnalysis(analysis, schema);
     const detectedRequired = new Map(schema.fields.map((f) => [f.field_key, f.required]));
     // withNew: the columns of migrations 0006/0007 (Tamil label, upload rules).

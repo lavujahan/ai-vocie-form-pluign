@@ -80,6 +80,8 @@ export function useVoiceSession(code: string) {
   const [fatal, setFatal] = useState<string | null>(null);
   /** "Connect phone again" was used on the computer: another phone (or this one, rescanned) took over. */
   const [replaced, setReplaced] = useState(false);
+  /** The computer user's plan ended or its voice minutes ran out (server message): speech is refused. */
+  const [planBlocked, setPlanBlocked] = useState<string | null>(null);
   /** When this phone paired, to notice a newer pairing. */
   const pairedAtRef = useRef<string | null>(null);
   const [session, setSession] = useState<SessionInfo | null>(null);
@@ -143,6 +145,9 @@ export function useVoiceSession(code: string) {
       } else if (res.status === 403) {
         const body = (await res.clone().json().catch(() => ({}))) as ApiError;
         if (body.code === 'phone_replaced') setReplaced(true);
+      } else if (res.status === 402) {
+        const body = (await res.clone().json().catch(() => ({}))) as ApiError;
+        setPlanBlocked(body.error || null);
       } else if (res.status === 409) {
         // The desktop form tab was closed or moved meanwhile: show it even if the Realtime event was missed.
         const body = (await res.clone().json().catch(() => ({}))) as ApiError;
@@ -489,6 +494,7 @@ export function useVoiceSession(code: string) {
     phase,
     fatal,
     replaced,
+    planBlocked,
     session,
     fields,
     valueByKey,

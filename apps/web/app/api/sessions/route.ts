@@ -4,6 +4,7 @@ import { FormSchema, PAIR_CODE_TTL_MIN, type CreateSessionResponse } from '@vff/
 import { analyzeAndStore } from '@/lib/agents/formAnalyzer';
 import { purgeExpiredFiles } from '@/lib/files/storage';
 import { requireUser } from '@/lib/auth';
+import { assertCanUse } from '@/lib/billing/plans';
 import { env } from '@/lib/env';
 import { must, route } from '@/lib/http';
 import { fieldRows, insertFieldRows } from '@/lib/sessions';
@@ -24,6 +25,8 @@ function dedupeKeys<T extends { field_key: string }>(fields: T[]): T[] {
 
 export const POST = route(async (req) => {
   const user = await requireUser(req);
+  // No active plan or no minutes left: refuse before the Form Analyzer spends anything.
+  await assertCanUse(user.id, user.role);
   const schema = FormSchema.parse(await req.json());
   schema.fields = dedupeKeys(schema.fields);
 

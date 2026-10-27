@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { KeyRound, LogOut, Pencil, Plus, Power, Search, Unlock, X } from 'lucide-react';
+import { CreditCard, KeyRound, LogOut, Pencil, Plus, Power, Search, Unlock, X } from 'lucide-react';
 import type { AdminUserRow, UserRole } from '@vff/shared';
 import { Button, Card, Input, Pill } from '@/components/ui';
 import { AdminNav } from './admin-nav';
 import { api } from './api';
+import { PlanCell, PlanDialog } from './plan-dialog';
 
 type Status = 'Active' | 'Locked' | 'Inactive';
 
@@ -22,6 +23,7 @@ type Dialog =
   | { kind: 'create' }
   | { kind: 'edit'; user: AdminUserRow }
   | { kind: 'pin'; user: AdminUserRow }
+  | { kind: 'plan'; user: AdminUserRow }
   | null;
 
 export function UsersAdmin() {
@@ -51,6 +53,8 @@ export function UsersAdmin() {
     return () => clearTimeout(t);
   }, [q, load]);
 
+  // Before migration 0013 there are no plans: the column is left out.
+  const showPlans = users.some((u) => u.plan !== undefined);
   const replace = (u: AdminUserRow) => setUsers((list) => list.map((x) => (x.id === u.id ? u : x)));
 
   async function patch(id: string, body: Record<string, unknown>) {
@@ -69,7 +73,7 @@ export function UsersAdmin() {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-4 py-6">
+    <main className="mx-auto max-w-5xl px-4 py-6">
       <header className="mb-4 flex items-center justify-between gap-3">
         <AdminNav />
         <div className="flex gap-2">
@@ -101,6 +105,7 @@ export function UsersAdmin() {
                 <th className="px-4 py-2 font-medium">Phone</th>
                 <th className="px-4 py-2 font-medium">Role</th>
                 <th className="px-4 py-2 font-medium">Status</th>
+                {showPlans && <th className="px-4 py-2 font-medium">Plan</th>}
                 <th className="px-4 py-2" />
               </tr>
             </thead>
@@ -115,8 +120,18 @@ export function UsersAdmin() {
                     <td className="px-4 py-2.5">
                       <Pill tone={TONE[status]}>{status}</Pill>
                     </td>
+                    {showPlans && (
+                      <td className="px-4 py-2">
+                        <PlanCell user={u} />
+                      </td>
+                    )}
                     <td className="px-4 py-1.5">
                       <div className="flex justify-end gap-1">
+                        {showPlans && (
+                          <IconBtn label="Plan and payments" onClick={() => setDialog({ kind: 'plan', user: u })}>
+                            <CreditCard size={15} />
+                          </IconBtn>
+                        )}
                         <IconBtn label="Reset PIN" onClick={() => setDialog({ kind: 'pin', user: u })}>
                           <KeyRound size={15} />
                         </IconBtn>
@@ -141,7 +156,7 @@ export function UsersAdmin() {
               })}
               {!users.length && !loading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted">
+                  <td colSpan={showPlans ? 6 : 5} className="px-4 py-8 text-center text-sm text-muted">
                     No users found.
                   </td>
                 </tr>
@@ -151,7 +166,8 @@ export function UsersAdmin() {
         </div>
       </Card>
 
-      {dialog && (
+      {dialog?.kind === 'plan' && <PlanDialog user={dialog.user} onClose={() => setDialog(null)} onSaved={replace} />}
+      {dialog && dialog.kind !== 'plan' && (
         <UserDialog
           dialog={dialog}
           onClose={() => setDialog(null)}
@@ -185,7 +201,7 @@ function UserDialog({
   onClose,
   onSaved,
 }: {
-  dialog: NonNullable<Dialog>;
+  dialog: Exclude<Dialog, { kind: 'plan' } | null>;
   onClose: () => void;
   onSaved: (u: AdminUserRow, created: boolean) => void;
 }) {

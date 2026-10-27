@@ -56,6 +56,16 @@ The content is written in `store/pages/`. Copy it to your other site and fill in
 
 The images can be built in parallel with Phases 1 and 2, but they need the D1 title and the 1.1 icon.
 
+### Phase 3b: Subscriptions (migration `0013`)
+
+| # | Step | Status |
+| --- | --- | --- |
+| S.1 | Apply `supabase/migrations/0013_subscriptions.sql` and run `pnpm --filter web check:db`. Existing users get a 7-day Trial; renew paying customers in Admin → Users → Plan. | ☐ |
+| S.2 | Check the plan prices in Admin → Plans (seeded: Trial free 7 days / 20 min, Basic ₹199 / 150 min, Pro ₹499 / 500 min, Business ₹1,499 / 2,000 min). | ☐ |
+| S.3 | Set `VITE_ACCOUNT_URL` (WhatsApp chat link or your site) for the production build: the popup's "Get one" and "Renew" links. Put the same contact in place of `{{ACCOUNT_CONTACT}}` in the description. | ☐ |
+| S.4 | Publish [pages/terms.md](pages/terms.md) (plans, payments, refunds) and link it from the homepage and support page. Have it reviewed; check whether you need GST registration. | ☐ |
+| S.5 | The privacy policy now lists plan and payment records (sections 2 and 5): publish the updated page. | ☐ |
+
 ### Phase 4: Submit
 
 | # | Step | Status |
@@ -179,9 +189,14 @@ PRIVACY
 • Nothing is sold or used for advertising.
 
 
+PLANS
+
+Voice Form Filler needs a Voice2Fill account. Every new account starts with a free 7-day trial with 20 voice minutes. After that, pick a monthly plan with the voice minutes you need. Only the time you spend speaking counts; scanning and filling forms is free. Contact us to get an account or renew: {{ACCOUNT_CONTACT}}
+
+
 WHAT YOU NEED
 
-• An account from your administrator (phone number and PIN)
+• A Voice2Fill account (phone number and PIN; free trial for new accounts)
 • A phone with a browser and a microphone
 • Chrome on the computer with the form
 

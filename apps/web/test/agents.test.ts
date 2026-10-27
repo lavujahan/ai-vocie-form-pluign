@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { assistantMessage, functionCall, ScriptedModel } from '@openai/agents/testing';
 import { Usage } from '@openai/agents';
 import type { FormSchema } from '@vff/shared';
-import { mapTranscript, buildMapperPrompt, mapperInstructions } from '@/lib/agents/fieldMapper';
+import { mapTranscript, buildMapperPrompt, mapperInstructions, withShortIds } from '@/lib/agents/fieldMapper';
 import { agentModel, modelName } from '@/lib/agents/usage';
 import { baseModel } from '@/lib/usage/pricing';
 import { sanitizeAnalysis } from '@/lib/agents/formAnalyzer';
@@ -35,8 +35,6 @@ describe('sanitizeMapping (output guardrail)', () => {
           { field_key: 'marital', value: 'Widowed', confidence: 0.9, source_phrase: null, number_parts: null },
           { field_key: 'phone', value: '9876543210', confidence: 2, source_phrase: null, number_parts: null },
         ],
-        unmapped_speech: '  ',
-        missing_required: ['email', 'ghost'],
         command: null,
       },
       EVAL_FORM,
@@ -48,8 +46,6 @@ describe('sanitizeMapping (output guardrail)', () => {
     expect(byKey.marital.confidence).toBeLessThanOrEqual(0.3);
     expect(byKey.marital.error).toBeTruthy();
     expect(byKey.phone.confidence).toBe(1);
-    expect(r.unmapped_speech).toBeNull();
-    expect(r.missing_required).toEqual(['email']);
   });
 
   it('builds spoken numbers from the parts the agent heard, not its one-shot answer', () => {
@@ -74,8 +70,6 @@ describe('sanitizeMapping (output guardrail)', () => {
             ],
           },
         ],
-        unmapped_speech: null,
-        missing_required: [],
         command: null,
       },
       EVAL_FORM,
@@ -91,8 +85,6 @@ describe('sanitizeMapping (output guardrail)', () => {
           { field_key: 'full_name', value: 'Ramesh', confidence: 0.9, source_phrase: null, number_parts: null },
           { field_key: 'city', value: 'Chennai', confidence: 0.9, source_phrase: null, number_parts: null },
         ],
-        unmapped_speech: null,
-        missing_required: [],
         command: null,
       },
       EVAL_FORM,
@@ -103,13 +95,13 @@ describe('sanitizeMapping (output guardrail)', () => {
 
   it('lowers confidence when Tamil script leaks into an English field', () => {
     const r = sanitizeMapping(
-      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [], command: null },
+      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null, number_parts: null }], command: null },
       EVAL_FORM,
       null,
     );
     expect(r.values[0].confidence).toBeLessThanOrEqual(0.5);
     const ta = sanitizeMapping(
-      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null, number_parts: null }], unmapped_speech: null, missing_required: [], command: null },
+      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null, number_parts: null }], command: null },
       EVAL_FORM,
       null,
     );
@@ -146,17 +138,17 @@ describe('sanitizeAnalysis', () => {
 
 describe('Field Mapping Agent (scripted model)', () => {
   it('runs tools and returns sanitized values', async () => {
+    // The model sees the fields as f1, f2, … and answers with those ids.
+    const id = (key: string) => `f${EVAL_FORM.findIndex((f) => f.field_key === key) + 1}`;
     const final = {
       values: [
-        { field_key: 'full_name', value: 'Ramesh Kumar', confidence: 0.95, source_phrase: 'en peru Ramesh Kumar', number_parts: null },
-        { field_key: 'gender', value: 'Male', confidence: 0.9, source_phrase: 'aan', number_parts: null },
+        { field_key: id('full_name'), value: 'Ramesh Kumar', confidence: 0.95, source_phrase: null, number_parts: null },
+        { field_key: id('gender'), value: 'Male', confidence: 0.9, source_phrase: 'aan', number_parts: null },
       ],
-      unmapped_speech: null,
-      missing_required: ['email', 'phone'],
       command: null,
     };
     const model = new ScriptedModel([
-      [functionCall('validate_value', { field_key: 'gender', value: 'aan' }, { callId: 'c1' })],
+      [functionCall('validate_value', { field_key: id('gender'), value: 'aan' }, { callId: 'c1' })],
       [assistantMessage(JSON.stringify(final))],
     ]);
     const out = await mapTranscript(
@@ -171,7 +163,39 @@ describe('Field Mapping Agent (scripted model)', () => {
     ]);
     // The tool result was fed back to the model on the second call.
     expect(JSON.stringify(model.lastCall?.request.input)).toContain('Male');
+    // The site's keys never reach the model.
+    expect(JSON.stringify(model.lastCall?.request.input)).not.toContain('- full_name ·');
     model.assertComplete();
+  });
+
+  it('short ids: the same id for a field in every mode, and back to the site key', () => {
+    const current = { full_name: 'Jahan', email: 'a@b.co' };
+    const recent = [{ speech: 'Name vandhu Jahan', set: { full_name: 'Jahan' } }];
+    const whole = withShortIds({ fields: EVAL_FORM, current, transcript: 'x', targetFieldKey: null, recent });
+    const one = withShortIds({ fields: EVAL_FORM, current, transcript: 'x', targetFieldKey: 'full_name', recent });
+    const nameId = whole.input.fields.find((f) => f.label === EVAL_FORM.find((g) => g.field_key === 'full_name')!.label)!.field_key;
+    expect(nameId).toMatch(/^f\d+$/);
+    expect(one.input.targetFieldKey).toBe(nameId);
+    expect(whole.input.current[nameId]).toBe('Jahan');
+    expect(whole.input.recent?.[0].set[nameId]).toBe('Jahan');
+    expect(whole.realKey(nameId)).toBe('full_name');
+    expect(whole.realKey('f999')).toBeUndefined(); // an id the form doesn't have is dropped by sanitizeMapping first
+    const prompt = buildMapperPrompt(whole.input);
+    for (const f of EVAL_FORM) expect(prompt).not.toContain(`- ${f.field_key} `);
+  });
+
+  it('drops an answer for an id the form does not have', async () => {
+    const final = {
+      values: [
+        { field_key: 'f1', value: 'Ramesh Kumar', confidence: 0.95, source_phrase: null, number_parts: null },
+        { field_key: 'f999', value: 'x', confidence: 0.9, source_phrase: null, number_parts: null },
+      ],
+      command: null,
+    };
+    const model = new ScriptedModel([[assistantMessage(JSON.stringify(final))]]);
+    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'Ramesh Kumar', targetFieldKey: null }, { model });
+    if (out.empty) throw new Error('empty');
+    expect(out.values.map((v) => v.field_key)).toEqual([EVAL_FORM[0].field_key]);
   });
 
   it('skips the model entirely for an empty transcript', async () => {
@@ -184,7 +208,7 @@ describe('Field Mapping Agent (scripted model)', () => {
   });
 
   it('reports the tokens of every request in the run, for billing', async () => {
-    const final = { values: [], unmapped_speech: 'hello', missing_required: [], command: null };
+    const final = { values: [], command: null };
     const model = new ScriptedModel([
       {
         output: [functionCall('validate_value', { field_key: 'gender', value: 'Male' }, { callId: 'c1' })],
@@ -250,7 +274,7 @@ describe('spoken corrections and commands', () => {
   });
 
   it('passes a command through only when the speech set no values, and never in single-field mode', () => {
-    const cmd = { values: [], unmapped_speech: null, missing_required: [], command: 'start_over' as const };
+    const cmd = { values: [], command: 'start_over' as const };
     expect(sanitizeMapping(cmd, EVAL_FORM, null).command).toBe('start_over');
     expect(sanitizeMapping(cmd, EVAL_FORM, 'full_name').command).toBeNull();
     const withValue = {
@@ -278,21 +302,31 @@ describe('model per AI step', () => {
     vi.unstubAllEnvs();
   });
   it('every step has an output-token limit and a timeout, so a runaway reply fails fast', () => {
-    expect(agentModel('mapper', 'gpt-4o')).toEqual({ model: 'gpt-4o', modelSettings: { maxTokens: 4_000 }, timeoutMs: 30_000 });
+    expect(agentModel('mapper', 'gpt-4o')).toMatchObject({ model: 'gpt-4o', modelSettings: { maxTokens: 4_000 }, timeoutMs: 30_000 });
     expect(agentModel('analyzer', 'gpt-4o')).toMatchObject({ modelSettings: { maxTokens: 16_000 }, timeoutMs: 90_000 });
     expect(agentModel('resolver', 'gpt-4o')).toMatchObject({ modelSettings: { maxTokens: 2_000 }, timeoutMs: 20_000 });
   });
+  it('prompt caching: a cache key per step and form; GPT-5.x keeps the cache up to 24 h', () => {
+    expect(agentModel('mapper', 'gpt-5.4-mini@low', 'form1').modelSettings).toMatchObject({
+      promptCacheRetention: '24h',
+      providerData: { prompt_cache_key: 'mapper:form1' },
+    });
+    expect(agentModel('analyzer', 'gpt-5.4-mini').modelSettings.providerData).toEqual({ prompt_cache_key: 'analyzer:all' });
+    const old = agentModel('mapper', 'gpt-4o', 'form1').modelSettings;
+    expect(old.promptCacheRetention).toBeUndefined(); // only GPT-5.x is asked for 24 h
+    expect(old.providerData).toEqual({ prompt_cache_key: 'mapper:form1' });
+  });
   it('the mapper has no validate_value tool unless asked for', async () => {
-    const final = { values: [], unmapped_speech: 'hello', missing_required: [], command: null };
+    const final = { values: [], command: null };
     const model = new ScriptedModel([[assistantMessage(JSON.stringify(final))]]);
     await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello', targetFieldKey: null }, { model });
     expect(model.lastCall?.request.tools ?? []).toHaveLength(0);
     expect(JSON.stringify(model.lastCall?.request.systemInstructions)).not.toContain('validate_value');
   });
   it('reasoning models get a low effort; "@" sets it; billing uses the bare model name', () => {
-    expect(agentModel('mapper', 'gpt-5.4-mini').modelSettings).toEqual({ maxTokens: 4_000, reasoning: { effort: 'low' } });
-    expect(agentModel('mapper', 'gpt-5.4-mini@none').modelSettings).toEqual({ maxTokens: 4_000, reasoning: { effort: 'none' } });
-    expect(agentModel('mapper', 'gpt-4.1-mini@low').modelSettings).toEqual({ maxTokens: 4_000 }); // not a reasoning model
+    expect(agentModel('mapper', 'gpt-5.4-mini').modelSettings).toMatchObject({ maxTokens: 4_000, reasoning: { effort: 'low' } });
+    expect(agentModel('mapper', 'gpt-5.4-mini@none').modelSettings).toMatchObject({ reasoning: { effort: 'none' } });
+    expect(agentModel('mapper', 'gpt-4.1-mini@low').modelSettings.reasoning).toBeUndefined(); // not a reasoning model
     expect(modelName('gpt-5-mini@minimal')).toBe('gpt-5-mini');
     expect(baseModel('gpt-5-mini@minimal')).toBe('gpt-5-mini');
   });

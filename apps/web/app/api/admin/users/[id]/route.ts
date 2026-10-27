@@ -4,6 +4,7 @@ import { hashPin, requireAdmin } from '@/lib/auth';
 import { fail, route } from '@/lib/http';
 import { db } from '@/lib/supabase-admin';
 import { ADMIN_USER_COLUMNS } from '@/lib/admin';
+import { attachPlans } from '@/lib/billing/admin';
 
 export const runtime = 'nodejs';
 
@@ -14,7 +15,7 @@ async function update(id: string, patch: Record<string, unknown>) {
   if (error?.code === '23505') throw fail(409, 'A user with this phone number already exists');
   if (error) throw fail(500, 'Database error');
   if (!data) throw fail(404, 'User not found');
-  return NextResponse.json({ user: data as AdminUserRow });
+  return NextResponse.json({ user: (await attachPlans([data as AdminUserRow]))[0] });
 }
 
 export const PATCH = route<Ctx>(async (req, { params }) => {

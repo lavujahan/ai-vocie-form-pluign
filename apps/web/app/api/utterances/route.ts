@@ -4,6 +4,7 @@ import { mapTranscript } from '@/lib/agents/fieldMapper';
 import { isEmptyTranscript } from '@/lib/agents/guardrails';
 import { STT_MAX_SECONDS, sttConfig, transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
+import { assertCanUse } from '@/lib/billing/plans';
 import { fail, must, route } from '@/lib/http';
 import { assertPhoneCanWrite, assertPhoneOf, getFieldRows, getSessionById, getValues, recentSpeech, upsertValue } from '@/lib/sessions';
 import { recordingTranscript } from '@/lib/recordings';
@@ -67,6 +68,9 @@ export const POST = route(async (req) => {
     : null;
   // Desktop tab closed (nothing would be filled), or spoken before a Start over: don't spend AI on it.
   assertPhoneCanWrite(session, seq);
+  // The owner's plan ended or its minutes are used up. Checked on a recording's first piece only, so a
+  // recording that started is never cut off halfway (it can go slightly over the minutes).
+  if (part === 0) await assertCanUse(session.user_id);
 
   // Upload fields are filled from the phone's camera / files, never from speech.
   const fields = (await getFieldRows(session.id)).filter((f) => f.field_type !== 'file');
@@ -187,7 +191,7 @@ export const POST = route(async (req) => {
       status: 'done',
       transcript,
       values: outcome.values,
-      unmapped_speech: outcome.unmapped_speech,
+      unmapped_speech: null,
       command: outcome.command,
     } satisfies UtteranceResponse);
   } catch (e) {

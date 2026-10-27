@@ -36,7 +36,8 @@ This policy explains what data the service handles, why, who it is shared with, 
 | **Voice recordings** | When you tap the mic on the phone | To turn your speech into text. Not stored. |
 | **What you said, as text, and the field values made from it** | After each recording | To fill the form and let you check and correct the answers |
 | **Photos and documents** you add on the phone | When you upload one for an upload field | To put the file into the website's upload field |
-| **Usage records**: time of each request, minutes of audio, number of AI tokens, cost | Each time speech is transcribed or the AI reads a form | To bill accounts and keep track of costs. These records contain no audio, text or answers. |
+| **Usage records**: time of each request, minutes of audio, number of AI tokens, cost | Each time speech is transcribed or the AI reads a form | To count the voice minutes in your plan and keep track of costs. These records contain no audio, text or answers. |
+| **Plan and payment records**: your plan, its dates and minutes, and each payment's amount, date, method and reference (for example a UPI transaction id) | When you get or renew a plan, or buy extra minutes | To know which plan you paid for, and for our accounts. We never receive or store card numbers, UPI PINs or bank passwords. |
 
 We don't collect your browsing history. The extension reads a page only when you click "Scan form on this page" on it, and only for as long as that form session is open.
 
@@ -74,6 +75,7 @@ These providers may process data on servers outside India.
 | Form session records (page address, title, field labels) | 30 days, then deleted |
 | Sign-in attempts | 1 day |
 | Usage records | Kept for billing. When an account is deleted, its usage records are no longer linked to it. |
+| Plan and payment records | As long as the law requires us to keep accounting records. When an account is deleted, its payment records are no longer linked to it. |
 | Account details | Until your administrator deletes the account |
 
 ## 6. How we protect it
@@ -87,7 +89,7 @@ These providers may process data on servers outside India.
 ## 7. Who can see your data
 
 No person reads your recordings, transcripts, answers or files. That applies to us and to your administrator.
-- **Administrators can see:** account names, phone numbers and usage totals (minutes, tokens, cost).
+- **Administrators can see:** account names, phone numbers, plans, payments and usage totals (minutes, tokens, cost).
 - **We may look at data only:** with your permission, to investigate security problems or abuse, or when the law requires it.
 
 ## 8. Chrome Web Store Limited Use

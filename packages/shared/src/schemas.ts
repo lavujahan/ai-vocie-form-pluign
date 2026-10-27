@@ -168,8 +168,6 @@ export type VoiceCommand = z.infer<typeof VoiceCommand>;
 
 export const MappingResult = z.object({
   values: z.array(MappedValue),
-  unmapped_speech: z.string().nullable(),
-  missing_required: z.array(z.string()),
   command: VoiceCommand.nullable().describe(
     'Only when the whole speech is a command: "start over"/"clear everything" → start_over, "send it" → send, "what is left?" → whats_left. null otherwise.',
   ),
@@ -232,6 +230,141 @@ export type AdminUserRow = PublicUser & {
   failed_attempts: number;
   locked_until: string | null;
   created_at: string;
+  /** The user's plan; undefined until migration 0013 is applied. */
+  plan?: PlanStatus;
+};
+
+// ---------- Plans and payments (migration 0013) ----------
+
+/** A plan that is sold: `minutes` of voice (speech-to-text audio) for `days` days. */
+export type Plan = {
+  id: string;
+  name: string;
+  price_inr: number;
+  minutes: number;
+  days: number;
+  is_active: boolean;
+  sort: number;
+};
+
+export const PlanInput = z.object({
+  name: z.string().trim().min(1).max(60),
+  price_inr: z.number().min(0).max(1_000_000),
+  minutes: z.number().int().min(0).max(1_000_000),
+  days: z.number().int().min(1).max(366),
+  is_active: z.boolean(),
+});
+export type PlanInput = z.infer<typeof PlanInput>;
+
+export const CreatePlanRequest = PlanInput.extend({
+  id: z.string().trim().regex(/^[a-z0-9_-]{1,32}$/, 'Use 1–32 lowercase letters, digits, - or _'),
+});
+export type CreatePlanRequest = z.infer<typeof CreatePlanRequest>;
+
+/** A user's current (latest started) plan period and the voice minutes used in it. */
+export type PlanStatus = {
+  /** null: the user never had a plan. */
+  plan_id: string | null;
+  plan_name: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
+  /** The plan's minutes plus top-ups. */
+  minutes_total: number;
+  minutes_used: number;
+  minutes_left: number;
+  /** The period has started and not ended. */
+  active: boolean;
+  /** End of the last period paid for: later than ends_at when renewed early. */
+  paid_until: string | null;
+};
+
+/** GET /api/account: the signed-in user and their plan (the extension popup shows it). */
+export type AccountResponse = {
+  user: PublicUser;
+  plan: PlanStatus | null;
+  /** Admins, and every user before plans are set up, are never limited. */
+  unlimited: boolean;
+};
+
+export const PaymentMethod = z.enum(['upi', 'bank', 'cash', 'other']);
+export type PaymentMethod = z.infer<typeof PaymentMethod>;
+
+const PaymentFields = {
+  /** 0 or missing: no payment is recorded (a free or complimentary plan). */
+  amount_inr: z.number().min(0).max(1_000_000).optional(),
+  method: PaymentMethod.default('upi'),
+  /** UPI transaction id, bank reference… */
+  reference: z.string().trim().max(100).optional(),
+  note: z.string().trim().max(300).optional(),
+};
+
+/** Admin: start a plan for a user (renewal or plan change), with its payment. */
+export const GrantPlanRequest = z.object({
+  plan_id: z.string().min(1).max(32),
+  /** 'after_current': when the current paid time ends (renewal); 'now': replaces the current period. */
+  start: z.enum(['after_current', 'now']).default('after_current'),
+  ...PaymentFields,
+});
+export type GrantPlanRequest = z.infer<typeof GrantPlanRequest>;
+
+/** Admin: add voice minutes to the user's current period, with its payment. */
+export const TopUpRequest = z.object({
+  minutes: z.number().int().min(1).max(100_000),
+  ...PaymentFields,
+});
+export type TopUpRequest = z.infer<typeof TopUpRequest>;
+
+export type PaymentRow = {
+  id: string;
+  user_id: string | null;
+  name: string | null;
+  phone: string | null;
+  kind: 'plan' | 'topup';
+  plan_name: string | null;
+  amount_inr: number;
+  method: string;
+  reference: string | null;
+  note: string | null;
+  paid_at: string;
+};
+
+export type SubscriptionRow = {
+  id: string;
+  plan_id: string;
+  plan_name: string;
+  starts_at: string;
+  ends_at: string;
+  minutes: number;
+  extra_minutes: number;
+  note: string | null;
+  created_at: string;
+};
+
+/** Admin: one user's plan, its history and payments. */
+export type UserPlanResponse = {
+  user: AdminUserRow;
+  plans: Plan[];
+  subscriptions: SubscriptionRow[];
+  payments: PaymentRow[];
+};
+
+/** Admin → Billing: money received in the chosen dates against the AI cost of the same dates. */
+export type BillingResponse = {
+  from: string;
+  to: string;
+  payments: PaymentRow[];
+  users: {
+    user_id: string | null;
+    name: string | null;
+    phone: string | null;
+    revenue_inr: number;
+    cost_inr: number;
+    margin_inr: number;
+    minutes: number;
+  }[];
+  totals: { revenue_inr: number; cost_inr: number; margin_inr: number; minutes: number };
+  /** Users whose paid time ends in the next 7 days or ended in the last 30, soonest first. */
+  renewals: (PlanStatus & { user_id: string; name: string; phone: string })[];
 };
 
 /** Admin-set billing rates: OpenAI bills in USD, Sarvam per minute of audio in ₹. */
@@ -291,6 +424,65 @@ export type UsageSummaryResponse = {
   days: UsageDayRow[] | null;
   day_totals: UsageCosts | null;
 };
+
+/** A saved form reading (admin panel → Forms): read by the AI once, reused by every later scan. */
+export type AdminFormRow = {
+  fingerprint: string;
+  form_name: string;
+  /** Origin + path of the page. */
+  page_url: string;
+  field_count: number;
+  /** A later step of a form (fields that appeared after the first scan). */
+  partial: boolean;
+  model: string;
+  cost_usd: number | null;
+  /** Scans that reused this reading. */
+  uses: number;
+  last_used_at: string | null;
+  created_at: string;
+  edited_at: string | null;
+  /** When it stops being reused; null when the admin edited it (kept until cleared). */
+  expires_at: string | null;
+  /** False when the next scan reads the form again (expired, or a newer model or instructions). */
+  fresh: boolean;
+};
+
+export type AdminFormsResponse = {
+  rows: AdminFormRow[];
+  usd_inr_rate: number;
+  /** Migration 0012 not applied yet: nothing is saved. */
+  missing: boolean;
+};
+
+/** One field of a saved reading: as the site shows it, and as the reading labels it. */
+export type AdminFormField = {
+  field_key: string;
+  /** The label on the website. */
+  site_label: string;
+  field_type: FieldType;
+  /** Marked required on the website (then it stays required). */
+  site_required: boolean;
+  clean_label: string;
+  label_ta: string;
+  required: boolean;
+};
+
+export type AdminFormDetail = AdminFormRow & { fields: AdminFormField[] };
+
+export const AdminFormPatch = z.object({
+  fields: z
+    .array(
+      z.object({
+        field_key: z.string().min(1).max(300),
+        clean_label: z.string().trim().min(1, 'A label is needed').max(200),
+        label_ta: z.string().trim().max(200),
+        required: z.boolean(),
+      }),
+    )
+    .min(1)
+    .max(200),
+});
+export type AdminFormPatch = z.infer<typeof AdminFormPatch>;
 
 export type CreateSessionResponse = {
   session_id: string;

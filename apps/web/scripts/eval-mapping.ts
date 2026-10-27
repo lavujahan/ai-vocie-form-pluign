@@ -4,13 +4,14 @@
  *   pnpm eval:mapping --only can,corrections   (tags: english tanglish tamil field can corrections commands)
  *   pnpm eval:mapping --model gpt-4o           (compare models; default: the app's model)
  *   pnpm eval:mapping --validate               (with the model's validate_value round trips, off in the app)
- * Prints per-field accuracy, per tag, and saves a JSON report in apps/web/eval-results/.
+ * Prints per-field accuracy, per tag, the tokens and cost (list price), and saves a JSON report in apps/web/eval-results/.
  * Not part of CI: it costs tokens and model output varies.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { normalizeText } from '@vff/shared';
 import { mapTranscript } from '../lib/agents/fieldMapper';
 import { DEFAULT_AGENT_MODEL } from '../lib/agents/usage';
+import { openaiEvent, type UsageEvent } from '../lib/usage/events';
 import { CAN_FORM, EVAL_CASES, EVAL_FORM, type EvalTag } from './eval-fixtures';
 
 if (!process.env.OPENAI_API_KEY) {
@@ -30,6 +31,10 @@ const same = (a: string, b: string) => normalizeText(a) === normalizeText(b) || 
 
 type Miss = { field: string; expected: string; got: string };
 const results: { n: number; speech: string; tags: EvalTag[]; checks: number; passed: number; misses: Miss[]; ms: number }[] = [];
+/** Every model run's tokens and list-price cost, as billed. */
+const usage: UsageEvent[] = [];
+/** ₹ per $ for the report (the admin page uses its own rate). */
+const INR_PER_USD = 88;
 
 const cases = EVAL_CASES.map((c, i) => ({ ...c, n: i + 1 })).filter((c) => !only || c.tags.some((t) => only.includes(t)));
 console.log(`Model ${model}${validateTool ? ' · with validate_value' : ''} · ${cases.length} cases${only ? ` (${only.join(', ')})` : ''}\n`);
@@ -44,7 +49,7 @@ for (const c of cases) {
       targetFieldKey: c.target ?? null,
       recent: c.recent,
     },
-    { model, validateTool },
+    { model, validateTool, onUsage: (run) => usage.push(openaiEvent({ user_id: null, session_id: null }, 'map', run)) },
   );
   const got = new Map(outcome.empty ? [] : outcome.values.map((v) => [v.field_key, v.value ?? '']));
   const misses: Miss[] = [];
@@ -88,12 +93,28 @@ for (const [tag, s] of Object.entries(byTag)) console.log(`  ${tag.padEnd(12)} $
 const failed = results.filter((r) => r.misses.length).map((r) => `#${r.n}`);
 if (failed.length) console.log(`Cases with misses: ${failed.join(', ')}`);
 
+const tok = (k: 'requests' | 'input_tokens' | 'cached_input_tokens' | 'output_tokens') => usage.reduce((a, e) => a + (e[k] ?? 0), 0);
+const spent = usage.reduce((a, e) => a + (e.cost_usd ?? 0), 0);
+const per = (x: number) => (results.length ? x / results.length : 0);
+const tokens = {
+  requests: tok('requests'),
+  input: tok('input_tokens'),
+  cached: tok('cached_input_tokens'),
+  output: tok('output_tokens'),
+  usd: spent,
+};
+console.log(
+  `
+Tokens per case: input ${Math.round(per(tokens.input))} (${pct(tokens.cached, tokens.input)} cached) · output ${Math.round(per(tokens.output))} · ${(per(tokens.requests)).toFixed(1)} requests`,
+);
+console.log(`Cost per case: $${per(spent).toFixed(5)} (₹${(per(spent) * INR_PER_USD).toFixed(3)}) · all ${results.length} cases: $${spent.toFixed(4)} (list price, ₹ at ${INR_PER_USD}/$)`);
+
 // Saved for comparing runs (prompt changes, models).
 const dir = new URL('../eval-results/', import.meta.url);
 mkdirSync(dir, { recursive: true });
 const file = new URL(`${new Date().toISOString().replace(/[:.]/g, '-')}.json`, dir);
 writeFileSync(
   file,
-  JSON.stringify({ at: new Date().toISOString(), model, only: only ?? null, total: { ...total, accuracy: pct(total.passed, total.checks) }, byTag, results }, null, 2),
+  JSON.stringify({ at: new Date().toISOString(), model, only: only ?? null, total: { ...total, accuracy: pct(total.passed, total.checks) }, byTag, tokens, results }, null, 2),
 );
 console.log(`\nReport: ${file.pathname}`);

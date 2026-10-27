@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { ClipboardList, Clock, Loader2, Mic, Smartphone } from 'lucide-react';
-import { formatSize, LOCK_MINUTES, LOW_CONFIDENCE, MAX_PIN_ATTEMPTS, type FieldFile, type SessionField } from '@vff/shared';
+import { formatSize, LOCK_MINUTES, LOW_CONFIDENCE, MAX_PIN_ATTEMPTS, type AccountResponse, type FieldFile, type SessionField } from '@vff/shared';
 import { NOT_ON_PAGE, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
-import { PRIVACY_URL } from '../env';
+import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { Button, Card, FieldRow, Input, LinkButton, Pill } from './ui';
 
 /** State of the form session in the tab this popup was opened on (each tab has its own). */
@@ -86,7 +86,18 @@ function SignIn({ send }: { send: Send }) {
       <h1 className="flex items-center gap-2 text-sm font-semibold">
         <Mic size={16} /> Voice2Fill
       </h1>
-      <p className="mt-1.5 text-sm text-muted">Sign in with the account your admin created.</p>
+      <p className="mt-1.5 text-sm text-muted">
+        Sign in with your Voice2Fill account.
+        {ACCOUNT_URL && (
+          <>
+            {' '}
+            No account yet?{' '}
+            <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="text-accent-ink underline underline-offset-2">
+              Get one
+            </a>
+          </>
+        )}
+      </p>
       <form
         className="mt-3 space-y-2.5"
         onSubmit={async (e) => {
@@ -141,6 +152,7 @@ function StartCard({ state, send }: { state: ExtState; send: Send }) {
         <Mic size={16} /> Voice2Fill
       </h1>
       <p className="mt-1.5 text-sm text-muted">Open the page with the form, then scan it to pair your phone.</p>
+      {state.account && <PlanNote account={state.account} />}
       <Button
         className="mt-3 w-full"
         loading={busy}
@@ -152,12 +164,62 @@ function StartCard({ state, send }: { state: ExtState; send: Send }) {
       >
         Scan form on this page
       </Button>
-      {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
+      {/* A plan refusal is already explained by the plan note. */}
+      {error && !planBlocked(state.account) && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
       <div className="mt-3 flex items-center justify-between text-xs text-muted">
         <span>Signed in as {state.auth?.user.name}</span>
         <LinkButton onClick={() => send({ type: 'LOGOUT' })}>Sign out</LinkButton>
       </div>
     </Card>
+  );
+}
+
+const DAY_MS = 86_400_000;
+const shortDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
+
+/** Why the plan doesn't allow scanning or speaking (null = it does, or plans don't apply). */
+function planBlocked(a: AccountResponse | null): string | null {
+  if (!a || a.unlimited) return null;
+  const p = a.plan;
+  if (!p?.plan_id) return 'Your account has no active plan.';
+  if (!p.active) return `Your ${p.plan_name} plan ended on ${shortDate(p.ends_at)}.`;
+  if (p.minutes_left <= 0) return `You have used all ${p.minutes_total} voice minutes of your ${p.plan_name} plan.`;
+  return null;
+}
+
+/** The plan and voice minutes left, or why scanning is refused with a Renew link. */
+function PlanNote({ account }: { account: AccountResponse }) {
+  const blocked = planBlocked(account);
+  if (blocked) {
+    return (
+      <p className="mt-2 rounded-md bg-danger-bg px-2.5 py-2 text-xs text-danger-ink">
+        {blocked}{' '}
+        {ACCOUNT_URL ? (
+          <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2">
+            Renew
+          </a>
+        ) : (
+          'Contact us to renew.'
+        )}
+      </p>
+    );
+  }
+  const p = account.plan;
+  if (account.unlimited || !p) return null;
+  const left = Math.floor(p.minutes_left);
+  const low = left < p.minutes_total * 0.1 || (!!p.paid_until && Date.parse(p.paid_until) - Date.now() < 3 * DAY_MS);
+  return (
+    <p className={`mt-2 text-xs ${low ? 'text-warn-ink' : 'text-muted'}`}>
+      {p.plan_name} · {left} voice min left · till {shortDate(p.paid_until)}
+      {low && ACCOUNT_URL && (
+        <>
+          {' · '}
+          <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+            Renew
+          </a>
+        </>
+      )}
+    </p>
   );
 }
 
@@ -195,6 +257,7 @@ function QrBlock({ url, expiresAt, hint, expired }: { url: string; expiresAt: st
 function QrCard({ state, send }: { state: ExtState; send: Send }) {
   const s = state.session!;
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const name = s.snapshot?.session.form_name || s.form_name;
 
   return (
@@ -217,12 +280,18 @@ function QrCard({ state, send }: { state: ExtState; send: Send }) {
               loading={busy}
               onClick={async () => {
                 setBusy(true);
-                await send({ type: 'START_SESSION' });
+                setError(await send({ type: 'START_SESSION' }));
                 setBusy(false);
               }}
             >
               Regenerate
             </Button>
+            {/* e.g. the plan ended meanwhile */}
+            {planBlocked(state.account) ? (
+              <PlanNote account={state.account!} />
+            ) : (
+              error && <p className="mt-2 text-xs text-danger-ink">{error}</p>
+            )}
           </div>
         }
       />

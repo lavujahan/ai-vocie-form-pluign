@@ -52,10 +52,15 @@ function defaultEffort(model: string): Effort | null {
  * The model for one AI step and its settings: MAPPER_MODEL / ANALYZER_MODEL / RESOLVER_MODEL, else
  * AGENT_MODEL, else the default. AGENT_REASONING sets the reasoning effort for all reasoning models.
  * A Model object (tests) is used as it is. Every step gets its STEP_LIMITS.
+ *
+ * Prompt caching: OpenAI bills a repeated prompt start (the instructions, the form's fields) at 10%.
+ * `prompt_cache_key` sends requests with the same start to the same cache (`cacheKey`: e.g. the form),
+ * and GPT-5.x keeps cached starts up to 24 h, so the first recording after a quiet hour is cheap too.
  */
 export function agentModel(
   step: AgentStep,
   override?: Model | string,
+  cacheKey?: string,
 ): { model: Model | string; modelSettings: ModelSettings; timeoutMs: number } {
   const { maxTokens, timeoutMs } = STEP_LIMITS[step];
   if (override && typeof override !== 'string') return { model: override, modelSettings: { maxTokens }, timeoutMs };
@@ -63,7 +68,12 @@ export function agentModel(
   const { model, effort } = parseModelSpec(spec);
   const chosen = effort ?? ((process.env.AGENT_REASONING || null) as Effort | null) ?? defaultEffort(model);
   const reasoning = isReasoningModel(model) && chosen ? { reasoning: { effort: chosen } } : {};
-  return { model, modelSettings: { maxTokens, ...reasoning }, timeoutMs };
+  const retention = /^gpt-5\.\d/i.test(model) ? { promptCacheRetention: '24h' as const } : {};
+  return {
+    model,
+    modelSettings: { maxTokens, ...reasoning, ...retention, providerData: { prompt_cache_key: `${step}:${cacheKey ?? 'all'}` } },
+    timeoutMs,
+  };
 }
 
 /**

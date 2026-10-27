@@ -113,3 +113,12 @@ Why not the others:
      - a retry;
      - a dropdown the computer couldn't match.
    - In Admin → Usage, set the token prices to gpt-5.4-mini's: $0.75 input and $4.50 output per 1M tokens.
+6. **Read each form once.**
+   - A form's reading is saved (migration `0012_form_cache.sql`, [formCache.ts](../apps/web/lib/agents/formCache.ts)) and reused by every later scan of the same form, by any user, for 30 days.
+   - The form is recognised by a fingerprint of the page path and its fields. It is read again sooner when its fields change, or when the model or the analyzer's instructions change.
+   - Admin → Forms lists the saved readings, with search, sort, **Edit labels** (English, Tamil, required) and **Read again**.
+7. **Cheaper requests.**
+   - **Cache hits:** every AI request carries a cache key per step and form (`prompt_cache_key`), and GPT-5.x models keep the cached instructions up to 24 h (`prompt_cache_retention`), so the fixed instructions are billed at 10% more often.
+   - **Shorter answers:** the mapper no longer writes the list of required fields still empty (`missing_required`) or the speech it couldn't place (`unmapped_speech`). Nothing in the app used them; the phone works out what is missing itself.
+   - **Short field ids:** the mapper sees the fields as `f1, f2, …` (numbered over the whole form, so a field keeps its id with the row mic too) instead of the site's long keys; the server turns the ids back into the keys.
+   - **Short "what was said":** `source_phrase` holds only the spoken words of the value, without the field's label (it is still shown on the phone as "Heard: …" when it differs from the value).

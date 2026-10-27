@@ -214,6 +214,51 @@ try {
     check('Retention: could create aged test sessions', false);
   }
 
+  // ---- Plans: voice minutes are counted inside the current period only (migration 0013) ----
+  {
+    const status = async () =>
+      (await admin.rpc('subscription_status', { p_user: b.id })).data?.[0] as
+        | { plan_id: string; minutes_total: number; used_ms: string | number; starts_at: string; ends_at: string; paid_until: string }
+        | undefined;
+    const start = new Date(Date.now() - 60_000).toISOString();
+    const trial = await admin.rpc('grant_plan', {
+      p_user: b.id, p_plan: 'trial', p_starts_at: start, p_amount: 0, p_method: 'upi', p_reference: null, p_note: 'check-db', p_admin: null,
+    });
+    check('Plans: grant_plan runs (apply migration 0013)', !trial.error, trial.error?.message);
+    if (!trial.error) {
+      const before = new Date(Date.parse(start) - 86_400_000).toISOString();
+      const audio = await admin.from('usage_events').insert([
+        { user_id: b.id, kind: 'stt', provider: 'sarvam', model: 'check-db', audio_ms: 600_000, created_at: before },
+        // Every row names created_at: in a multi-row insert a missing column is sent as null, not its default.
+        { user_id: b.id, kind: 'stt', provider: 'sarvam', model: 'check-db', audio_ms: 60_000, created_at: new Date().toISOString() },
+      ]);
+      const s1 = await status();
+      check('Plans: only audio inside the period counts', Number(s1?.used_ms) === 60_000, audio.error?.message ?? JSON.stringify(s1));
+
+      const renew = await admin.rpc('grant_plan', {
+        p_user: b.id, p_plan: 'basic', p_starts_at: s1!.ends_at, p_amount: 199, p_method: 'upi', p_reference: 'check-db', p_note: null, p_admin: null,
+      });
+      const s2 = await status();
+      check(
+        'Plans: an early renewal starts when the current period ends',
+        !renew.error && s2?.plan_id === 'trial' && Date.parse(s2.paid_until) > Date.parse(s2.ends_at),
+        renew.error?.message ?? JSON.stringify(s2),
+      );
+      const twice = await admin.rpc('grant_plan', {
+        p_user: b.id, p_plan: 'basic', p_starts_at: s1!.ends_at, p_amount: 0, p_method: 'upi', p_reference: null, p_note: null, p_admin: null,
+      });
+      check('Plans: a second period on the same dates is refused', !!twice.error?.message.includes('already_planned'), twice.error?.message);
+
+      const topup = await admin.rpc('add_minutes', {
+        p_user: b.id, p_minutes: 50, p_amount: 99, p_method: 'upi', p_reference: null, p_note: null, p_admin: null,
+      });
+      const s3 = await status();
+      const { data: pays } = await admin.from('payments').select('kind, amount_inr').eq('user_id', b.id);
+      check('Plans: a top-up adds minutes to the current period', !topup.error && s3?.minutes_total === 70, topup.error?.message ?? JSON.stringify(s3));
+      check('Plans: plan and top-up payments are recorded', pays?.length === 2, JSON.stringify(pays));
+    }
+  }
+
   // ---- Realtime: the phone and the extension get value changes pushed ----
   for (const [who, token] of [
     ['phone', await phoneToken(session.id)],
@@ -250,7 +295,12 @@ try {
   console.error('check-db crashed:', e);
   failures++;
 } finally {
-  if (userIds.length) await admin.from('users').delete().in('id', userIds);
+  if (userIds.length) {
+    // Payments and usage rows outlive deleted users (user_id set to null): remove the test ones first.
+    await admin.from('payments').delete().in('user_id', userIds);
+    await admin.from('usage_events').delete().in('user_id', userIds);
+    await admin.from('users').delete().in('id', userIds);
+  }
 }
 
 console.log(failures ? `\n${failures} check(s) failed` : '\nAll database checks passed');

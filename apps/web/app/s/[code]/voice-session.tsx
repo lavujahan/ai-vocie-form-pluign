@@ -333,11 +333,12 @@ function SessionScreen({ code }: { code: string }) {
     return () => window.removeEventListener('pointerdown', off);
   }, [leaveWarn]);
 
-  // Another phone took over ("Connect phone again" on the computer): stop listening here.
+  // Another phone took over ("Connect phone again" on the computer), or the plan has no minutes left:
+  // stop listening here.
   useEffect(() => {
-    if (s.replaced && recorder.state === 'recording') recorder.stop();
+    if ((s.replaced || s.planBlocked) && recorder.state === 'recording') recorder.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.replaced]);
+  }, [s.replaced, s.planBlocked]);
 
   if (s.phase === 'pairing') {
     return (
@@ -393,6 +394,11 @@ function SessionScreen({ code }: { code: string }) {
   const top = (
     <>
       <DesktopBanner state={desktop} />
+      {s.planBlocked && (
+        <p className="flex items-center gap-2 rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-ink">
+          <AlertCircle size={16} className="shrink-0" /> {srv(s.planBlocked)}
+        </p>
+      )}
       {!s.online && (
         <p className="flex items-center gap-2 rounded-lg bg-warn-bg px-3 py-2 text-sm text-warn-ink">
           <WifiOff size={16} className="shrink-0" /> {t('offline')}

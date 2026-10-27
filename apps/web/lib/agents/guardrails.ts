@@ -36,8 +36,6 @@ export const unknownKeysGuardrail: OutputGuardrail<typeof MappingResult> = {
 export type SanitizedValue = MappedValue & { error: string | null };
 export type SanitizedMapping = {
   values: SanitizedValue[];
-  unmapped_speech: string | null;
-  missing_required: string[];
   command: VoiceCommand | null;
 };
 
@@ -105,8 +103,6 @@ export function sanitizeMapping(
   const values = [...out.values()];
   return {
     values,
-    unmapped_speech: result.unmapped_speech?.trim() || null,
-    missing_required: result.missing_required.filter((k) => byKey.has(k)),
     // A command is the whole speech ("start over", "send it"): never alongside values, never in single-field mode.
     command: !targetFieldKey && !values.length ? (result.command ?? null) : null,
   };
