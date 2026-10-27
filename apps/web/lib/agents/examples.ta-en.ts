@@ -59,14 +59,14 @@ export const FEW_SHOT: { speech: string; current?: string; recent?: string; outp
     speech: 'father name spelling J A G A D H E E S A N',
     output: '{"values":[{"field_key":"father_name","value":"Jagadheesan","confidence":0.95,"source_phrase":"J A G A D H E E S A N"}]}',
   },
-  // A command, not a value: the phone asks before acting on it.
+  // Not about any field: nothing to fill (never invent a value).
   {
     speech: 'ellam azhichidunga, start over',
-    output: '{"values":[],"command":"start_over"}',
+    output: '{"values":[]}',
   },
 ];
 
-// number_parts and command are omitted above where they are null, to keep the examples short.
+// number_parts is omitted above where it is null, to keep the examples short.
 export function renderFewShot(): string {
   return FEW_SHOT.map(
     (e, i) =>

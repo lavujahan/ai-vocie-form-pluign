@@ -1,4 +1,3 @@
-import type { VoiceCommand } from '@vff/shared';
 import type { RecentSpeech } from '../lib/agents/fieldMapper';
 import type { AgentField } from '../lib/agents/tools';
 
@@ -68,8 +67,6 @@ export type EvalCase = {
    * returned. Fields not listed are not checked.
    */
   expect: Record<string, string | string[] | null>;
-  /** Expected spoken command (checked when given; `null` = must not be a command). */
-  command?: VoiceCommand | null;
 };
 
 /**
@@ -218,10 +215,10 @@ export const EVAL_CASES: EvalCase[] = [
   { tags: ['corrections'], form: 'can', speech: 'applicant name spelling J A G A N', expect: { applicant_name: 'Jagan' } },
   { tags: ['corrections'], form: 'can', speech: 'pincode la 455 illa 445', current: { pincode: '636455' }, expect: { pincode: '636445' } },
 
-  // Spoken commands (the phone asks before acting on them)
-  { tags: ['commands'], form: 'can', speech: 'start over, ellam azhichidunga', expect: { applicant_name: null }, command: 'start_over' },
-  { tags: ['commands'], form: 'can', speech: 'send it to the computer', expect: {}, command: 'send' },
-  { tags: ['commands'], form: 'can', speech: 'innum enna baaki irukku?', expect: {}, command: 'whats_left' },
-  { tags: ['commands'], form: 'can', speech: 'அனுப்பு', expect: {}, command: 'send' },
-  { tags: ['commands'], form: 'can', speech: 'Name Jagan, then send it', expect: { applicant_name: 'Jagan' }, command: null },
+  // Command-like speech (no spoken commands any more): nothing is filled, no value is invented
+  { tags: ['commands'], form: 'can', speech: 'start over, ellam azhichidunga', expect: { applicant_name: null } },
+  { tags: ['commands'], form: 'can', speech: 'send it to the computer', expect: {} },
+  { tags: ['commands'], form: 'can', speech: 'innum enna baaki irukku?', expect: {} },
+  { tags: ['commands'], form: 'can', speech: 'அனுப்பு', expect: {} },
+  { tags: ['commands'], form: 'can', speech: 'Name Jagan, then send it', expect: { applicant_name: 'Jagan' } },
 ];

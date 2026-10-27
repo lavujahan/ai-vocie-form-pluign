@@ -1,5 +1,5 @@
 import type { InputGuardrail, OutputGuardrail } from '@openai/agents';
-import { MappingResult, normalizeText, type MappedValue, type VoiceCommand } from '@vff/shared';
+import { MappingResult, normalizeText, type MappedValue } from '@vff/shared';
 import { fieldLabel, validateForField, type AgentField } from './tools';
 
 export type MapperContext = { transcript: string; fieldKeys: Set<string> };
@@ -36,7 +36,6 @@ export const unknownKeysGuardrail: OutputGuardrail<typeof MappingResult> = {
 export type SanitizedValue = MappedValue & { error: string | null };
 export type SanitizedMapping = {
   values: SanitizedValue[];
-  command: VoiceCommand | null;
 };
 
 /**
@@ -103,7 +102,5 @@ export function sanitizeMapping(
   const values = [...out.values()];
   return {
     values,
-    // A command is the whole speech ("start over", "send it"): never alongside values, never in single-field mode.
-    command: !targetFieldKey && !values.length ? (result.command ?? null) : null,
   };
 }

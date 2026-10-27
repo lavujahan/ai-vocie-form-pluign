@@ -59,15 +59,21 @@ type FieldStatus =
   | { kind: 'file'; file?: FieldFile };
 
 const isFile = (f: SessionField) => f.field_type === 'file';
+/** Share of the voice fields that must be filled before each row shows its own mic (for corrections). */
+const ROW_MIC_AT = 0.7;
 /** Required and still empty, a dropdown to pick, a refused upload: sending would leave a gap. */
 const needsInput = (f: SessionField, st: FieldStatus) =>
-  st.kind === 'missing' || st.kind === 'pick' || (st.kind === 'file' && ((!st.file && f.required) || st.file?.status === 'rejected'));
+  st.kind === 'missing' ||
+  st.kind === 'pick' ||
+  (st.kind === 'file' && ((!st.file && f.required) || st.file?.status === 'rejected'));
 /** Worth a look before sending: the gaps above, plus doubtful values and recordings that failed. */
-const needsAttention = (f: SessionField, st: FieldStatus) => needsInput(f, st) || st.kind === 'low' || st.kind === 'error';
+const needsAttention = (f: SessionField, st: FieldStatus) =>
+  needsInput(f, st) || st.kind === 'low' || st.kind === 'error';
 
 function displayValue(f: SessionField, v: string | null | undefined, t: T): string {
   if (!v) return '';
-  if (f.field_type === 'checkbox' && !f.multiple) return v === 'true' ? t('yes') : v === 'false' ? t('no') : v;
+  if (f.field_type === 'checkbox' && !f.multiple)
+    return v === 'true' ? t('yes') : v === 'false' ? t('no') : v;
   return v;
 }
 
@@ -79,7 +85,15 @@ function fmtTime(s: number) {
  * A recording is mapped once, after Stop (a few seconds): these messages take turns meanwhile, so the
  * user sees work going on and keeps the page open.
  */
-const WAIT_STEPS = ['waitPlease', 'waitThinking', 'waitPlanning', 'waitMapping', 'waitFilling', 'waitDontClose', 'waitLoading'] as const;
+const WAIT_STEPS = [
+  'waitPlease',
+  'waitThinking',
+  'waitPlanning',
+  'waitMapping',
+  'waitFilling',
+  'waitDontClose',
+  'waitLoading',
+] as const;
 const WAIT_STEP_MS = 1800;
 
 /** Which wait message to show while `active` (cycles through WAIT_STEPS); null while not active. */
@@ -149,7 +163,10 @@ function SessionScreen({ code }: { code: string }) {
    * Tags for one recording: the first piece gets `seq`; each extra piece (long recordings are cut
    * for Sarvam's 30 s limit) takes the next seq, the same recordingId and the next part number.
    */
-  const pieceTags = (seq: number, target: string | null): [PieceTag, { nextTag: () => PieceTag }] => {
+  const pieceTags = (
+    seq: number,
+    target: string | null,
+  ): [PieceTag, { nextTag: () => PieceTag }] => {
     const recordingId = crypto.randomUUID();
     let part = 0;
     return [
@@ -186,7 +203,9 @@ function SessionScreen({ code }: { code: string }) {
     }
     if (f.choice_hint) return { kind: 'pick', hint: f.choice_hint, value };
     if (value?.value) {
-      return (value.confidence ?? 1) < LOW_CONFIDENCE ? { kind: 'low', value } : { kind: 'filled', value };
+      return (value.confidence ?? 1) < LOW_CONFIDENCE
+        ? { kind: 'low', value }
+        : { kind: 'filled', value };
     }
     return f.required ? { kind: 'missing' } : { kind: 'empty' };
   };
@@ -195,13 +214,22 @@ function SessionScreen({ code }: { code: string }) {
   /** After Stop, while the answers are on their way: the wait message to show (null when not waiting). */
   const waitStep = useWaitStep(!recording && processing > 0);
   /** Whole-form recordings the server couldn't use (no field of their own to show the error on). */
-  const failedSpeech = [...s.utterances.values()].filter((u) => u.status === 'error' && !u.target_field_key).sort((a, b) => b.seq - a.seq);
+  const failedSpeech = [...s.utterances.values()]
+    .filter((u) => u.status === 'error' && !u.target_field_key)
+    .sort((a, b) => b.seq - a.seq);
   const latestTranscript = [...s.utterances.values()]
     .filter((u) => u.transcript)
     .sort((a, b) => b.seq - a.seq)[0]?.transcript;
   const filledCount = s.fields.filter((f) =>
-    isFile(f) ? ['uploaded', 'filled'].includes(s.files.get(f.id)?.status ?? '') : !!s.valueByKey.get(f.field_key)?.value,
+    isFile(f)
+      ? ['uploaded', 'filled'].includes(s.files.get(f.id)?.status ?? '')
+      : !!s.valueByKey.get(f.field_key)?.value,
   ).length;
+  // Row mics are for corrections: the first pass is spoken with the big mic (one AI call for the whole
+  // form; field by field measured ~1.8× the cost and ~5× the wait), so they show once most fields are filled.
+  const voiceFields = s.fields.filter((f) => !isFile(f));
+  const voiceFilled = voiceFields.filter((f) => !!s.valueByKey.get(f.field_key)?.value).length;
+  const rowMic = voiceFields.length > 0 && voiceFilled / voiceFields.length >= ROW_MIC_AT;
   const steps = useMemo(() => stepStarts(s.fields), [s.fields]);
 
   const desktop = s.session?.desktop_state ?? 'open';
@@ -210,7 +238,9 @@ function SessionScreen({ code }: { code: string }) {
   const values = [...s.valueByKey.values()];
   const files = [...s.files.values()];
   /** After a Send: answers / uploads changed since then (they can be sent again). */
-  const unsent = sent ? unsentChanges(values, files, resetSeq, sentUpTo, s.session?.desktop_report?.at) : 0;
+  const unsent = sent
+    ? unsentChanges(values, files, resetSeq, sentUpTo, s.session?.desktop_report?.at)
+    : 0;
   const send = useSend({
     fields: s.fields,
     statusOf,
@@ -234,7 +264,12 @@ function SessionScreen({ code }: { code: string }) {
     const added = s.fields.length - fieldCount.current;
     if (fieldCount.current > 0 && added > 0) {
       const step = steps.get(s.fields[s.fields.length - 1].id);
-      setNotice(t(added === 1 ? 'newFieldsOne' : 'newFieldsMany', { n: added, step: step ? t('stepSuffix', { n: step }) : '' }));
+      setNotice(
+        t(added === 1 ? 'newFieldsOne' : 'newFieldsMany', {
+          n: added,
+          step: step ? t('stepSuffix', { n: step }) : '',
+        }),
+      );
     }
     fieldCount.current = s.fields.length;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,22 +287,6 @@ function SessionScreen({ code }: { code: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recording, processing]);
 
-  // A spoken command never acts by itself: it opens the same confirmation a tap would.
-  useEffect(() => {
-    const c = s.command;
-    if (!c) return;
-    s.clearCommand();
-    if (c.command === 'start_over') {
-      setResetOpen(true);
-      window.scrollTo(0, 0);
-    } else if (c.command === 'send') {
-      setAskSend((n) => n + 1);
-    } else {
-      const left = s.fields.filter((f) => needsInput(f, statusOf(f))).map(label);
-      setNotice(left.length ? t('whatsLeftSome', { list: left.join(', ') }) : t('whatsLeftNone'));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.command]);
 
   async function startOver(scope: ResetScope) {
     if (recording) recorder.stop();
@@ -405,7 +424,10 @@ function SessionScreen({ code }: { code: string }) {
         </p>
       )}
       {notice && (
-        <button onClick={() => setNotice(null)} className="flex w-full items-center gap-2 rounded-lg bg-live-bg px-3 py-2 text-left text-sm text-live-ink">
+        <button
+          onClick={() => setNotice(null)}
+          className="flex w-full items-center gap-2 rounded-lg bg-live-bg px-3 py-2 text-left text-sm text-live-ink"
+        >
           <Check size={16} className="shrink-0" /> {notice}
         </button>
       )}
@@ -416,7 +438,13 @@ function SessionScreen({ code }: { code: string }) {
         </div>
       )}
       {recorder.state === 'denied' && <MicHelp onRetry={toggleMic} />}
-      {resetOpen && <StartOverSheet count={filledCount} onCancel={() => setResetOpen(false)} onConfirm={startOver} />}
+      {resetOpen && (
+        <StartOverSheet
+          count={filledCount}
+          onCancel={() => setResetOpen(false)}
+          onConfirm={startOver}
+        />
+      )}
       {sheetField && (
         <FileSheet
           key={sheetField.id}
@@ -437,6 +465,10 @@ function SessionScreen({ code }: { code: string }) {
         key={f.id}
         field={f}
         status={st}
+        // A row whose own recording is running, processing or failed keeps its mic (to stop or retry).
+        showMic={
+          rowMic || st.kind === 'recording' || st.kind === 'processing' || st.kind === 'error'
+        }
         elapsed={recorder.elapsed}
         editing={editing === f.field_key}
         onMic={() => micFor(f.field_key)}
@@ -470,14 +502,16 @@ function SessionScreen({ code }: { code: string }) {
             <Fragment key={f.id}>
               <StepDivider step={steps.get(f.id)} />
               {/* Upload fields are listed together under their own heading. */}
-              {isFile(f) && (i === 0 || !isFile(s.fields[i - 1])) && <GroupLabel>{t('files')}</GroupLabel>}
+              {isFile(f) && (i === 0 || !isFile(s.fields[i - 1])) && (
+                <GroupLabel>{t('files')}</GroupLabel>
+              )}
               {item(f)}
             </Fragment>
           ))}
         </div>
       </div>
       <BottomBar
-        heard={recording && !recordingTarget ? t('listenAll') : latestTranscript ?? null}
+        heard={recording && !recordingTarget ? t('listenAll') : (latestTranscript ?? null)}
         filled={filledCount}
         total={s.fields.length}
         processing={processing}
@@ -489,13 +523,19 @@ function SessionScreen({ code }: { code: string }) {
         onAttention={() => {
           if (!attention.length) return;
           const f = attention[nextAttention.current++ % attention.length];
-          document.getElementById(`field-${f.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          document
+            .getElementById(`field-${f.id}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }}
         recording={recording}
         elapsed={recorder.elapsed}
         micDisabled={recorder.state === 'unsupported'}
         notice={
-          leaveWarn ? t('backAgainToLeave') : !recording && recorder.notice ? t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort') : null
+          leaveWarn
+            ? t('backAgainToLeave')
+            : !recording && recorder.notice
+              ? t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort')
+              : null
         }
         onMic={toggleMic}
         send={send}
@@ -560,7 +600,17 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Header({ title, subtitle, live, menu }: { title: string; subtitle?: string; live?: boolean; menu: React.ReactNode }) {
+function Header({
+  title,
+  subtitle,
+  live,
+  menu,
+}: {
+  title: string;
+  subtitle?: string;
+  live?: boolean;
+  menu: React.ReactNode;
+}) {
   const { t } = useI18n();
   return (
     <header className="sticky top-0 z-20 flex items-start gap-2 border-b border-line bg-page px-4 pt-3 pb-2">
@@ -590,7 +640,12 @@ function PageMenu({ onStartOver }: { onStartOver: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
-      <button onClick={() => setOpen((o) => !o)} aria-label={t('more')} aria-expanded={open} className="grid size-10 place-items-center rounded-lg hover:bg-subtle">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label={t('more')}
+        aria-expanded={open}
+        className="grid size-10 place-items-center rounded-lg hover:bg-subtle"
+      >
         <MoreHorizontal size={20} />
       </button>
       {open && (
@@ -601,7 +656,10 @@ function PageMenu({ onStartOver }: { onStartOver: () => void }) {
           >
             <Globe size={17} /> {translate(lang, 'switchLang')}
           </button>
-          <button onClick={() => (onStartOver(), setOpen(false))} className="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-left text-sm hover:bg-subtle">
+          <button
+            onClick={() => (onStartOver(), setOpen(false))}
+            className="flex min-h-11 items-center gap-2.5 rounded-lg px-3 text-left text-sm hover:bg-subtle"
+          >
             <RotateCcw size={17} /> {t('startOver')}
           </button>
         </div>
@@ -611,7 +669,11 @@ function PageMenu({ onStartOver }: { onStartOver: () => void }) {
 }
 
 function GroupLabel({ children }: { children: React.ReactNode }) {
-  return <p className="pt-4 pb-1 text-[11.5px] font-bold tracking-wider text-muted uppercase">{children}</p>;
+  return (
+    <p className="pt-4 pb-1 text-[11.5px] font-bold tracking-wider text-muted uppercase">
+      {children}
+    </p>
+  );
 }
 
 /**
@@ -623,7 +685,8 @@ function stepStarts(fields: SessionField[]): Map<string, number> {
   const distinct = [...new Set(fields.map((f) => f.step_index ?? 0))].sort((a, b) => a - b);
   if (distinct.length < 2) return out;
   fields.forEach((f, i) => {
-    if (i === 0 || (fields[i - 1].step_index ?? 0) !== (f.step_index ?? 0)) out.set(f.id, distinct.indexOf(f.step_index ?? 0) + 1);
+    if (i === 0 || (fields[i - 1].step_index ?? 0) !== (f.step_index ?? 0))
+      out.set(f.id, distinct.indexOf(f.step_index ?? 0) + 1);
   });
   return out;
 }
@@ -655,10 +718,14 @@ function DesktopBanner({ state }: { state: DesktopState }) {
 
 // ---------- field rows ----------
 
-/** One field: label, live value / status, and its own Speak + Type buttons (or Add for uploads). */
+/**
+ * One field: label, live value / status, and its own Speak + Type buttons (or Add for uploads). Speak
+ * shows only with `showMic` (once most of the form is filled: it is for corrections).
+ */
 function FieldItem({
   field,
   status,
+  showMic,
   elapsed,
   editing,
   onMic,
@@ -670,6 +737,7 @@ function FieldItem({
 }: {
   field: SessionField;
   status: FieldStatus;
+  showMic: boolean;
   elapsed: number;
   editing: boolean;
   onMic: () => void;
@@ -686,12 +754,16 @@ function FieldItem({
   const said = 'value' in status ? status.value?.source_phrase?.trim() : null;
   const shown = 'value' in status ? displayValue(field, status.value?.value, t) : '';
   const source = said && said.toLowerCase() !== shown.toLowerCase() ? said : null;
-  const actBase = 'flex w-[52px] min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] font-semibold leading-tight';
+  const actBase =
+    'flex w-[52px] min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl text-[10.5px] font-semibold leading-tight';
 
   return (
     <div
       id={`field-${field.id}`}
-      className={cx('scroll-mt-20 scroll-mb-64 border-b border-line', rec && '-mx-2.5 rounded-xl border-transparent bg-accent-bg px-2.5')}
+      className={cx(
+        'scroll-mt-20 scroll-mb-64 border-b border-line',
+        rec && '-mx-2.5 rounded-xl border-transparent bg-accent-bg px-2.5',
+      )}
     >
       <div className="flex items-center gap-2 py-2.5">
         <div className="min-w-0 flex-1">
@@ -705,7 +777,8 @@ function FieldItem({
           <div className="mt-0.5 text-[15.5px] leading-snug font-semibold break-words">
             {rec ? (
               <span className="inline-flex items-center gap-1.5 text-danger-ink">
-                <span className="size-2 animate-pulse rounded-full bg-danger" /> {t('listening', { time: fmtTime(elapsed) })}
+                <span className="size-2 animate-pulse rounded-full bg-danger" />{' '}
+                {t('listening', { time: fmtTime(elapsed) })}
               </span>
             ) : status.kind === 'error' ? (
               <button onClick={onRetry} className="text-left">
@@ -715,30 +788,51 @@ function FieldItem({
               <StatusMarker field={field} status={status} />
             )}
           </div>
-          {status.kind === 'pick' && !editing && <p className="mt-0.5 text-xs text-muted">{t('youSaid', { text: status.hint.spoken })}</p>}
-          {source && !rec && <p className="mt-0.5 text-xs text-muted">{t('heard')}: “{source}”</p>}
+          {status.kind === 'pick' && !editing && (
+            <p className="mt-0.5 text-xs text-muted">
+              {t('youSaid', { text: status.hint.spoken })}
+            </p>
+          )}
+          {source && !rec && (
+            <p className="mt-0.5 text-xs text-muted">
+              {t('heard')}: “{source}”
+            </p>
+          )}
         </div>
         <div className="flex flex-none gap-1.5">
           {file ? (
-            <button onClick={onFile} aria-label={`${t('fileTakePhoto')} · ${label(field)}`} className={cx(actBase, 'bg-accent-bg text-accent-ink')}>
+            <button
+              onClick={onFile}
+              aria-label={`${t('fileTakePhoto')} · ${label(field)}`}
+              className={cx(actBase, 'bg-accent-bg text-accent-ink')}
+            >
               <Camera size={20} />
               {status.kind === 'file' && status.file ? t('fileReplace') : t('fileAdd')}
             </button>
           ) : (
             <>
-              <button
-                onClick={onMic}
-                aria-label={rec ? t('stopRec') : t('speakField', { label: label(field) })}
-                className={cx(actBase, rec ? 'bg-danger text-white' : 'bg-accent-bg text-accent-ink')}
-              >
-                {rec ? <Square size={18} fill="currentColor" /> : <Mic size={20} />}
-                {rec ? t('stop') : t('speak')}
-              </button>
+              {showMic && (
+                <button
+                  onClick={onMic}
+                  aria-label={rec ? t('stopRec') : t('speakField', { label: label(field) })}
+                  className={cx(
+                    actBase,
+                    rec ? 'bg-danger text-white' : 'bg-accent-bg text-accent-ink',
+                  )}
+                >
+                  {rec ? <Square size={18} fill="currentColor" /> : <Mic size={20} />}
+                  {rec ? t('stop') : t('speak')}
+                </button>
+              )}
               <button
                 onClick={onPen}
                 aria-label={`${t('type')} · ${label(field)}`}
                 aria-expanded={editing}
-                className={cx(actBase, 'border-[1.5px] border-accent-ink text-accent-ink', editing ? 'bg-accent-bg' : 'bg-card')}
+                className={cx(
+                  actBase,
+                  'border-[1.5px] border-accent-ink text-accent-ink',
+                  editing ? 'bg-accent-bg' : 'bg-card',
+                )}
               >
                 <Pencil size={18} />
                 {t('type')}
@@ -748,7 +842,12 @@ function FieldItem({
         </div>
       </div>
       {editing && !file && (
-        <ValueEditor field={field} initial={'value' in status ? (status.value?.value ?? null) : null} onSave={onSave} onCancel={onCancel} />
+        <ValueEditor
+          field={field}
+          initial={'value' in status ? (status.value?.value ?? null) : null}
+          onSave={onSave}
+          onCancel={onCancel}
+        />
       )}
     </div>
   );
@@ -764,7 +863,13 @@ function StatusMarker({ field, status }: { field: SessionField; status: FieldSta
         </span>
       );
     case 'processing':
-      return <Loader2 size={16} className="inline animate-spin text-muted" aria-label={t('processingLabel')} />;
+      return (
+        <Loader2
+          size={16}
+          className="inline animate-spin text-muted"
+          aria-label={t('processingLabel')}
+        />
+      );
     case 'error':
       return <Pill tone="danger">{t('tapToRetry')}</Pill>;
     case 'low':
@@ -776,7 +881,8 @@ function StatusMarker({ field, status }: { field: SessionField; status: FieldSta
     case 'filled':
       return (
         <span className="inline-flex items-center gap-1.5">
-          <Check size={15} className="shrink-0 text-live-ink" /> {displayValue(field, status.value.value, t)}
+          <Check size={15} className="shrink-0 text-live-ink" />{' '}
+          {displayValue(field, status.value.value, t)}
         </span>
       );
     case 'missing':
@@ -838,21 +944,34 @@ function BottomBar({
   return (
     <div className="sticky bottom-0 z-20 flex flex-col gap-2 border-t border-line bg-card px-4 pt-2.5 pb-[calc(12px+env(safe-area-inset-bottom,0px))] shadow-[0_-8px_24px_rgba(0,0,0,0.08)]">
       {heard && (
-        <button onClick={() => setOpen((o) => !o)} className={cx('text-left text-[13px] text-muted italic', !open && 'truncate')}>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className={cx('text-left text-[13px] text-muted italic', !open && 'truncate')}
+        >
           {recording ? heard : `${t('heard')}: “${heard}”`}
         </button>
       )}
-      {notice && <p className="rounded-lg bg-warn-bg px-3 py-1.5 text-[13px] text-warn-ink">{notice}</p>}
+      {notice && (
+        <p className="rounded-lg bg-warn-bg px-3 py-1.5 text-[13px] text-warn-ink">{notice}</p>
+      )}
       {failed.length > 0 && (
-        <button onClick={onRetryFailed} className="flex items-center gap-1.5 rounded-lg bg-danger-bg px-3 py-1.5 text-left text-[13px] text-danger-ink">
+        <button
+          onClick={onRetryFailed}
+          className="flex items-center gap-1.5 rounded-lg bg-danger-bg px-3 py-1.5 text-left text-[13px] text-danger-ink"
+        >
           <AlertCircle size={15} className="shrink-0" />
-          {failed.length === 1 && failed[0].error ? srv(failed[0].error) : t('failedRetry', { n: failed.length })}
+          {failed.length === 1 && failed[0].error
+            ? srv(failed[0].error)
+            : t('failedRetry', { n: failed.length })}
         </button>
       )}
       <div className="flex flex-wrap items-center gap-2 text-[13.5px]">
         <span className="font-bold tabular-nums">{t('filledCount', { n: filled, total })}</span>
         {waitStep ? (
-          <span className="inline-flex items-center gap-1.5 font-semibold text-accent-ink" aria-live="polite">
+          <span
+            className="inline-flex items-center gap-1.5 font-semibold text-accent-ink"
+            aria-live="polite"
+          >
             · <Loader2 size={14} className="animate-spin" /> {t(waitStep)}
           </span>
         ) : (
@@ -863,16 +982,25 @@ function BottomBar({
           )
         )}
         {attention > 0 && (
-          <button onClick={onAttention} className="rounded-full bg-warn-bg px-2.5 py-0.5 font-semibold text-warn-ink">
+          <button
+            onClick={onAttention}
+            className="rounded-full bg-warn-bg px-2.5 py-0.5 font-semibold text-warn-ink"
+          >
             {t('needYou', { n: attention })}
           </button>
         )}
-        {unsent > 0 && <span className="rounded-full bg-accent-bg px-2.5 py-0.5 font-semibold text-accent-ink">{t('notSentYet', { n: unsent })}</span>}
+        {unsent > 0 && (
+          <span className="rounded-full bg-accent-bg px-2.5 py-0.5 font-semibold text-accent-ink">
+            {t('notSentYet', { n: unsent })}
+          </span>
+        )}
       </div>
       {send.confirm && (
         <div className="rounded-xl bg-warn-bg px-3 py-2">
           <p className="text-sm text-warn-ink">
-            {send.missing ? t(send.missing === 1 ? 'missingOne' : 'missingMany', { n: send.missing }) : t('voiceSendConfirm')}
+            {send.missing
+              ? t(send.missing === 1 ? 'missingOne' : 'missingMany', { n: send.missing })
+              : t('voiceSendConfirm')}
           </p>
           <div className="mt-2 flex gap-2">
             <Button className="flex-1" variant="primary" onClick={send.send}>
@@ -896,7 +1024,9 @@ function BottomBar({
             )}
           >
             {recording ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
-            {recording && <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />}
+            {recording && (
+              <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />
+            )}
           </button>
           <span className="text-[11.5px] text-muted tabular-nums">
             {recording ? fmtTime(elapsed) : waitStep ? t('waitPlease') : t('tapToSpeak')}
@@ -905,7 +1035,11 @@ function BottomBar({
         {/* While speech is still being turned into answers, Send waits (else they'd miss this Send). */}
         <SendButton send={send} waiting={recording || processing > 0} />
       </div>
-      {send.error ? <p className="text-xs text-danger-ink">{send.error}</p> : <AckLine ack={send.ack} />}
+      {send.error ? (
+        <p className="text-xs text-danger-ink">{send.error}</p>
+      ) : (
+        <AckLine ack={send.ack} />
+      )}
     </div>
   );
 }
@@ -998,7 +1132,13 @@ function SendButton({ send: s, waiting }: { send: SendState; waiting: boolean })
       ) : (
         <>
           <Send size={18} className="shrink-0" />
-          {!s.sent ? t('sendToDesktop') : s.unsent === 1 ? t('sendOneChange') : s.unsent > 1 ? t('sendChanges', { n: s.unsent }) : t('sendAgain')}
+          {!s.sent
+            ? t('sendToDesktop')
+            : s.unsent === 1
+              ? t('sendOneChange')
+              : s.unsent > 1
+                ? t('sendChanges', { n: s.unsent })
+                : t('sendAgain')}
         </>
       )}
     </button>
@@ -1033,7 +1173,9 @@ function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: numbe
 
   if (!sent) return { kind: 'none' };
   if (report && report.at !== sentWith.current) {
-    return report.filled === 0 && report.total > 0 ? { kind: 'nothing', report } : { kind: 'filled', report };
+    return report.filled === 0 && report.total > 0
+      ? { kind: 'nothing', report }
+      : { kind: 'filled', report };
   }
   return { kind: 'waiting' };
 }
@@ -1051,7 +1193,9 @@ function AckLine({ ack }: { ack: Ack }) {
       return (
         <p className="text-xs text-live-ink">
           {t('ackFilled', { filled: ack.report.filled, total: ack.report.total })}
-          {ack.report.skipped > 0 && <span className="text-warn-ink">{t('ackSkipped', { n: ack.report.skipped })}</span>}
+          {ack.report.skipped > 0 && (
+            <span className="text-warn-ink">{t('ackSkipped', { n: ack.report.skipped })}</span>
+          )}
         </p>
       );
     case 'nothing':
@@ -1086,12 +1230,24 @@ function StartOverSheet({
       <h2 className="flex items-center gap-2 text-base font-semibold">
         <RotateCcw size={16} /> {t('startOver')}
       </h2>
-      <p className="mt-1 text-sm text-muted">{t(count === 1 ? 'clearOne' : 'clearMany', { n: count })}</p>
+      <p className="mt-1 text-sm text-muted">
+        {t(count === 1 ? 'clearOne' : 'clearMany', { n: count })}
+      </p>
       <div className="mt-3 space-y-2">
-        <Button className="w-full" loading={busy === 'phone'} disabled={!!busy} onClick={() => run('phone')}>
+        <Button
+          className="w-full"
+          loading={busy === 'phone'}
+          disabled={!!busy}
+          onClick={() => run('phone')}
+        >
           {t('clearPhone')}
         </Button>
-        <Button className="w-full" loading={busy === 'both'} disabled={!!busy} onClick={() => run('both')}>
+        <Button
+          className="w-full"
+          loading={busy === 'both'}
+          disabled={!!busy}
+          onClick={() => run('both')}
+        >
           {t('clearBoth')}
         </Button>
         <Button variant="ghost" className="w-full" disabled={!!busy} onClick={onCancel}>
@@ -1158,7 +1314,8 @@ function ValueEditor({
   const [value, setValue] = useState(initial ?? '');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const inputCls = 'min-h-11 w-full rounded-lg border border-line bg-card px-3 text-base focus:border-accent-ink focus:outline-none';
+  const inputCls =
+    'min-h-11 w-full rounded-lg border border-line bg-card px-3 text-base focus:border-accent-ink focus:outline-none';
 
   let input: React.ReactNode;
   if (field.field_type === 'checkbox' && !field.multiple) {
@@ -1202,10 +1359,32 @@ function ValueEditor({
       </select>
     );
   } else if (field.field_type === 'textarea') {
-    input = <textarea className={cx(inputCls, 'py-2')} rows={3} value={value} onChange={(e) => setValue(e.target.value)} />;
+    input = (
+      <textarea
+        className={cx(inputCls, 'py-2')}
+        rows={3}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+      />
+    );
   } else {
-    const type = field.field_type === 'date' ? 'date' : field.field_type === 'email' ? 'email' : field.field_type === 'tel' ? 'tel' : 'text';
-    input = <input className={inputCls} type={type} value={value} onChange={(e) => setValue(e.target.value)} autoFocus />;
+    const type =
+      field.field_type === 'date'
+        ? 'date'
+        : field.field_type === 'email'
+          ? 'email'
+          : field.field_type === 'tel'
+            ? 'tel'
+            : 'text';
+    input = (
+      <input
+        className={inputCls}
+        type={type}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        autoFocus
+      />
+    );
   }
 
   return (
@@ -1213,7 +1392,8 @@ function ValueEditor({
       {field.choice_hint && (
         <div className="rounded-lg bg-warn-bg/60 px-3 py-2 text-sm">
           <p className="text-warn-ink">
-            {t('youSaid', { text: field.choice_hint.spoken })}. {t(`hint_${field.choice_hint.reason}`)}
+            {t('youSaid', { text: field.choice_hint.spoken })}.{' '}
+            {t(`hint_${field.choice_hint.reason}`)}
           </p>
           {field.choice_hint.top.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">

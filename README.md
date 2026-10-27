@@ -13,7 +13,7 @@ supabase           SQL migrations (schema, RLS, latest-wins upsert, purge cron)
 
 1. **Extension popup → Scan form.** The content script detects fields, including same-origin iframes and open shadow roots. `POST /api/sessions` stores them and returns a single-use QR code that expires after 10 minutes. The **Form Analyzer Agent** then runs in the background and adds clean labels, semantic types and validation rules.
 2. **Phone scans the QR code.** It opens `/s/<code>`, which pairs the phone and gives it a 30-minute session JWT.
-3. **Tap the mic to start and tap again to stop.** Each recording is one *utterance*, sent with a `seq` number, and several can be processed at once. The server transcribes it with Sarvam **Saaras** (`saaras:v3`, `codemix` mode: English words in English letters, Tamil in Tamil script, numbers as digits), runs the **Field Mapping Agent** (OpenAI Agents SDK, `gpt-5.4-mini`), and calls `upsert_field_value`. A recording longer than 28 s is sent in pieces as you speak: each piece is transcribed right away, and the whole recording is mapped **once, after Stop** (the phone marks the last piece; while the answers come it shows changing messages: please wait, thinking, planning, matching, filling, don't close this page, loading). A value is only overwritten by a newer `seq`, so newer speech wins even if it finishes processing first.
+3. **Tap the mic to start and tap again to stop.** Each recording is one *utterance*, sent with a `seq` number, and several can be processed at once. The server transcribes it with Sarvam **Saaras** (`saaras:v3`, `codemix` mode: English words in English letters, Tamil in Tamil script, numbers as digits), runs the **Field Mapping Agent** (OpenAI Agents SDK, `gpt-5.4-mini`), and calls `upsert_field_value`. A recording longer than 28 s is sent in pieces as you speak: each piece is transcribed right away, and the whole recording is mapped **once, after Stop** (the phone marks the last piece; while the answers come it shows changing messages: please wait, thinking, planning, matching, filling, don't close this page, loading). A value is only overwritten by a newer `seq`, so newer speech wins even if it finishes processing first. The first pass is spoken with the big mic; each field's own mic appears once 70% of the voice fields are filled, for corrections (filling field by field measured about 1.8× the cost and 5× the wait of one recording).
 4. **Values stream to the phone and the extension over Supabase Realtime.** Press **Fill form** once; after that, new values fill the page automatically and the changed field is highlighted. **Undo** restores the page's original values.
 
 ## Setup
@@ -78,7 +78,7 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 | `pnpm test` | Unit tests (vitest), no network:<br>• shared normalization and validation<br>• login lockout and IP rate limit<br>• JWTs<br>• agent tools and guardrails<br>• Field Mapping Agent on a scripted model<br>• detector and filler on jsdom, including React controlled inputs |
 | `pnpm --filter extension e2e` | Builds the extension, loads it unpacked in Chromium with Playwright, and fills the vanilla, React and Vue fixtures through the real content script. Checks the framework state, latest-wins re-fill and Undo. Run `npx playwright install chromium` once first. |
 | `pnpm --filter web check:db` | Runs against your Supabase project: latest-wins upsert (seq 3, 1, 2 finishing out of order), single-use pairing and RLS isolation. |
-| `pnpm eval:mapping` | Sends 54 fixtures to the real Field Mapping Agent and prints per-field accuracy per tag. The fixtures cover English, Tanglish and Tamil, a CAN registration form, corrections and spoken commands. `--only can,corrections` runs a subset; `--model gpt-4o` compares models (default: the app's model); `--validate` adds the validate_value tool. Reports are saved to `apps/web/eval-results/`. Uses OpenAI tokens. |
+| `pnpm eval:mapping` | Sends 54 fixtures to the real Field Mapping Agent and prints per-field accuracy per tag. The fixtures cover English, Tanglish and Tamil, a CAN registration form, corrections, and command-like speech that must fill nothing. `--only can,corrections` runs a subset; `--model gpt-4o` compares models (default: the app's model); `--validate` adds the validate_value tool. Reports are saved to `apps/web/eval-results/`. Uses OpenAI tokens. |
 
 ## Deploying
 
@@ -175,16 +175,13 @@ Upload fields are filled from the phone's camera or files, never by voice.
 
 Test pages: `test-fixtures/upload.html` (plain input with its own size check, hidden input + Upload button, drop zone) and `test-fixtures/convert.html` (the phone converter in a real browser).
 
-## Spoken corrections and commands
+## Spoken corrections
 
 The Field Mapping Agent also sees the **last 3 recordings** and the fields they set. That lets corrections that don't name a field work. All of these go through the same AI call, with no extra agent and no extra delay:
 - **Pointing back at the last answer:** "no, not Jahan, Jagan", "Jahan illa, Jagan" and "change it to 9876…" correct the field that was just said.
 - **Partial edits:** "the last digit is 5" and "pincode la 455 illa 445" change part of the current value.
 - **Spelled names:** "J A G A N", including Tamil letter names, becomes "Jagan".
-- **Commands:** "start over", "send it" and "what is left?" (also in Tanglish and Tamil). The phone never acts on these by itself:
-  - "start over" opens the Start over sheet;
-  - "send it" asks "Send the form to the computer now?";
-  - "what is left?" lists the required fields that are still empty.
+- **No spoken commands:** saying "start over", "send it" or "what is left?" fills nothing; the phone's buttons do these (⋯ → Start over, Send, the "needs you" chip).
 
 ## Phone screens in Tamil
 

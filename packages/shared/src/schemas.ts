@@ -162,15 +162,8 @@ export const MappedValue = z.object({
 });
 export type MappedValue = z.infer<typeof MappedValue>;
 
-/** Spoken commands: the phone always asks before acting on one. */
-export const VoiceCommand = z.enum(['start_over', 'send', 'whats_left']);
-export type VoiceCommand = z.infer<typeof VoiceCommand>;
-
 export const MappingResult = z.object({
   values: z.array(MappedValue),
-  command: VoiceCommand.nullable().describe(
-    'Only when the whole speech is a command: "start over"/"clear everything" → start_over, "send it" → send, "what is left?" → whats_left. null otherwise.',
-  ),
 });
 export type MappingResult = z.infer<typeof MappingResult>;
 
@@ -660,8 +653,6 @@ export type UtteranceResponse = {
   transcript: string | null;
   values: MappedValue[];
   unmapped_speech: string | null;
-  /** A spoken command ("start over", "send it", "what is left?"): the phone asks before acting. */
-  command?: VoiceCommand | null;
   error?: string;
 };
 

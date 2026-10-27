@@ -14,7 +14,6 @@ import type {
   SessionValue,
   UtteranceResponse,
   UtteranceRow,
-  VoiceCommand,
 } from '@vff/shared';
 
 export type LocalUtterance = {
@@ -93,8 +92,6 @@ export function useVoiceSession(code: string) {
   const [live, setLive] = useState(false);
 
   const [online, setOnline] = useState(true);
-  /** A spoken command ("start over", "send it", "what is left?") waiting for the page to ask about it. */
-  const [command, setCommand] = useState<{ seq: number; command: VoiceCommand } | null>(null);
 
   const tokenRef = useRef<Stored | null>(null);
   const seqRef = useRef(1);
@@ -341,7 +338,6 @@ export function useVoiceSession(code: string) {
           });
           // Values normally arrive over Realtime; re-read once so a missed event can't leave rows empty.
           if (body.status === 'done') void refresh();
-          if (body.command && !hidden(seq)) setCommand({ seq, command: body.command });
         } else {
           setUtt(seq, { status: 'error', error: body.error, blob });
         }
@@ -479,8 +475,6 @@ export function useVoiceSession(code: string) {
     }
   }, [online, phase, retry]);
 
-  const clearCommand = useCallback(() => setCommand(null), []);
-
   const valueByKey = useMemo(() => {
     const m = new Map<string, SessionValue>();
     for (const f of fields) {
@@ -509,8 +503,6 @@ export function useVoiceSession(code: string) {
     online,
     files,
     uploadFile,
-    command,
-    clearCommand,
   };
 }
 

@@ -35,7 +35,6 @@ describe('sanitizeMapping (output guardrail)', () => {
           { field_key: 'marital', value: 'Widowed', confidence: 0.9, source_phrase: null, number_parts: null },
           { field_key: 'phone', value: '9876543210', confidence: 2, source_phrase: null, number_parts: null },
         ],
-        command: null,
       },
       EVAL_FORM,
       null,
@@ -70,7 +69,6 @@ describe('sanitizeMapping (output guardrail)', () => {
             ],
           },
         ],
-        command: null,
       },
       EVAL_FORM,
       null,
@@ -85,7 +83,6 @@ describe('sanitizeMapping (output guardrail)', () => {
           { field_key: 'full_name', value: 'Ramesh', confidence: 0.9, source_phrase: null, number_parts: null },
           { field_key: 'city', value: 'Chennai', confidence: 0.9, source_phrase: null, number_parts: null },
         ],
-        command: null,
       },
       EVAL_FORM,
       'city',
@@ -95,13 +92,13 @@ describe('sanitizeMapping (output guardrail)', () => {
 
   it('lowers confidence when Tamil script leaks into an English field', () => {
     const r = sanitizeMapping(
-      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null, number_parts: null }], command: null },
+      { values: [{ field_key: 'city', value: 'சென்னை', confidence: 0.9, source_phrase: null, number_parts: null }] },
       EVAL_FORM,
       null,
     );
     expect(r.values[0].confidence).toBeLessThanOrEqual(0.5);
     const ta = sanitizeMapping(
-      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null, number_parts: null }], command: null },
+      { values: [{ field_key: 'name_ta', value: 'ரமேஷ்', confidence: 0.9, source_phrase: null, number_parts: null }] },
       EVAL_FORM,
       null,
     );
@@ -145,7 +142,6 @@ describe('Field Mapping Agent (scripted model)', () => {
         { field_key: id('full_name'), value: 'Ramesh Kumar', confidence: 0.95, source_phrase: null, number_parts: null },
         { field_key: id('gender'), value: 'Male', confidence: 0.9, source_phrase: 'aan', number_parts: null },
       ],
-      command: null,
     };
     const model = new ScriptedModel([
       [functionCall('validate_value', { field_key: id('gender'), value: 'aan' }, { callId: 'c1' })],
@@ -190,7 +186,6 @@ describe('Field Mapping Agent (scripted model)', () => {
         { field_key: 'f1', value: 'Ramesh Kumar', confidence: 0.95, source_phrase: null, number_parts: null },
         { field_key: 'f999', value: 'x', confidence: 0.9, source_phrase: null, number_parts: null },
       ],
-      command: null,
     };
     const model = new ScriptedModel([[assistantMessage(JSON.stringify(final))]]);
     const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'Ramesh Kumar', targetFieldKey: null }, { model });
@@ -208,7 +203,7 @@ describe('Field Mapping Agent (scripted model)', () => {
   });
 
   it('reports the tokens of every request in the run, for billing', async () => {
-    const final = { values: [], command: null };
+    const final = { values: [] };
     const model = new ScriptedModel([
       {
         output: [functionCall('validate_value', { field_key: 'gender', value: 'Male' }, { callId: 'c1' })],
@@ -260,7 +255,7 @@ describe('Field Mapping Agent (scripted model)', () => {
   });
 });
 
-describe('spoken corrections and commands', () => {
+describe('spoken corrections', () => {
   it('shows the mapper what was just said, so "no, Jagan" can find its field', () => {
     const prompt = buildMapperPrompt({
       fields: EVAL_FORM,
@@ -273,15 +268,11 @@ describe('spoken corrections and commands', () => {
     expect(buildMapperPrompt({ fields: EVAL_FORM, current: {}, transcript: 'x', targetFieldKey: null })).not.toContain('Recent speech');
   });
 
-  it('passes a command through only when the speech set no values, and never in single-field mode', () => {
-    const cmd = { values: [], command: 'start_over' as const };
-    expect(sanitizeMapping(cmd, EVAL_FORM, null).command).toBe('start_over');
-    expect(sanitizeMapping(cmd, EVAL_FORM, 'full_name').command).toBeNull();
-    const withValue = {
-      ...cmd,
-      values: [{ field_key: 'city', value: 'Salem', confidence: 0.9, source_phrase: null, number_parts: null }],
-    };
-    expect(sanitizeMapping(withValue, EVAL_FORM, null).command).toBeNull();
+  it('command-like speech fills nothing (spoken commands were removed)', async () => {
+    const model = new ScriptedModel([[assistantMessage(JSON.stringify({ values: [] }))]]);
+    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'start over, ellam azhichidunga', targetFieldKey: null }, { model });
+    expect(out).toEqual({ empty: false, values: [] });
+    expect(mapperInstructions(false)).not.toContain('start_over');
   });
 });
 
@@ -317,7 +308,7 @@ describe('model per AI step', () => {
     expect(old.providerData).toEqual({ prompt_cache_key: 'mapper:form1' });
   });
   it('the mapper has no validate_value tool unless asked for', async () => {
-    const final = { values: [], command: null };
+    const final = { values: [] };
     const model = new ScriptedModel([[assistantMessage(JSON.stringify(final))]]);
     await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'hello', targetFieldKey: null }, { model });
     expect(model.lastCall?.request.tools ?? []).toHaveLength(0);

@@ -181,9 +181,6 @@ export const POST = route(async (req) => {
       ),
     );
     await finish({ status: 'done' });
-    // A spoken command ("start over", "send it"): kept on the utterance; the phone asks before acting.
-    // Before migration 0006 the column doesn't exist; the response still carries it.
-    if (outcome.command) await db().from('utterances').update({ command: outcome.command }).eq('id', utteranceId);
 
     return NextResponse.json({
       utterance_id: utteranceId,
@@ -192,7 +189,6 @@ export const POST = route(async (req) => {
       transcript,
       values: outcome.values,
       unmapped_speech: null,
-      command: outcome.command,
     } satisfies UtteranceResponse);
   } catch (e) {
     const provider = transcript === null ? 'Sarvam speech-to-text' : 'OpenAI mapping';

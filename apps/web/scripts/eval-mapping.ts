@@ -66,10 +66,10 @@ for (const c of cases) {
       });
     }
   }
-  if (c.command !== undefined) {
+  // No expected values ("send it", "what is left?"): nothing may be filled at all.
+  if (!Object.keys(c.expect).length) {
     checks++;
-    const have = outcome.empty ? null : outcome.command;
-    if (have !== c.command) misses.push({ field: 'command', expected: String(c.command), got: String(have) });
+    if (got.size) misses.push({ field: '(any)', expected: 'nothing filled', got: JSON.stringify(Object.fromEntries(got)) });
   }
   const ms = Date.now() - t0;
   results.push({ n: c.n, speech: c.speech, tags: c.tags, checks, passed: checks - misses.length, misses, ms });

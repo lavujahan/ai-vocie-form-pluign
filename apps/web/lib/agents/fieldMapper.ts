@@ -27,7 +27,6 @@ Rules
 - Corrections that don't name the field point back to what was just said ("Recent speech"): "no, not Jahan, Jagan", "Jahan illa, Jagan", "sorry, Jagan", "change it to 9543…", "adhu thappu, …". Find the field from the recent speech (or from the current value that matches the wrong word) and return only that field with the corrected value.
 - Partial edits change part of the current value and return the whole new value: "the last digit is 5", "change 9543 to 9534", "add 0 at the end", "kadaisi number 5". Apply the edit to the current value exactly; never retype the rest from memory.
 - Spelled-out letters are joined into one word: "J A G A N", "J-A-G-A-N", "Jagan, J A G A N" → "Jagan". Tamil letter names count too: ஜே ஏ ஜி ஏ என் → "Jagan". Names get a capital first letter; codes (IFSC, PAN) stay upper case.
-- command: set it only when the whole speech is a command and holds no field values: "start over", "clear everything", "ellam azhi", "எல்லாம் அழி" → start_over; "send it", "submit", "anuppu", "அனுப்பு" → send; "what is left?", "innum enna baaki?", "இன்னும் என்ன?" → whats_left. Return values: [] with it. Otherwise command is null.
 - Names and proper nouns: transliterate, don't translate (ரமேஷ் குமார் → "Ramesh Kumar").
 - Places: use the standard English name (சென்னை → "Chennai", தமிழ்நாடு → "Tamil Nadu").
 - Numbers spoken as words (Tamil or English) become digits. "double nine" = 99, "triple zero" = 000.
@@ -93,7 +92,7 @@ export function buildMapperPrompt(input: MapInput): string {
     .map(([k, v]) => `- ${k} = ${JSON.stringify(v)}`);
   return [
     input.targetFieldKey
-      ? `Mode: single field. The speech is the value for "${input.targetFieldKey}" only. command is always null.`
+      ? `Mode: single field. The speech is the value for "${input.targetFieldKey}" only.`
       : 'Mode: full form. The speech may cover any number of fields.',
     `Fields:\n${fields.map(describeField).join('\n')}`,
     `Current values:\n${current.length ? current.join('\n') : '(none)'}`,
