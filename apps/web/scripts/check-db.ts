@@ -202,6 +202,8 @@ try {
     if (hinted) {
       await admin.rpc('upsert_field_value', { p_session: expired.id, p_field: hinted.id, p_value: 'x', p_confidence: 1, p_source_phrase: null, p_seq: 1, p_utterance: null });
     }
+    // A completed form is counted for good: its record must outlive the session (migration 0016).
+    const done = await admin.from('form_completions').insert({ session_id: old.id, user_id: a.id, form_name: 'check-db', fields: 3, filled: 3 });
     const purge = await admin.rpc('purge_expired');
     check('Retention: purge_expired runs (apply migration 0009)', !purge.error, purge.error?.message);
     const { data: hint } = await admin.from('form_fields').select('choice_hint').eq('session_id', expired.id).maybeSingle();
@@ -210,6 +212,9 @@ try {
     check('Retention: expired session loses its values', (vals?.length ?? 0) === 0);
     const { data: gone } = await admin.from('form_sessions').select('id').eq('id', old.id);
     check('Retention: sessions older than 30 days are deleted', (gone?.length ?? 1) === 0);
+    const { data: kept } = await admin.from('form_completions').select('session_id').eq('session_id', old.id);
+    check('Forms completed: kept after the session is deleted (apply migration 0016)', !done.error && kept?.length === 1, done.error?.message);
+    await admin.from('form_completions').delete().eq('session_id', old.id);
   } else {
     check('Retention: could create aged test sessions', false);
   }
@@ -254,7 +259,8 @@ try {
       });
       const s3 = await status();
       const { data: pays } = await admin.from('payments').select('kind, amount_inr').eq('user_id', b.id);
-      check('Plans: a top-up adds minutes to the current period', !topup.error && s3?.minutes_total === 70, topup.error?.message ?? JSON.stringify(s3));
+      // Relative to the period's minutes, so changing the Trial's minutes (migration 0015) doesn't break it.
+      check('Plans: a top-up adds minutes to the current period', !topup.error && s3?.minutes_total === (s2?.minutes_total ?? 0) + 50, topup.error?.message ?? JSON.stringify(s3));
       check('Plans: plan and top-up payments are recorded', pays?.length === 2, JSON.stringify(pays));
     }
   }

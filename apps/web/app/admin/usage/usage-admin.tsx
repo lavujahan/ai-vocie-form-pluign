@@ -185,7 +185,7 @@ export function UsageAdmin() {
         <a className="underline" href="https://www.sarvam.ai/api-pricing" target="_blank" rel="noreferrer">
           Sarvam speech-to-text
         </a>{' '}
-        (per minute of audio). Dates follow India time.
+        (per minute of audio). Forms = forms the computer filled with at most 2 fields left empty, counted once per form (— until migration 0016 is applied). Dates follow India time.
       </p>
     </main>
   );
@@ -227,6 +227,9 @@ function UsageHead({ first }: { first: string }) {
     <thead>
       <tr className="text-left text-xs text-muted">
         <th className="px-4 py-2 font-medium">{first}</th>
+        <th className="px-4 py-2 text-right font-medium" title="Forms the computer filled, with at most 2 fields left empty">
+          Forms
+        </th>
         <th className="px-4 py-2 text-right font-medium">Minutes</th>
         <th className="px-4 py-2 text-right font-medium">Input tokens</th>
         <th className="px-4 py-2 text-right font-medium">Input cost</th>
@@ -263,11 +266,12 @@ function EmptyRow({ data, loading, empty }: { data: UsageSummaryResponse | null;
   );
 }
 
-const COLUMNS = 9;
+const COLUMNS = 10;
 
 function UsageCells({ row }: { row: UsageCosts }) {
   return (
     <>
+      <td className="px-4 py-2.5 text-right tabular-nums">{row.forms_completed === null ? '—' : num.format(row.forms_completed)}</td>
       <td className="px-4 py-2.5 text-right tabular-nums" title={`${num.format(row.stt_calls)} recordings`}>
         {mins.format(row.minutes)}
       </td>

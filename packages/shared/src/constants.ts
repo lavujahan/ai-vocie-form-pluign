@@ -16,5 +16,5 @@ export const LOW_CONFIDENCE = 0.6;
 export const USER_COOKIE = 'vf_session';
 
 /** Admin → Users → Add minutes: the default top-up. */
-export const TOPUP_MINUTES = 100;
-export const TOPUP_PRICE_INR = 99;
+export const TOPUP_MINUTES = 50;
+export const TOPUP_PRICE_INR = 79;

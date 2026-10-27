@@ -277,6 +277,11 @@ export type AccountResponse = {
   plan: PlanStatus | null;
   /** Admins, and every user before plans are set up, are never limited. */
   unlimited: boolean;
+  /**
+   * Forms the computer filled (at most 2 fields left empty): in the current plan period (the last 30 days
+   * without a plan) and in total. null before migration 0016.
+   */
+  forms_completed: { period: number; total: number } | null;
 };
 
 export const PaymentMethod = z.enum(['upi', 'bank', 'cash', 'other']);
@@ -391,6 +396,8 @@ export type UsageCosts = {
   sarvam_inr: number;
   openai_inr: number;
   total_inr: number;
+  /** Forms completed in the same dates (computer filled, at most 2 fields empty); null before migration 0016. */
+  forms_completed: number | null;
 };
 
 /** One user's AI usage in the chosen dates. */

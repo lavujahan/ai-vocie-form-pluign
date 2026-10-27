@@ -103,12 +103,13 @@ export function priceCounts(r: RawCounts, settings: BillingSettings): UsageCosts
     sarvam_inr: round2(sarvamInr),
     openai_inr: round2(openaiInr),
     total_inr: round2(sarvamInr + openaiInr),
+    forms_completed: null,
   };
 }
 
 /** Totals of several priced rows (users or days). */
 export function sumCosts(rows: UsageCosts[]): UsageCosts {
-  const sum = (k: keyof UsageCosts) => rows.reduce((a, r) => a + r[k], 0);
+  const sum = (k: Exclude<keyof UsageCosts, 'forms_completed'>) => rows.reduce((a, r) => a + r[k], 0);
   return {
     stt_calls: sum('stt_calls'),
     minutes: sum('minutes'),
@@ -123,6 +124,7 @@ export function sumCosts(rows: UsageCosts[]): UsageCosts {
     sarvam_inr: round2(sum('sarvam_inr')),
     openai_inr: round2(sum('openai_inr')),
     total_inr: round2(sum('total_inr')),
+    forms_completed: rows.some((r) => r.forms_completed !== null) ? rows.reduce((a, r) => a + (r.forms_completed ?? 0), 0) : null,
   };
 }
 
@@ -130,6 +132,23 @@ export function sumCosts(rows: UsageCosts[]): UsageCosts {
 export function priceSummary(raw: RawUsageRow[], settings: BillingSettings): { rows: UsageSummaryRow[]; totals: UsageCosts } {
   const rows = raw.map((r) => ({ user_id: r.user_id, name: r.name, phone: r.phone, ...priceCounts(r, settings) }));
   return { rows, totals: sumCosts(rows) };
+}
+
+/** A completed form, as read from form_completions. */
+export type CompletionRow = { user_id: string | null; completed_at: string };
+
+/** The India-time day of a timestamp, YYYY-MM-DD. */
+export const istDay = (iso: string) => new Date(Date.parse(iso) + IST_MS).toISOString().slice(0, 10);
+
+/**
+ * Puts the number of completed forms on each user / day row (0 where none). `completions` null: the
+ * table doesn't exist yet (migration 0016), so the counts stay null ("—").
+ */
+export function withForms<T extends UsageCosts>(rows: T[], completions: CompletionRow[] | null, keyOf: (c: CompletionRow) => string | null, rowKey: (r: T) => string | null): T[] {
+  if (!completions) return rows;
+  const counts = new Map<string | null, number>();
+  for (const c of completions) counts.set(keyOf(c), (counts.get(keyOf(c)) ?? 0) + 1);
+  return rows.map((r) => ({ ...r, forms_completed: counts.get(rowKey(r)) ?? 0 }));
 }
 
 /** Day-by-day usage, priced, with totals. */

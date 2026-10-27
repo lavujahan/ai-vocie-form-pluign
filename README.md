@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql` and `0013_subscriptions.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql` and `0016_form_completions.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -110,6 +110,8 @@ The Form Analyzer reads a form **once**; every later scan of the same form, by *
 
 ## Usage and billing (migrations `0008`, `0010`, `0011`)
 
+**Forms completed** (migration `0016`): a form counts once when the computer filled it with at most 2 of its non-upload fields left empty (`lib/completions.ts`, recorded from the extension's full-fill report in `PATCH /api/sessions/[code]/desktop`). The rows are kept in `form_completions` after the session itself is deleted. The extension popup shows them under the voice-minutes meter ("Forms completed: 12 this plan · 48 total"), and Admin → Usage has a **Forms** column per user and per day.
+
 Every paid AI call adds a row to `usage_events`, charged to the user who owns the session:
 - **Sarvam:** one row per speech-to-text call, with `audio_ms`. Sarvam's reply doesn't include the audio length, so the phone sends how long it recorded (`duration_ms`, at most 30 s).
 - **OpenAI:** one row per agent run (`map`, `analyze` or `resolve`), with its requests, input/cached/output tokens and `cost_usd` at list price (`lib/usage/pricing.ts`). Runs that fail after reaching the model are counted too.
@@ -123,7 +125,7 @@ When OpenAI changes its prices or `AGENT_MODEL` changes to a new model, update `
 
 Users pay for a monthly plan with a number of **voice minutes** (the audio their phones send to Sarvam). Payments are made outside the app (UPI or bank transfer) and recorded by the admin; there is no payment gateway yet.
 
-- **Plans** (`/admin/plans`): price, voice minutes, days, on sale or not. Seeded: Trial (free, 7 days, 20 min), Basic (₹199, 30 days, 150 min), Pro (₹499, 500 min), Business (₹1,499, 2,000 min). A change applies from each user's next renewal: a period keeps the minutes it started with.
+- **Plans** (`/admin/plans`): price, voice minutes, days, on sale or not. Seeded (migration `0015`, priced for a 35% margin at about ₹1.03 of AI cost per voice minute): Trial (free, 7 days, 15 min), Starter (₹99, 30 days, 60 min), Basic (₹249, 150 min), Pro (₹649, 400 min), Business (₹1,949, 1,200 min). Extra minutes default to 50 for ₹79. A change applies from each user's next renewal: a period keeps the minutes it started with.
 - **Users → Plan** (card icon): renew or change the plan and record the payment (amount, UPI / bank / cash, reference), add extra minutes to the current period, and see past periods and payments. A renewal starts when the paid time ends, so paying early loses nothing; *Start now* replaces the current period. Unused minutes don't carry over. New users get the Trial while it is on sale; when `0013` is applied, every existing user gets a Trial from that moment.
 - **Billing** (`/admin/billing`): renewals due (ending within 7 days or ended in the last 30, with a WhatsApp reminder link), money received, AI cost (the Usage prices) and the margin per user for a date range, and every payment.
 - **Enforcement** (`lib/billing/plans.ts`): scanning a form (`POST /api/sessions`) and the first piece of each recording (`POST /api/utterances`) are refused with **402** (`plan_expired` / `quota_exceeded`) when the user's plan has ended or its minutes are used up. A recording that has started is never cut off, so a plan can go slightly over its minutes. Admins are never limited, and nobody is until `0013` is applied.

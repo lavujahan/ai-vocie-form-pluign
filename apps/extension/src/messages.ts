@@ -73,6 +73,8 @@ export type FieldsChangedMessage = { type: 'FIELDS_CHANGED'; schema: FormSchemaI
 /** Each tab has its own form session; `tab_id` is the tab the popup was opened on. */
 export type PopupRequest = (
   | { type: 'GET_STATE' }
+  /** Re-read the plan and voice minutes (the popup's minutes meter). */
+  | { type: 'GET_ACCOUNT' }
   | { type: 'LOGIN'; phone: string; pin: string }
   | { type: 'LOGOUT' }
   | { type: 'START_SESSION' }

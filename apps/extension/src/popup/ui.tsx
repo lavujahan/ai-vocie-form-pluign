@@ -59,8 +59,9 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
 export function FieldRow({ label, children, sub }: { label: ReactNode; children: ReactNode; sub?: ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3 border-b border-line py-2 text-sm last:border-b-0">
-      <span className="shrink-0 text-ink/80">{label}</span>
-      <span className="min-w-0 text-right">
+      {/* Long (often bilingual) labels wrap instead of pushing the row wider than the popup. */}
+      <span className="min-w-0 flex-1 break-words text-ink/80">{label}</span>
+      <span className="min-w-0 max-w-[55%] shrink-0 text-right">
         <span className="break-words font-medium">{children}</span>
         {sub && <span className="mt-0.5 block text-xs text-muted">{sub}</span>}
       </span>

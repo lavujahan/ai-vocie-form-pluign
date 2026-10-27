@@ -665,6 +665,10 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       if (tabId !== undefined && tabOf(tabId) && !channels.get(tabOf(tabId)!.session.session_id)?.live) await refreshSnapshot(tabId);
       return;
 
+    case 'GET_ACCOUNT':
+      await refreshAccount();
+      return;
+
     case 'LOGIN': {
       const r = await api<LoginResponse>('/api/auth/login', { body: { phone: req.phone, pin: req.pin } });
       account = null;

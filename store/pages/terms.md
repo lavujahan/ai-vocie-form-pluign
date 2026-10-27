@@ -21,15 +21,16 @@ These terms apply to Voice Form Filler ("the service"): the Chrome extension, th
 
 ## 2. Plans
 
-Every plan gives you a number of **voice minutes** for a number of days. A voice minute is one minute of speech recorded on the phone and sent for transcription. Scanning a form, filling it, photos and uploads don't use minutes.
+Every plan gives you a number of **voice minutes** for a number of days. A voice minute is one minute of recording on the phone (from tapping the microphone to tapping Stop), sent for transcription. Scanning a form, filling it, photos and uploads don't use minutes.
 
 | Plan | Price | Voice minutes | Lasts |
 | --- | --- | --- | --- |
-| Trial | Free | 20 | 7 days (once per person) |
-| Basic | ₹199 | 150 | 30 days |
-| Pro | ₹499 | 500 | 30 days |
-| Business | ₹1,499 | 2,000 | 30 days |
-| Extra minutes | ₹99 | 100 | Until the current plan ends |
+| Trial | Free | 15 | 7 days (once per person) |
+| Starter | ₹99 | 60 | 30 days |
+| Basic | ₹249 | 150 | 30 days |
+| Pro | ₹649 | 400 | 30 days |
+| Business | ₹1,949 | 1,200 | 30 days |
+| Extra minutes | ₹79 | 50 | Until the current plan ends |
 
 - The extension shows your plan, the minutes left and the end date.
 - When the minutes run out or the plan ends, you can't scan new forms or record speech until you renew. A recording that has already started is finished.

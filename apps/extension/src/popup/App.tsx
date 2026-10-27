@@ -59,6 +59,15 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [polling]);
 
+  // The minutes meter moves while the user speaks: re-read the plan every 30 s while the popup is open.
+  const signedIn = !!state?.auth;
+  useEffect(() => {
+    if (!signedIn) return;
+    const t = setInterval(() => send({ type: 'GET_ACCOUNT' }), 30_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn]);
+
   let body: React.ReactNode;
   if (!state) {
     body = (
@@ -166,7 +175,7 @@ function StartCard({ state, send }: { state: ExtState; send: Send }) {
         <Mic size={16} /> Voice2Fill
       </h1>
       <p className="mt-1.5 text-sm text-muted">Open the page with the form, then scan it to pair your phone.</p>
-      {state.account && <PlanNote account={state.account} />}
+      {state.account && <PlanMeter account={state.account} />}
       <Button
         className="mt-3 w-full"
         loading={busy}
@@ -201,8 +210,8 @@ function planBlocked(a: AccountResponse | null): string | null {
   return null;
 }
 
-/** The plan and voice minutes left, or why scanning is refused with a Renew link. */
-function PlanNote({ account }: { account: AccountResponse }) {
+/** The plan and its voice minutes, used of allowed with a bar, or why scanning is refused with a Renew link. */
+function PlanMeter({ account }: { account: AccountResponse }) {
   const blocked = planBlocked(account);
   if (blocked) {
     return (
@@ -219,20 +228,53 @@ function PlanNote({ account }: { account: AccountResponse }) {
     );
   }
   const p = account.plan;
-  if (account.unlimited || !p) return null;
-  const left = Math.floor(p.minutes_left);
-  const low = left < p.minutes_total * 0.1 || (!!p.paid_until && Date.parse(p.paid_until) - Date.now() < 3 * DAY_MS);
+  if (account.unlimited || !p) return <FormsDone account={account} />;
+  const used = Math.min(p.minutes_total, Math.max(0, p.minutes_used));
+  const pct = p.minutes_total > 0 ? Math.round((used / p.minutes_total) * 100) : 100;
+  // Most minutes used, or the paid time about to end: amber, with Renew.
+  const low = pct >= 80 || (!!p.paid_until && Date.parse(p.paid_until) - Date.now() < 3 * DAY_MS);
   return (
-    <p className={`mt-2 text-xs ${low ? 'text-warn-ink' : 'text-muted'}`}>
-      {p.plan_name} · {left} voice min left · till {shortDate(p.paid_until)}
-      {low && ACCOUNT_URL && (
-        <>
-          {' · '}
-          <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-            Renew
-          </a>
-        </>
-      )}
+    <div className="mt-2 text-xs">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className={low ? 'text-warn-ink' : 'text-muted'}>
+          {p.plan_name} plan · till {shortDate(p.paid_until)}
+          {low && ACCOUNT_URL && (
+            <>
+              {' · '}
+              <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                Renew
+              </a>
+            </>
+          )}
+        </span>
+        <span className={`shrink-0 tabular-nums ${low ? 'font-medium text-warn-ink' : 'text-muted'}`}>
+          {Math.floor(used)} / {p.minutes_total} min · {pct}%
+        </span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="Voice minutes used"
+        aria-valuemin={0}
+        aria-valuemax={p.minutes_total}
+        aria-valuenow={Math.floor(used)}
+        className="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"
+      >
+        <div className={`h-full rounded-full ${low ? 'bg-warn-ink' : 'bg-accent-ink'}`} style={{ width: `${pct}%` }} />
+      </div>
+      <FormsDone account={account} />
+    </div>
+  );
+}
+
+/** Forms the computer filled (at most 2 fields left empty): this plan period (30 days without a plan) and in total. */
+function FormsDone({ account }: { account: AccountResponse }) {
+  const f = account.forms_completed;
+  if (!f) return null;
+  const period = account.plan && !account.unlimited ? 'this plan' : 'in 30 days';
+  return (
+    <p className="mt-1 text-xs text-muted">
+      Forms completed: <span className="font-medium text-ink tabular-nums">{f.period}</span> {period} ·{' '}
+      <span className="tabular-nums">{f.total}</span> total
     </p>
   );
 }
@@ -282,6 +324,7 @@ function QrCard({ state, send }: { state: ExtState; send: Send }) {
         </h1>
         <Pill tone="accent">{s.field_count} fields</Pill>
       </div>
+      {state.account && !planBlocked(state.account) && <PlanMeter account={state.account} />}
       {s.site_access === false && /^https?:/.test(s.page_site) && (
         <p className="mt-2 rounded-lg bg-warn-bg px-3 py-1.5 text-xs text-warn-ink">
           Allow access to this site when you scan, so the next pages of the form fill too. This page works now.
@@ -307,7 +350,7 @@ function QrCard({ state, send }: { state: ExtState; send: Send }) {
             </Button>
             {/* e.g. the plan ended meanwhile */}
             {planBlocked(state.account) ? (
-              <PlanNote account={state.account!} />
+              <PlanMeter account={state.account!} />
             ) : (
               error && <p className="mt-2 text-xs text-danger-ink">{error}</p>
             )}
@@ -366,6 +409,7 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
         </div>
       </div>
       <p className="mt-0.5 truncate text-xs text-muted">{snap.session.form_name}</p>
+      {state.account && <PlanMeter account={state.account} />}
 
       {waiting && (
         <div className="mt-1 border-b border-line pb-3">
@@ -385,7 +429,7 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
         </div>
       )}
 
-      <div className="mt-2 max-h-72 overflow-y-auto">
+      <div className="mt-2 max-h-72 overflow-x-hidden overflow-y-auto">
         {snap.fields.map((f) => {
           if (f.field_type === 'file') {
             return <FileRow key={f.id} field={f} file={fileOf.get(f.id)} needsClick={state.uploadClicks.includes(f.field_key)} />;

@@ -101,3 +101,32 @@ describe('date range and day by day', () => {
     expect(d.day_totals).toMatchObject({ minutes: 3, input_tokens: 50_000, output_tokens: 5_000, input_usd: 0.125, output_usd: 0.05, openai_usd: 0.175 });
   });
 });
+
+describe('forms completed', () => {
+  it('counts a form the computer filled with at most 2 fields left empty', async () => {
+    const { isCompleted } = await import('@/lib/completions');
+    expect(isCompleted(15, 15)).toBe(true);
+    expect(isCompleted(13, 15)).toBe(true); // 2 left empty
+    expect(isCompleted(12, 15)).toBe(false);
+    expect(isCompleted(1, 2)).toBe(true);
+    expect(isCompleted(0, 2)).toBe(false); // nothing filled is never a completed form
+  });
+
+  it('puts the counts on user and India-time day rows; null before the table exists', async () => {
+    const { istDay, withForms } = await import('@/lib/usage/summary');
+    const zero = priceCounts({ stt_calls: 0, audio_ms: 0, llm_calls: 0, input_tokens: 0, cached_input_tokens: 0, output_tokens: 0 }, {
+      usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 0.75, cached_usd_per_m: 0.075, output_usd_per_m: 4.5,
+    });
+    const done = [
+      { user_id: 'u1', completed_at: '2026-10-27T20:00:00Z' }, // 28 Oct in India
+      { user_id: 'u1', completed_at: '2026-10-27T10:00:00Z' },
+      { user_id: 'u2', completed_at: '2026-10-27T10:00:00Z' },
+    ];
+    expect(istDay('2026-10-27T20:00:00Z')).toBe('2026-10-28');
+    const users = withForms([{ ...zero, user_id: 'u1' }, { ...zero, user_id: 'u3' }], done, (c) => c.user_id, (r) => r.user_id);
+    expect(users.map((r) => r.forms_completed)).toEqual([2, 0]);
+    const days = withForms([{ ...zero, day: '2026-10-27' }, { ...zero, day: '2026-10-28' }], done, (c) => istDay(c.completed_at), (d) => d.day);
+    expect(days.map((d) => d.forms_completed)).toEqual([2, 1]);
+    expect(withForms([{ ...zero, user_id: 'u1' }], null, (c) => c.user_id, (r) => r.user_id)[0].forms_completed).toBeNull();
+  });
+});
