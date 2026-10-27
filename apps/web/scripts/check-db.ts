@@ -127,8 +127,8 @@ try {
   check('Connect phone again: answers are kept', kept?.value === 'from #11', JSON.stringify(kept));
 
   // ---- Token prices (admin panel → Usage) ----
-  const prices = await admin.from('billing_settings').select('input_usd_per_m, output_usd_per_m').eq('id', true).maybeSingle();
-  check('Billing: input / output token prices exist (apply migration 0010)', !prices.error && prices.data != null, prices.error?.message);
+  const prices = await admin.from('billing_settings').select('input_usd_per_m, cached_usd_per_m, output_usd_per_m').eq('id', true).maybeSingle();
+  check('Billing: input / cached / output token prices exist (apply migrations 0010 and 0014)', !prices.error && prices.data != null, prices.error?.message);
   const daily = await admin.rpc('usage_daily', { p_from: new Date(Date.now() - 86_400_000).toISOString(), p_to: new Date().toISOString(), p_user: null });
   check('Billing: usage by day runs (apply migration 0011)', !daily.error, daily.error?.message);
 

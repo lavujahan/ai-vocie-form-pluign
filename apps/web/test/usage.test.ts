@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Usage } from '@openai/agents';
 import { cachedTokens, openaiEvent, sttEvent } from '@/lib/usage/events';
 import { openaiCostUsd } from '@/lib/usage/pricing';
-import { currentMonth, isDate, monthBounds, priceDays, priceSummary, rangeBounds, rangeDays, todayIst, type RawUsageRow } from '@/lib/usage/summary';
+import { currentMonth, isDate, monthBounds, priceCounts, priceDays, priceSummary, rangeBounds, rangeDays, todayIst, type RawUsageRow } from '@/lib/usage/summary';
 
 describe('openaiCostUsd', () => {
   it('prices gpt-4o input, cached input and output separately', () => {
@@ -48,20 +48,28 @@ describe('monthly summary', () => {
     expect(currentMonth(new Date('2026-10-31T20:00:00Z'))).toBe('2026-11');
   });
 
-  it("prices tokens at the admin's $ per 1M (input and output), Sarvam by minutes, with totals", () => {
+  it("prices tokens at the admin's $ per 1M (input, cached input and output), Sarvam by minutes, with totals", () => {
     const raw: RawUsageRow[] = [
       { user_id: 'a', name: 'Anu', phone: '9000000001', stt_calls: '10', audio_ms: '600000', llm_calls: '10', input_tokens: '50000', cached_input_tokens: '10000', output_tokens: '5000', openai_usd: '0.5' },
       { user_id: 'b', name: 'Bala', phone: '9000000002', stt_calls: 2, audio_ms: 30_000, llm_calls: 3, input_tokens: 1000, cached_input_tokens: 0, output_tokens: 100, openai_usd: 0.01 },
     ];
-    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, output_usd_per_m: 10 };
+    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, cached_usd_per_m: 1.25, output_usd_per_m: 10 };
     const s = priceSummary(raw, settings);
-    // Anu: 50k input × $2.50/1M = $0.125, 5k output × $10/1M = $0.05 → $0.175 → ₹15.40 (the stored list-price cost is not used).
-    expect(s.rows[0]).toMatchObject({ minutes: 10, tokens: 55_000, input_usd: 0.125, output_usd: 0.05, openai_usd: 0.175, sarvam_inr: 4.9, openai_inr: 15.4, total_inr: 20.3 });
+    // Anu: 40k uncached × $2.50/1M + 10k cached × $1.25/1M = $0.1125, 5k output × $10/1M = $0.05 → $0.1625 → ₹14.30
+    // (the stored list-price cost is not used).
+    expect(s.rows[0]).toMatchObject({ minutes: 10, tokens: 55_000, input_usd: 0.1125, output_usd: 0.05, openai_usd: 0.1625, sarvam_inr: 4.9, openai_inr: 14.3, total_inr: 19.2 });
     expect(s.rows[1]).toMatchObject({ input_usd: 0.0025, output_usd: 0.001, openai_usd: 0.0035, openai_inr: 0.31 });
-    expect(s.totals).toMatchObject({ tokens: 56_100, input_usd: 0.1275, output_usd: 0.051, openai_usd: 0.1785, openai_inr: 15.71 });
-    // A new price applies straight away: input $1, output $4 per 1M.
-    const cheaper = priceSummary(raw, { ...settings, input_usd_per_m: 1, output_usd_per_m: 4 });
-    expect(cheaper.rows[0]).toMatchObject({ input_usd: 0.05, output_usd: 0.02, openai_usd: 0.07, openai_inr: 6.16 });
+    expect(s.totals).toMatchObject({ tokens: 56_100, input_usd: 0.115, output_usd: 0.051, openai_usd: 0.166, openai_inr: 14.61 });
+    // A new price applies straight away: input $1, cached $0.10, output $4 per 1M.
+    const cheaper = priceSummary(raw, { ...settings, input_usd_per_m: 1, cached_usd_per_m: 0.1, output_usd_per_m: 4 });
+    expect(cheaper.rows[0]).toMatchObject({ input_usd: 0.041, output_usd: 0.02, openai_usd: 0.061, openai_inr: 5.37 });
+  });
+
+  it('never counts more cached tokens than input tokens', () => {
+    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, cached_usd_per_m: 1.25, output_usd_per_m: 10 };
+    const row = priceCounts({ stt_calls: 0, audio_ms: 0, llm_calls: 1, input_tokens: 1000, cached_input_tokens: 5000, output_tokens: 0 }, settings);
+    // All 1,000 input tokens at the cached price.
+    expect(row.input_usd).toBe(0.00125);
   });
 });
 
@@ -80,7 +88,7 @@ describe('date range and day by day', () => {
     expect(isDate('2026-10')).toBe(false);
   });
   it('prices each day with the same prices as the user table, with totals', () => {
-    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, output_usd_per_m: 10 };
+    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, cached_usd_per_m: 1.25, output_usd_per_m: 10 };
     const d = priceDays(
       [
         { day: '2026-10-01', stt_calls: 3, audio_ms: 120_000, llm_calls: 3, input_tokens: 20_000, cached_input_tokens: 0, output_tokens: 2_000 },

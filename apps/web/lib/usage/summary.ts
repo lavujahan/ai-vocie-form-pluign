@@ -75,14 +75,16 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 /**
- * Prices usage with the admin's prices. OpenAI: input tokens × input $ per 1M + output tokens × output
- * $ per 1M (cached input tokens count as input), also in ₹ at the admin's rate. Sarvam: minutes × ₹/min.
+ * Prices usage with the admin's prices. OpenAI: uncached input tokens × input $ per 1M + cached input
+ * tokens (part of the input tokens) × cached $ per 1M + output tokens × output $ per 1M, also in ₹ at the
+ * admin's rate. Sarvam: minutes × ₹/min.
  */
 export function priceCounts(r: RawCounts, settings: BillingSettings): UsageCosts {
   const minutes = Number(r.audio_ms) / 60_000;
   const input = Number(r.input_tokens);
+  const cached = Math.min(Number(r.cached_input_tokens), input);
   const output = Number(r.output_tokens);
-  const inputUsd = (input / 1e6) * settings.input_usd_per_m;
+  const inputUsd = ((input - cached) / 1e6) * settings.input_usd_per_m + (cached / 1e6) * settings.cached_usd_per_m;
   const outputUsd = (output / 1e6) * settings.output_usd_per_m;
   const openaiUsd = inputUsd + outputUsd;
   const sarvamInr = minutes * settings.sarvam_inr_per_min;

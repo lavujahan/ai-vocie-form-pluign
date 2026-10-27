@@ -366,6 +366,8 @@ export const BillingSettings = z.object({
   sarvam_inr_per_min: z.number().positive().max(100),
   /** OpenAI price set by the admin, USD per 1M input tokens. */
   input_usd_per_m: z.number().min(0).max(1000),
+  /** OpenAI price set by the admin, USD per 1M cached input tokens. */
+  cached_usd_per_m: z.number().min(0).max(1000),
   /** OpenAI price set by the admin, USD per 1M output tokens. */
   output_usd_per_m: z.number().min(0).max(1000),
 });
@@ -380,7 +382,7 @@ export type UsageCosts = {
   cached_input_tokens: number;
   output_tokens: number;
   tokens: number;
-  /** Input tokens × the admin's input price. */
+  /** Uncached input tokens × the admin's input price + cached input tokens × the cached price. */
   input_usd: number;
   /** Output tokens × the admin's output price. */
   output_usd: number;

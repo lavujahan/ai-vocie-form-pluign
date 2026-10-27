@@ -101,6 +101,8 @@ export function UsageAdmin() {
 
       {error && <p className="mb-3 rounded-lg bg-danger-bg px-4 py-2 text-sm text-danger-ink">{error}</p>}
 
+      <SummaryCards totals={data?.totals ?? null} />
+
       <h2 className="mb-2 text-sm font-semibold">By user</h2>
       <Card className="p-0">
         <div className="overflow-x-auto">
@@ -174,8 +176,8 @@ export function UsageAdmin() {
       </Card>
 
       <p className="mt-3 text-xs text-muted">
-        OpenAI cost = input tokens × your input price + output tokens × your output price (per 1M tokens, in $; cached input
-        tokens count as input), shown in ₹ at your rate. A new price applies to all dates. Check the{' '}
+        OpenAI cost = uncached input tokens × your input price + cached input tokens × your cached price + output tokens ×
+        your output price (per 1M tokens, in $), shown in ₹ at your rate. A new price applies to all dates. Check the{' '}
         <a className="underline" href="https://developers.openai.com/api/docs/pricing" target="_blank" rel="noreferrer">
           OpenAI prices
         </a>{' '}
@@ -186,6 +188,37 @@ export function UsageAdmin() {
         (per minute of audio). Dates follow India time.
       </p>
     </main>
+  );
+}
+
+/** All users' cost in the chosen dates: the total, and its OpenAI and Sarvam parts. */
+function SummaryCards({ totals }: { totals: UsageCosts | null }) {
+  const show = (f: (t: UsageCosts) => string) => (totals ? f(totals) : '…');
+  const cards = [
+    { label: 'Total cost', value: show((t) => inr.format(t.total_inr)), note: 'OpenAI + Sarvam' },
+    {
+      label: 'OpenAI',
+      value: show((t) => inr.format(t.openai_inr)),
+      note: show(
+        (t) => `${usd.format(t.openai_usd)} · ${num.format(t.tokens)} tokens (${num.format(t.cached_input_tokens)} cached) · ${num.format(t.llm_calls)} runs`,
+      ),
+    },
+    {
+      label: 'Sarvam',
+      value: show((t) => inr.format(t.sarvam_inr)),
+      note: show((t) => `${mins.format(t.minutes)} min · ${num.format(t.stt_calls)} recordings`),
+    },
+  ];
+  return (
+    <div className="mb-6 grid gap-3 sm:grid-cols-3">
+      {cards.map((c, i) => (
+        <Card key={c.label}>
+          <div className="text-xs font-medium text-muted">{c.label}</div>
+          <div className={`mt-1 tabular-nums ${i === 0 ? 'text-2xl font-semibold' : 'text-xl font-medium'}`}>{c.value}</div>
+          <div className="mt-1 text-xs tabular-nums text-muted">{c.note}</div>
+        </Card>
+      ))}
+    </div>
   );
 }
 
@@ -259,6 +292,7 @@ type Rate = { key: keyof BillingSettings; label: string; min: number; max: numbe
 
 const RATES: Rate[] = [
   { key: 'input_usd_per_m', label: 'Input tokens · $ per 1M', min: 0, max: 1000 },
+  { key: 'cached_usd_per_m', label: 'Cached input · $ per 1M', min: 0, max: 1000 },
   { key: 'output_usd_per_m', label: 'Output tokens · $ per 1M', min: 0, max: 1000 },
   { key: 'usd_inr_rate', label: '1 USD in ₹', min: 0.01, max: 1000 },
   { key: 'sarvam_inr_per_min', label: 'Sarvam ₹ per minute', min: 0.01, max: 100 },
@@ -266,7 +300,7 @@ const RATES: Rate[] = [
 
 const asText = (s: BillingSettings) => Object.fromEntries(RATES.map((r) => [r.key, String(s[r.key])])) as Record<keyof BillingSettings, string>;
 
-/** The admin's prices: OpenAI input / output tokens in $ per 1M, the $→₹ rate, Sarvam ₹ per minute. */
+/** The admin's prices: OpenAI input / cached input / output tokens in $ per 1M, the $→₹ rate, Sarvam ₹ per minute. */
 function RatesCard({ settings, onSaved }: { settings: BillingSettings; onSaved: () => void }) {
   const [text, setText] = useState(() => asText(settings));
   const [busy, setBusy] = useState(false);
@@ -295,7 +329,7 @@ function RatesCard({ settings, onSaved }: { settings: BillingSettings; onSaved: 
 
   return (
     <Card>
-      <form onSubmit={save} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_auto] lg:items-end">
+      <form onSubmit={save} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[repeat(5,minmax(0,1fr))_auto] lg:items-end">
         {RATES.map((r) => (
           <label key={r.key} className="block">
             <span className="text-xs font-medium text-muted">{r.label}</span>
@@ -314,7 +348,7 @@ function RatesCard({ settings, onSaved }: { settings: BillingSettings; onSaved: 
         <Button type="submit" variant="primary" loading={busy} disabled={!valid || !changed}>
           Save prices
         </Button>
-        {msg && <p className={`text-xs sm:col-span-2 lg:col-span-5 ${msg.ok ? 'text-live-ink' : 'text-danger-ink'}`}>{msg.text}</p>}
+        {msg && <p className={`text-xs sm:col-span-2 lg:col-span-6 ${msg.ok ? 'text-live-ink' : 'text-danger-ink'}`}>{msg.text}</p>}
       </form>
     </Card>
   );
