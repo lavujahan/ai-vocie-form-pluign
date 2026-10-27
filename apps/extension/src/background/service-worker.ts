@@ -36,6 +36,7 @@ import {
   type StateMessage,
   type UndoResult,
 } from '../messages';
+import contentScript from '../content/index.ts?script';
 import { api, ApiError } from './api';
 import {
   assertRoom,
@@ -218,14 +219,39 @@ async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
 
 // ---------- content script ----------
 
+/**
+ * The form detector runs on no website by default. When the user scans a form and allows the site (the
+ * popup asks Chrome for it), it is registered for that site only, so the form's later pages (next step,
+ * reload) load it too. Without that permission it is injected into the scanned tab once (activeTab).
+ */
+const siteScriptId = (origin: string) => `vff-site:${origin}`;
+
+async function ensureSiteScript(origin: string): Promise<boolean> {
+  if (!/^https?:/.test(origin)) return false;
+  const allowed = await chrome.permissions.contains({ origins: [`${origin}/*`] }).catch(() => false);
+  if (!allowed) return false;
+  const id = siteScriptId(origin);
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [id] }).catch(() => []);
+  if (!existing.length) {
+    await chrome.scripting.registerContentScripts([
+      { id, matches: [`${origin}/*`], js: [contentScript], runAt: 'document_idle', persistAcrossSessions: true },
+    ]);
+  }
+  return true;
+}
+
+// Access to a site removed in Chrome's settings: stop loading the detector there.
+chrome.permissions.onRemoved.addListener(({ origins }) => {
+  const ids = (origins ?? []).map((o) => siteScriptId(o.replace(/\/\*$/, '')));
+  if (ids.length) void chrome.scripting.unregisterContentScripts({ ids }).catch(() => null);
+});
+
 async function sendToTab<T>(tabId: number, msg: ContentRequest): Promise<T> {
   try {
     return (await chrome.tabs.sendMessage(tabId, msg)) as T;
   } catch {
-    // Tab was open before the extension loaded: inject the content script, then retry.
-    const file = chrome.runtime.getManifest().content_scripts?.[0]?.js?.[0];
-    if (!file) throw new Error('Content script missing from manifest');
-    await chrome.scripting.executeScript({ target: { tabId }, files: [file] });
+    // No detector in the tab yet (first scan, or the page was open before access was allowed): inject it.
+    await chrome.scripting.executeScript({ target: { tabId }, files: [contentScript] });
     await new Promise((r) => setTimeout(r, 150));
     return (await chrome.tabs.sendMessage(tabId, msg)) as T;
   }
@@ -657,6 +683,7 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       const tab = tabId === undefined ? null : await chrome.tabs.get(tabId).catch(() => null);
       if (!tab?.id || !/^(https?|file):/.test(tab.url ?? '')) throw new Error('Open a web page with a form first');
       assertRoom(state.tabs, tab.id);
+      const siteAccess = await ensureSiteScript(siteOf(tab.url ?? '')).catch(() => false);
       let scan: ScanResult;
       try {
         scan = await sendToTab<ScanResult>(tab.id, { type: 'SCAN' });
@@ -673,6 +700,7 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
         field_count: scan.schema.fields.length,
         page_site: siteOf(scan.schema.page_url),
         snapshot: null,
+        site_access: siteAccess,
       };
       await save({ tabs: startTab(state.tabs, tab.id, session) });
       await ensureRealtime();

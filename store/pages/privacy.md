@@ -39,7 +39,7 @@ This policy explains what data the service handles, why, who it is shared with, 
 | **Usage records**: time of each request, minutes of audio, number of AI tokens, cost | Each time speech is transcribed or the AI reads a form | To count the voice minutes in your plan and keep track of costs. These records contain no audio, text or answers. |
 | **Plan and payment records**: your plan, its dates and minutes, and each payment's amount, date, method and reference (for example a UPI transaction id) | When you get or renew a plan, or buy extra minutes | To know which plan you paid for, and for our accounts. We never receive or store card numbers, UPI PINs or bank passwords. |
 
-We don't collect your browsing history. The extension reads a page only when you click "Scan form on this page" on it, and only for as long as that form session is open.
+We don't collect your browsing history. The extension runs on no website by default. When you click "Scan form on this page", Chrome asks you to allow that one site; the extension then reads that site's form pages only while a form session is open, so a form's next step also fills. You can remove that access in Chrome at any time.
 
 ## 3. Who we share it with
 

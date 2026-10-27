@@ -93,6 +93,8 @@ export type ActiveSession = CreateSessionResponse & {
   snapshot: SessionSnapshot | null;
   /** The QR code was shown again ("Connect phone again") for a form that already had a phone. */
   reconnect?: boolean;
+  /** The user allowed this site: the form's later pages (next step, reload) load the detector too. */
+  site_access?: boolean;
 };
 
 /** The popup's view: the session of its own tab. */

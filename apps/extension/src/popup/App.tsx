@@ -10,12 +10,20 @@ import { Button, Card, FieldRow, Input, LinkButton, Pill } from './ui';
 function useExtState() {
   const [state, setState] = useState<ExtState | null>(null);
   const tabId = useRef<number | undefined>(undefined);
+  /** The tab's site, known before a tap: Chrome only shows its permission prompt straight from a click. */
+  const site = useRef<string | null>(null);
   useEffect(() => {
     let port: chrome.runtime.Port | null = null;
     let closed = false;
     chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
       if (closed) return;
       tabId.current = tab?.id;
+      try {
+        const u = new URL(tab?.url ?? '');
+        site.current = /^https?:$/.test(u.protocol) ? u.origin : null;
+      } catch {
+        site.current = null;
+      }
       port = chrome.runtime.connect({ name: `popup:${tab?.id ?? ''}` });
       port.onMessage.addListener((m: StateMessage) => m.type === 'STATE' && setState(m.state));
     });
@@ -25,8 +33,14 @@ function useExtState() {
     };
   }, []);
 
-  /** Sends a request; resolves to an error message or null. */
+  /**
+   * Sends a request; resolves to an error message or null. Scanning first asks Chrome for this one site
+   * (once; already-allowed sites don't ask), so the form's next pages fill too. Saying No still scans this page.
+   */
   const send = async (req: PopupRequest): Promise<string | null> => {
+    if (req.type === 'START_SESSION' && site.current) {
+      await chrome.permissions.request({ origins: [`${site.current}/*`] }).catch(() => false);
+    }
     const res = (await chrome.runtime.sendMessage({ ...req, tab_id: tabId.current })) as PopupResponse;
     setState(res.state);
     return res.ok ? null : res.error;
@@ -268,6 +282,11 @@ function QrCard({ state, send }: { state: ExtState; send: Send }) {
         </h1>
         <Pill tone="accent">{s.field_count} fields</Pill>
       </div>
+      {s.site_access === false && /^https?:/.test(s.page_site) && (
+        <p className="mt-2 rounded-lg bg-warn-bg px-3 py-1.5 text-xs text-warn-ink">
+          Allow access to this site when you scan, so the next pages of the form fill too. This page works now.
+        </p>
+      )}
       <QrBlock
         url={s.qr_url}
         expiresAt={s.expires_at}

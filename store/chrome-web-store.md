@@ -20,7 +20,7 @@ Status key: ☐ to do · ◐ in progress · ☑ done. Steps marked **blocker** w
 | # | Decision | Options | Affects |
 | --- | --- | --- | --- |
 | D1 | Store title | ☑ **"Voice Form Filler: Fill web forms by speaking on your phone"** | Step 1.4, all images |
-| D2 | Content script | ☐ Open: (a) inject only when Scan is clicked, which has less risk of rejection but needs testing; (b) keep it on all sites, but drop `file:///*` | Step 1.3 (`file:///*` already removed) |
+| D2 | Content script | ☑ Done: no content script on any site. Access is asked per site when the user taps Scan form (`optional_host_permissions`), and the detector is registered for that site only | Step 1.3 |
 | D3 | Public pages | ☑ Homepage, privacy and support pages go on your other existing site. ☐ Still needed: that site's address and the support email/phone, to fill the `{{…}}` placeholders. | Steps 1.2, 2.x, 4.2 |
 | D4 | Regions | ☐ Open: all regions, or India only | Step 4.2 |
 
@@ -221,12 +221,10 @@ Fill web forms on the current page from answers the user speaks or photographs o
 | --- | --- |
 | `storage` | Keeps the user signed in and remembers the active form session for each tab. |
 | `activeTab` | Reads the form fields on the tab where the user clicked "Scan form on this page". |
-| `scripting` | Injects the form detector and filler into the tab the user chose to fill. |
+| `scripting` | Injects the form detector and filler into the tab the user chose to fill, and registers it for a site the user allowed, so the form's next pages fill too. |
 | Host permission: API server | Sends the detected form fields and receives the values the user spoke on their phone. |
 | Host permission: Supabase | Receives new values in real time while the user speaks, so the form updates without reloading. |
-| Content script on all `http`/`https` sites | The user can fill a form on any website. The script does nothing until the user starts a session from the popup. It also watches for fields that appear on later steps of the same form. |
-
-If you switch to injecting on demand (see **Minimum permissions** below), delete the content script row.
+| Optional host permissions (`http://*/*`, `https://*/*`) | Not granted at install. When the user taps "Scan form on this page", Chrome asks for that one site. Once allowed, the form detector loads on that site's pages (a form's next step or a reload); it never runs on other sites. The user can remove the access in Chrome at any time. |
 
 ## Data usage disclosures (tick these)
 
@@ -261,10 +259,9 @@ The User Data FAQ requires a **clear notice inside the extension, and a user act
 ## Minimum permissions (reviewers check this)
 
 The privacy page says that asking for more permissions than you need can get the extension rejected.
-- **Currently:** the manifest's `content_scripts` runs on every `http`, `https` and `file` page, even when no session is active.
-- **Fix:** inject the scripts with `chrome.scripting.executeScript` when the user clicks Scan. `activeTab` and `scripting` already allow that.
-- **What could break:** keep the watcher (`watch.ts`) and the tab-moved checks working within an active session. A wizard's next page on the same site would need injecting again from `chrome.tabs.onUpdated`, which needs a host permission for that site. Test this before you change it.
-- **`file:///*` is already removed** (it was only needed for local files). If you keep `content_scripts`, explain in the justification why the extension must run on every site.
+- **Done:** the manifest has no `content_scripts`. Nothing runs on any website until the user taps Scan form.
+- **How:** on Scan, the popup asks Chrome for that one site (`chrome.permissions.request`). Once allowed, the worker registers the detector for that site only (`chrome.scripting.registerContentScripts`), so a wizard's next page and reloads keep working (watcher and tab-moved checks unchanged). If the user says No, the page is still scanned once through `activeTab`.
+- **Removing access** in Chrome unregisters the detector for that site.
 
 ## Remote code
 

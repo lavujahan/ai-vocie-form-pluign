@@ -10,7 +10,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "fixtures": "vite --config test-fixtures/vite.config.ts",
-    "e2e": "vite build && playwright test"
+    "e2e": "vite build --mode e2e && playwright test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.118.0",
