@@ -185,7 +185,8 @@ export function UsageAdmin() {
         <a className="underline" href="https://www.sarvam.ai/api-pricing" target="_blank" rel="noreferrer">
           Sarvam speech-to-text
         </a>{' '}
-        (per minute of audio). Forms = forms the computer filled with at most 2 fields left empty, counted once per form (— until migration 0016 is applied). Dates follow India time.
+        (per minute of audio). Cached tokens = input tokens OpenAI read from its prompt cache (part of the input tokens,
+        billed at the cached price); % = share of the input. Forms = forms the computer filled with at most 2 fields left empty, counted once per form (— until migration 0016 is applied). Dates follow India time.
       </p>
     </main>
   );
@@ -200,7 +201,8 @@ function SummaryCards({ totals }: { totals: UsageCosts | null }) {
       label: 'OpenAI',
       value: show((t) => inr.format(t.openai_inr)),
       note: show(
-        (t) => `${usd.format(t.openai_usd)} · ${num.format(t.tokens)} tokens (${num.format(t.cached_input_tokens)} cached) · ${num.format(t.llm_calls)} runs`,
+        (t) =>
+          `${usd.format(t.openai_usd)} · ${num.format(t.tokens)} tokens (${num.format(t.cached_input_tokens)} cached · ${cachedShare(t)}) · ${num.format(t.llm_calls)} runs`,
       ),
     },
     {
@@ -232,6 +234,9 @@ function UsageHead({ first }: { first: string }) {
         </th>
         <th className="px-4 py-2 text-right font-medium">Minutes</th>
         <th className="px-4 py-2 text-right font-medium">Input tokens</th>
+        <th className="px-4 py-2 text-right font-medium" title="Input tokens read from OpenAI's prompt cache (billed at the cached price)">
+          Cached tokens
+        </th>
         <th className="px-4 py-2 text-right font-medium">Input cost</th>
         <th className="px-4 py-2 text-right font-medium">Output tokens</th>
         <th className="px-4 py-2 text-right font-medium">Output cost</th>
@@ -266,7 +271,11 @@ function EmptyRow({ data, loading, empty }: { data: UsageSummaryResponse | null;
   );
 }
 
-const COLUMNS = 10;
+const COLUMNS = 11;
+
+/** Cached share of the input tokens, e.g. "62%"; "—" with no input. */
+const cachedShare = (row: UsageCosts) =>
+  row.input_tokens ? `${Math.round((100 * row.cached_input_tokens) / row.input_tokens)}%` : '—';
 
 function UsageCells({ row }: { row: UsageCosts }) {
   return (
@@ -275,8 +284,12 @@ function UsageCells({ row }: { row: UsageCosts }) {
       <td className="px-4 py-2.5 text-right tabular-nums" title={`${num.format(row.stt_calls)} recordings`}>
         {mins.format(row.minutes)}
       </td>
-      <td className="px-4 py-2.5 text-right tabular-nums" title={`${num.format(row.cached_input_tokens)} of them cached · ${num.format(row.llm_calls)} runs`}>
+      <td className="px-4 py-2.5 text-right tabular-nums" title={`${num.format(row.llm_calls)} runs`}>
         {num.format(row.input_tokens)}
+      </td>
+      <td className="px-4 py-2.5 text-right tabular-nums">
+        <div>{num.format(row.cached_input_tokens)}</div>
+        <div className="text-xs text-muted">{cachedShare(row)}</div>
       </td>
       <td className="px-4 py-2.5 text-right tabular-nums">{usd.format(row.input_usd)}</td>
       <td className="px-4 py-2.5 text-right tabular-nums">{num.format(row.output_tokens)}</td>
