@@ -67,16 +67,17 @@ export function isFresh(
 /**
  * The form's field list, saved with its reading the first time the form is read, so every later
  * session of the form gets exactly these fields, whatever the page showed when it was scanned.
- * Dropdowns whose options load later (empty when scanned, or depending on another field) are saved
- * without options: the list one district happened to show is not the form's list.
+ * A dropdown keeps the options the scan saw (also one that was disabled then: its list is the form's),
+ * except one that depends on another field (Taluk on District): the list one district happened to
+ * show is not the form's list, so it is saved without options, like one that was empty when scanned.
  */
 export function formTemplate(fields: FieldDescriptor[], analysis: Pick<FieldAnalysis, 'field_key' | 'depends_on'>[]): FieldDescriptor[] {
-  const dependent = new Set(analysis.filter((a) => a.depends_on).map((a) => a.field_key));
-  return fields.map((f) =>
-    f.dynamic_options || (dependent.has(f.field_key) && f.options.length)
-      ? { ...f, options: [], dynamic_options: true }
-      : f,
-  );
+  return fields.map((f) => (emptiedByTemplate(f, analysis) ? { ...f, options: [], dynamic_options: true } : f));
+}
+
+/** True for a dropdown whose scanned options the saved field list leaves out (see formTemplate). */
+export function emptiedByTemplate(f: FieldDescriptor, analysis: Pick<FieldAnalysis, 'field_key' | 'depends_on'>[]): boolean {
+  return f.options.length > 0 && analysis.some((a) => a.field_key === f.field_key && a.depends_on);
 }
 
 /** The fields as the site shows them, kept with the reading for the admin page. */

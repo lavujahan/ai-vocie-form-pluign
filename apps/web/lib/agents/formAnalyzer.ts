@@ -11,6 +11,7 @@ import {
 import {
   fieldSnapshot,
   formFingerprint,
+  emptiedByTemplate,
   formTemplate,
   isFresh,
   isMissingTable,
@@ -364,11 +365,16 @@ export async function analyzeAndStore(
     const analysis = await readForm(schema, !!opts.partial, onUsage, usage, opts.saved);
     const fields = sanitizeAnalysis(analysis, schema);
     const detectedRequired = new Map(schema.fields.map((f) => [f.field_key, f.required]));
+    // A new form's first session was built from the scan: the dropdowns the saved field list leaves
+    // empty are emptied here too, so this session's prompt starts like every later session's.
+    const scanned = new Map(schema.fields.map((f) => [f.field_key, f]));
+    const emptied = new Set(schema.fields.filter((f) => emptiedByTemplate(f, fields)).map((f) => f.field_key));
     // withNew: the columns of migrations 0006/0007 (Tamil label, upload rules).
     const save = (f: FieldAnalysis, withNew: boolean) =>
       db()
         .from('form_fields')
         .update({
+          ...(emptied.has(f.field_key) && scanned.has(f.field_key) ? { options: [], dynamic_options: true } : {}),
           clean_label: f.clean_label,
           semantic_type: f.semantic_type,
           validation: f.validation,

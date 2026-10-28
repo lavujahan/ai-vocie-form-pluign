@@ -46,6 +46,11 @@ describe("the form's saved field list", () => {
     expect(formTemplate(fields, analysis(null))).toEqual(fields);
   });
 
+  it('keeps the options of a dropdown that was disabled when scanned (CAN "Document Type 1")', () => {
+    const disabled = schema({}, { dynamic_options: true }).fields;
+    expect(formTemplate(disabled, analysis(null))[0]).toMatchObject({ options: [{ value: '1', label: 'Elumathur' }] });
+  });
+
   it('saves a dropdown that depends on another field without the options it happened to show', () => {
     const [village, name] = formTemplate(fields, analysis('ddl_taluk'));
     expect(village).toMatchObject({ field_key: 'ddl_village', options: [], dynamic_options: true });
