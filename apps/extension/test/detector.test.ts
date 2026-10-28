@@ -98,3 +98,35 @@ describe('detect', () => {
     expect(labels).toEqual(expect.arrayContaining(['Company', 'Occupation']));
   });
 });
+
+describe("the input's own rules and help text", () => {
+  it('reads maxlength, minlength, title and inputmode', () => {
+    page(`
+      <label for="m">Mobile</label><input id="m" maxlength="10" minlength="10" inputmode="numeric" pattern="[6-9][0-9]{9}" title="Enter 10 digit mobile number">
+      <label for="n">Name</label><input id="n">
+    `);
+    const [m, n] = detect().schema.fields;
+    expect(m).toMatchObject({ max_length: 10, min_length: 10, inputmode: 'numeric', title: 'Enter 10 digit mobile number' });
+    expect(n).toMatchObject({ max_length: null, min_length: null, inputmode: null, title: null });
+  });
+
+  it('takes the short text right after a field as its help, never the next field\'s label', () => {
+    page(`
+      <div><label for="a">Aadhaar</label><input id="a"><small>12 digits, no spaces</small></div>
+      <div><label for="p">PIN</label><input id="p"> (6 digits)</div>
+      <div><label for="b">Name</label><input id="b"></div>
+      <div><label for="c">City</label><input id="c"></div>
+      <label><input id="t" type="checkbox"> I agree</label>
+    `);
+    const byKey = Object.fromEntries(detect().schema.fields.map((f) => [f.field_key, f]));
+    expect(byKey.a.context).toBe('12 digits, no spaces');
+    expect(byKey.p.context).toBe('(6 digits)');
+    expect(byKey.b.context).toBeNull();
+    expect(byKey.t.context).toBeNull();
+  });
+
+  it('prefers the help the site links with aria-describedby', () => {
+    page(`<label for="e">Email</label><input id="e" aria-describedby="eh"><small>other text</small><p id="eh">We send the receipt here</p>`);
+    expect(detect().schema.fields[0].context).toBe('We send the receipt here');
+  });
+});

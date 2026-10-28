@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql` and `0016_form_completions.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql` and `0018_form_template.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -104,7 +104,15 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 
 ## Saved form readings (migration `0012`)
 
-The Form Analyzer reads a form **once**; every later scan of the same form, by **any user**, reuses that reading: no AI call, nothing billed, and the clean labels and Tamil labels appear at once. A form is recognised by a **fingerprint**, a hash of the page's origin and path (not the query string) plus every field's key, label, type, required flag, options and help text, so a form whose fields change on the website is read again. A reading is reused for **30 days**, and sooner re-read when the analyzer's model or instructions change. Only form structure is saved (table `form_cache`), never values or recordings.
+The Form Analyzer reads a form **once**; every later scan of the same form, by **any user**, reuses that reading: no AI call, nothing billed, and the clean labels and Tamil labels appear at once. A form is recognised by a **fingerprint**, a hash of the page's origin and path (not the query string), the form heading, and every field's key, label and type. The page's state doesn't count (options that loaded, help text), so the same form scanned with its dropdowns already chosen is the same form; a form whose fields or labels change on the website is read again. A reading is reused for **30 days**, whatever model made it, and sooner re-read when the analyzer's instructions change. Only form structure is saved (table `form_cache`), never values or recordings.
+
+**What the reader writes:** a short answer, about 35% fewer output tokens than one entry per property per field. Fields are named `f1, f2, …`; the site's key is shown as a hint only when it has words (`txtFatherName`, not `12330`). `validation` is null when the page states no rule. Tamil-output fields, later sections (`step_starts`) and upload rules are short lists for the whole form. Code turns this back into the saved reading (`readingFromAnswer`), and reads again, once, any field the answer left out. Tamil labels keep whose field it is ("உரிமையாளரின் கைபேசி எண்", not "கைபேசி எண்"). A field labelled only in Tamil next to its English twin ("Applicant Name" / "விண்ணப்பதாரர் பெயர்") takes Tamil output and is labelled "… in Tamil"; code applies that rule too, if the AI missed it.
+
+**Rules from the page itself:** the extension reads each input's `maxlength`, `minlength`, `pattern`, `title` and `inputmode`, and the short help text right after it (when the site doesn't link it with `aria-describedby`). Code turns them into the field's rules (`pageRules`): for example, `maxlength=10` + `minlength=10` on a numeric input gives "10 digits". They win over the AI's, so a digit count never depends on the AI, and the mapping step is told the field's length. A value longer than the field takes is not typed cut short: it is reported as skipped ("Too long: 11 characters, this field takes 10"). A number written with spaces is typed without them.
+
+**Checking a change to the reader:** `pnpm eval:analyzer` reads the saved forms with the reader before the short answer (`scripts/eval-analyzer-old.ts`) and with today's, on the same input. It prints the tokens, the cost and every field that reads differently. `--self` runs old against old, to see how much two runs differ anyway.
+
+**Saved field list** (migration `0018`): the first scan's fields are saved with the reading, and every later session of the form gets exactly that list, not the live scan. Dropdowns whose options load later (or that depend on another field) are saved without options; the extension matches the spoken value when it fills. A field shown by a checkbox is not added later. So the mapping prompt for a form always starts with the same text (all fields first, also for the row mic, and one cache key for all forms), and OpenAI bills it at the cached price. The server log shows `fields=<hash> cached=<cached>/<input>` per recording: the same form shows the same hash.
 
 **Admin → Forms** (`/admin/forms`) lists the saved readings: form name, website, fields, model, read on, expires, times reused, last used and the one-time cost, with search and sort. **Edit labels** changes a field's English label, Tamil label or required flag for later scans (an edited reading is kept until cleared; fields the website marks required stay required). **Read again** clears a reading, so the next scan is read by the AI. Until migration `0012` is applied, every scan is read as before.
 
@@ -138,7 +146,7 @@ The extension fills dependent dropdowns in order (`apps/extension/src/content/ca
 - **Fill in order:** the extension sets the parent, then waits (up to 8 s) for the child's list to load, then picks the spoken value from the real options.
 - **Learn the links:** which dropdown feeds which comes from the Form Analyzer's `depends_on`, or is learned by watching which dropdown reloads.
 - **Unclear match** (spelling variant, Tamil script, abbreviation): the **Option Resolver Agent** (OpenAI, `/api/resolve-option`) picks from the loaded options, or reports ambiguity.
-- **Still unresolved:** the extension uploads the loaded options and a hint (`PATCH /api/sessions/[code]/fields`). The phone row shows **"Pick one"** with "Did you mean…" buttons.
+- **Still unresolved:** the extension uploads a hint with the closest matches (`PATCH /api/sessions/[code]/fields`). The phone row shows **"Pick one"** with "Did you mean…" buttons. The loaded options themselves are not saved: the form's field list stays as first saved.
 - **Parent changed later:** children are re-checked. Values that no longer fit are cleared and sent to the phone picker, never left silently wrong.
 - **Safety check:** a final pass re-fills any dropdown the page reset after the extension moved on.
 
@@ -219,7 +227,8 @@ Test page: `test-fixtures/dropdowns.html`.
 ## Fields that appear later (multi-step forms, dependent fields)
 
 While a form session is active, the extension watches the page (`apps/extension/src/content/watch.ts`).
-- **Fields that appear later are added to the session.** That covers a wizard's next step, the form's next page on the same site, and a field shown by a checkbox or by choosing "Other". It uses `POST /api/sessions/[code]/fields`, and the Form Analyzer reads only the new fields.
+- **A new step's fields are added to the session.** That covers a wizard's next step and the form's next page on the same site: fewer than half of the fields that were on the page are still there. It uses `POST /api/sessions/[code]/fields`, and the Form Analyzer reads only the new fields (a step read before gets its saved field list, like a whole form).
+- **A field shown by a checkbox or by choosing "Other" is not added.** The form keeps its saved field list (see Saved form readings), so the user types such a field.
 - **The phone shows them right away:** "3 new fields on the computer (step 2)", under a **Step 2** heading.
 - **Values wait for their field.** A value spoken for a field that isn't on the page yet shows as "Waiting: this field isn't on the page yet" in the popup. It fills as soon as the field appears.
 

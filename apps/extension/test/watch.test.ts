@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { detect } from '../src/content/detector';
-import { diffFields, startWatch, stopWatch } from '../src/content/watch';
+import { diffFields, isNewStep, startWatch, stopWatch } from '../src/content/watch';
 
 const f = (field_key: string, label = field_key, field_type: 'text' | 'select' = 'text') => ({ field_key, label, field_type, required: false });
 
@@ -18,7 +18,14 @@ describe('fields that appear later', () => {
     expect(r.added.map((x) => x.label)).toEqual(['Bank name']);
   });
 
-  it('reports a field revealed by a checkbox, after the page settles', async () => {
+  it('a new step hides most of the fields that were there; a revealed field does not', () => {
+    expect(isNewStep(['name', 'mobile', 'other'], ['occupation', 'income'])).toBe(true);
+    expect(isNewStep(['name', 'mobile', 'other'], ['name', 'mobile', 'other', 'comm'])).toBe(false);
+    expect(isNewStep(['occupation', 'income'], ['occupation', 'income', 'occupation_other'])).toBe(false);
+    expect(isNewStep([], ['bank_name'])).toBe(true);
+  });
+
+  it('does not add a field revealed by a checkbox (the form keeps its field list), but reports it as present', async () => {
     document.body.innerHTML = `
       <label for="name">Name</label><input id="name" name="name" />
       <label><input id="other" name="other" type="checkbox" /> Different address</label>
@@ -32,6 +39,22 @@ describe('fields that appear later', () => {
 
     document.getElementById('wrap')!.hidden = false;
     await new Promise((r) => setTimeout(r, 900));
-    expect(changes.at(-1)).toEqual({ added: ['comm'], present: ['name', 'other', 'comm'] });
+    expect(changes.at(-1)).toEqual({ added: [], present: ['name', 'other', 'comm'] });
+  });
+
+  it('adds the fields of the next step', async () => {
+    document.body.innerHTML = `
+      <div id="s1"><label for="name">Name</label><input id="name" name="name" />
+      <label for="mobile">Mobile</label><input id="mobile" name="mobile" /></div>
+      <div id="s2" hidden><label for="job">Occupation</label><input id="job" name="job" />
+      <label for="income">Income</label><input id="income" name="income" /></div>`;
+    const changes: { added: string[]; present: string[] }[] = [];
+    startWatch(['name', 'mobile'], () => detect(document).schema, ({ schema, present }) =>
+      changes.push({ added: schema.fields.map((x) => x.field_key), present }),
+    );
+    document.getElementById('s1')!.hidden = true;
+    document.getElementById('s2')!.hidden = false;
+    await new Promise((r) => setTimeout(r, 900));
+    expect(changes.at(-1)).toEqual({ added: ['job', 'income'], present: ['job', 'income'] });
   });
 });

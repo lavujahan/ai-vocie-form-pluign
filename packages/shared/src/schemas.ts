@@ -44,6 +44,13 @@ export const FieldDescriptor = z.object({
   max: z.string().nullable().default(null),
   pattern: z.string().nullable().default(null),
   placeholder: z.string().nullable().default(null),
+  /** The input's `minlength` / `maxlength` (mobile 10, Aadhaar 12, PIN 6); null when not set. */
+  min_length: z.number().int().min(0).nullable().default(null),
+  max_length: z.number().int().min(1).nullable().default(null),
+  /** The input's `title`: sites often explain the pattern there ("10 digits only"). */
+  title: z.string().max(300).nullable().default(null),
+  /** The input's `inputmode` ("numeric", "tel", "email"). */
+  inputmode: z.string().max(20).nullable().default(null),
   /** Short text around the field (help text, error messages). */
   context: z.string().max(1000).nullable().default(null),
   /** File inputs: the `accept` attribute (".pdf", "image/*", …). */
@@ -130,7 +137,8 @@ export const FieldAnalysis = z.object({
   clean_label: z.string(),
   semantic_type: SemanticType,
   required: z.boolean(),
-  validation: ValidationRules,
+  /** null: the page states no format (readings saved before then have all four rules null instead). */
+  validation: ValidationRules.nullable(),
   depends_on: z.string().nullable(),
   step_index: z.number().int(),
   output_script: OutputScript,
@@ -144,6 +152,30 @@ export const FormAnalysis = z.object({
   fields: z.array(FieldAnalysis),
 });
 export type FormAnalysis = z.infer<typeof FormAnalysis>;
+
+/**
+ * What the Form Analyzer writes: the saved FormAnalysis without the defaults it would repeat on every
+ * field (output is most of its cost). Fields by short id; validation null when the page states none;
+ * the rare Tamil-text fields, later sections and upload rules as short lists. Code fills in the rest.
+ */
+export const AnalyzerAnswer = z.object({
+  form_purpose: z.string().describe('Short sentence-case name for the form, e.g. "Customer onboarding"'),
+  fields: z.array(
+    z.object({
+      field_key: z.string(),
+      clean_label: z.string(),
+      semantic_type: SemanticType,
+      required: z.boolean(),
+      validation: ValidationRules.nullable(),
+      depends_on: z.string().nullable(),
+      label_ta: z.string().describe("Short Tamil translation of the label for the phone screen, e.g. \"தந்தை பெயர்\" for Father's name"),
+    }),
+  ),
+  tamil_fields: z.array(z.string()).describe('Ids of the fields whose label asks for the value in Tamil; usually empty'),
+  step_starts: z.array(z.string()).describe('The first field of each later section, only when the form is clearly split into steps; usually empty'),
+  uploads: z.array(FileRules.extend({ field_key: z.string() })).describe('One entry per upload field (type file)'),
+});
+export type AnalyzerAnswer = z.infer<typeof AnalyzerAnswer>;
 
 export const NumberPart = z.object({
   heard: z.string().describe('One spoken piece, as transcribed: "rendu", "double two", "ஒன்பது", "98"'),
@@ -360,7 +392,8 @@ export type BillingResponse = {
     margin_inr: number;
     minutes: number;
   }[];
-  totals: { revenue_inr: number; cost_inr: number; margin_inr: number; minutes: number };
+  /** cost_inr includes shared_cost_inr: form reading, shared by all users and on no user's row. */
+  totals: { revenue_inr: number; cost_inr: number; margin_inr: number; minutes: number; shared_cost_inr: number };
   /** Users whose paid time ends in the next 7 days or ended in the last 30, soonest first. */
   renewals: (PlanStatus & { user_id: string; name: string; phone: string })[];
 };
@@ -419,6 +452,9 @@ export type UsageSummaryResponse = {
   to: string;
   settings: BillingSettings;
   rows: UsageSummaryRow[];
+  /** Form reading: read once per form and reused by every user, so it is not on any user's row. */
+  shared: UsageCosts | null;
+  /** Users plus form reading. */
   totals: UsageCosts;
   /** The user the day table is for (null: all users). */
   user: string | null;

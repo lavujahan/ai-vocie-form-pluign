@@ -36,7 +36,9 @@ export const GET = route(async (req) => {
   ]);
   if (isMissing(payRes.error) || !statuses) throw fail(500, 'Apply migration 0013_subscriptions.sql to see billing.');
   const payments = toPaymentRows(must(payRes) ?? []);
-  const costs = priceSummary((usage ?? []) as RawUsageRow[], settings).rows;
+  // Per-user cost leaves out form reading (shared by all users); the totals add it back.
+  const { rows: costs, shared } = priceSummary((usage ?? []) as RawUsageRow[], settings);
+  const sharedCost = shared?.total_inr ?? 0;
 
   // Revenue and AI cost per user, joined on user id (null: a deleted user's AI usage).
   type Acc = BillingResponse['users'][number];
@@ -56,7 +58,13 @@ export const GET = route(async (req) => {
     .map((a) => ({ ...a, revenue_inr: round2(a.revenue_inr), cost_inr: round2(a.cost_inr), margin_inr: round2(a.revenue_inr - a.cost_inr) }))
     .sort((a, b) => b.revenue_inr - a.revenue_inr || b.cost_inr - a.cost_inr);
   const sum = (k: 'revenue_inr' | 'cost_inr' | 'minutes') => rows.reduce((n, r) => n + r[k], 0);
-  const totals = { revenue_inr: round2(sum('revenue_inr')), cost_inr: round2(sum('cost_inr')), margin_inr: 0, minutes: sum('minutes') };
+  const totals = {
+    revenue_inr: round2(sum('revenue_inr')),
+    cost_inr: round2(sum('cost_inr') + sharedCost),
+    margin_inr: 0,
+    minutes: sum('minutes'),
+    shared_cost_inr: round2(sharedCost),
+  };
   totals.margin_inr = round2(totals.revenue_inr - totals.cost_inr);
 
   // Active users whose paid time ends within 7 days, or ended in the last 30.

@@ -65,6 +65,22 @@ describe('monthly summary', () => {
     expect(cheaper.rows[0]).toMatchObject({ input_usd: 0.041, output_usd: 0.02, openai_usd: 0.061, openai_inr: 5.37 });
   });
 
+  it('keeps form reading off the user rows but in the totals', () => {
+    const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, cached_usd_per_m: 1.25, output_usd_per_m: 10 };
+    const user = { user_id: 'a', name: 'Anu', phone: '9000000001', stt_calls: 1, audio_ms: 60_000, llm_calls: 1, input_tokens: 1000, cached_input_tokens: 0, output_tokens: 100 };
+    const reading = { user_id: null, name: null, phone: null, shared: true, stt_calls: 0, audio_ms: 0, llm_calls: 2, input_tokens: 40_000, cached_input_tokens: 0, output_tokens: 4_000 };
+    const s = priceSummary([{ ...user, shared: false }, reading], settings);
+    expect(s.rows).toHaveLength(1);
+    expect(s.rows[0]).toMatchObject({ user_id: 'a', input_tokens: 1000, minutes: 1 });
+    // 40k × $2.50/1M + 4k × $10/1M = $0.14
+    expect(s.shared).toMatchObject({ llm_calls: 2, input_tokens: 40_000, openai_usd: 0.14, minutes: 0 });
+    expect(s.totals).toMatchObject({ input_tokens: 41_000, output_tokens: 4_100, minutes: 1 });
+    // Before migration 0017 there is no shared column: everything stays on the user rows.
+    const old = priceSummary([user], settings);
+    expect(old.rows).toHaveLength(1);
+    expect(old.shared).toBeNull();
+  });
+
   it('never counts more cached tokens than input tokens', () => {
     const settings = { usd_inr_rate: 88, sarvam_inr_per_min: 0.49, input_usd_per_m: 2.5, cached_usd_per_m: 1.25, output_usd_per_m: 10 };
     const row = priceCounts({ stt_calls: 0, audio_ms: 0, llm_calls: 1, input_tokens: 1000, cached_input_tokens: 5000, output_tokens: 0 }, settings);

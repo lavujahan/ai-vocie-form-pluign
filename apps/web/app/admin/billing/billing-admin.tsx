@@ -157,7 +157,14 @@ export function BillingAdmin() {
         </Card>
         <div className="grid grid-cols-3 gap-3">
           <Stat label="Received" value={data && inr.format(data.totals.revenue_inr)} />
-          <Stat label="AI cost" value={data && inr.format(data.totals.cost_inr)} sub={data && `${mins.format(data.totals.minutes)} voice min`} />
+          <Stat
+            label="AI cost"
+            value={data && inr.format(data.totals.cost_inr)}
+            sub={
+              data &&
+              `${mins.format(data.totals.minutes)} voice min${data.totals.shared_cost_inr ? ` · ${inr.format(data.totals.shared_cost_inr)} form reading` : ''}`
+            }
+          />
           <Stat
             label="Margin"
             value={data && inr.format(data.totals.margin_inr)}

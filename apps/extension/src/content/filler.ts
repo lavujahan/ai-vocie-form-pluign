@@ -146,7 +146,13 @@ async function fillEntry(entry: RegistryEntry, value: string | null): Promise<st
         const fmt = detectDateFormat(el.placeholder) ?? detectDateFormat(el.pattern);
         if (fmt) out = formatDate(v, fmt);
       }
-      if (el.maxLength > 0 && out.length > el.maxLength) out = out.slice(0, el.maxLength);
+    }
+    // Longer than the field takes: a number written with spaces or dashes ("98765 43210") is typed
+    // without them; anything else is not typed cut short (a wrong number filled silently), it is reported.
+    if (el.maxLength > 0 && out.length > el.maxLength) {
+      const compact = out.replace(/[\s-]/g, '');
+      if (/^\d+$/.test(compact) && compact.length <= el.maxLength) out = compact;
+      else return `Too long: ${out.length} characters, this field takes ${el.maxLength}. Check it on your phone`;
     }
     setNativeValue(el, out);
     return null;

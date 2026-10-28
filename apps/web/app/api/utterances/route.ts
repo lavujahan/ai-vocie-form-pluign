@@ -1,6 +1,6 @@
 import { after, NextResponse } from 'next/server';
 import type { UtteranceResponse } from '@vff/shared';
-import { mapTranscript } from '@/lib/agents/fieldMapper';
+import { fieldsHash, mapTranscript } from '@/lib/agents/fieldMapper';
 import { isEmptyTranscript } from '@/lib/agents/guardrails';
 import { STT_MAX_SECONDS, sttConfig, transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
@@ -148,8 +148,11 @@ export const POST = route(async (req) => {
         { onUsage: (run) => usage.push(openaiEvent(owner, 'map', run)) },
       ),
     );
+    // fields= / cached=: the same form should show the same hash, and most of its input cached.
+    const mapRun = [...usage].reverse().find((e) => e.kind === 'map');
     console.log(
-      `utterance seq=${seq} part=${part} stt=${tStt}ms map=${Date.now() - tMap0}ms values=${outcome.empty ? 0 : outcome.values.length} chars=${fullText.length}`,
+      `utterance seq=${seq} part=${part} stt=${tStt}ms map=${Date.now() - tMap0}ms values=${outcome.empty ? 0 : outcome.values.length} chars=${fullText.length}` +
+        ` fields=${fieldsHash(fields)} cached=${mapRun?.cached_input_tokens ?? 0}/${mapRun?.input_tokens ?? 0}`,
     );
 
     if (outcome.empty) {

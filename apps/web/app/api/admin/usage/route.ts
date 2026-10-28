@@ -57,6 +57,8 @@ export const GET = route(async (req) => {
   const priced = missing ? null : priceDays((daily.data ?? []) as RawDayRow[], settings);
   const summary = priceSummary((raw ?? []) as RawUsageRow[], settings);
   const rows = withForms(summary.rows, completions, (c) => c.user_id, (r) => r.user_id);
+  // Form reading is shared by all users: its own row, in the totals but on no user's row.
+  const shared = summary.shared;
   const dayCompletions = completions && (user ? completions.filter((c) => c.user_id === user) : completions);
   const days = priced && withForms(priced.days, dayCompletions, (c) => istDay(c.completed_at), (d) => d.day);
 
@@ -65,7 +67,8 @@ export const GET = route(async (req) => {
     to,
     settings,
     rows,
-    totals: { ...sumCosts(rows), forms_completed: completions ? completions.length : null },
+    shared,
+    totals: { ...sumCosts(shared ? [...rows, shared] : rows), forms_completed: completions ? completions.length : null },
     user,
     days,
     day_totals: days ? { ...sumCosts(days), forms_completed: dayCompletions ? dayCompletions.length : null } : null,

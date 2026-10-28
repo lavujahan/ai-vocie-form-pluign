@@ -15,6 +15,8 @@ export type RawUsageRow = RawCounts & {
   user_id: string | null;
   name: string | null;
   phone: string | null;
+  /** The form-reading row, shared by all users (no user). Missing before migration 0017. */
+  shared?: boolean;
   /** Cost at list price when each run was recorded; not used (the admin's prices are). */
   openai_usd?: number | string;
 };
@@ -128,10 +130,18 @@ export function sumCosts(rows: UsageCosts[]): UsageCosts {
   };
 }
 
-/** Each user's usage in the chosen dates, priced, with totals. */
-export function priceSummary(raw: RawUsageRow[], settings: BillingSettings): { rows: UsageSummaryRow[]; totals: UsageCosts } {
-  const rows = raw.map((r) => ({ user_id: r.user_id, name: r.name, phone: r.phone, ...priceCounts(r, settings) }));
-  return { rows, totals: sumCosts(rows) };
+/**
+ * Each user's usage in the chosen dates, priced, and form reading (read once per form, reused by every
+ * user) on its own. The totals include both.
+ */
+export function priceSummary(
+  raw: RawUsageRow[],
+  settings: BillingSettings,
+): { rows: UsageSummaryRow[]; shared: UsageCosts | null; totals: UsageCosts } {
+  const rows = raw.filter((r) => !r.shared).map((r) => ({ user_id: r.user_id, name: r.name, phone: r.phone, ...priceCounts(r, settings) }));
+  const sharedRaw = raw.filter((r) => r.shared);
+  const shared = sharedRaw.length ? sumCosts(sharedRaw.map((r) => priceCounts(r, settings))) : null;
+  return { rows, shared, totals: sumCosts(shared ? [...rows, shared] : rows) };
 }
 
 /** A completed form, as read from form_completions. */

@@ -101,7 +101,7 @@ export function UsageAdmin() {
 
       {error && <p className="mb-3 rounded-lg bg-danger-bg px-4 py-2 text-sm text-danger-ink">{error}</p>}
 
-      <SummaryCards totals={data?.totals ?? null} />
+      <SummaryCards totals={data?.totals ?? null} shared={data ? data.shared : undefined} />
 
       <h2 className="mb-2 text-sm font-semibold">By user</h2>
       <Card className="p-0">
@@ -118,9 +118,18 @@ export function UsageAdmin() {
                   <UsageCells row={r} />
                 </tr>
               ))}
-              <EmptyRow data={data} loading={loading} empty={!data?.rows.length} />
+              {data?.shared && (
+                <tr className="border-t border-line text-muted">
+                  <td className="px-4 py-2.5">
+                    <div className="font-medium">Form reading</div>
+                    <div className="text-xs">shared by all users</div>
+                  </td>
+                  <UsageCells row={data.shared} />
+                </tr>
+              )}
+              <EmptyRow data={data} loading={loading} empty={!data?.rows.length && !data?.shared} />
             </tbody>
-            {data && data.rows.length > 0 && <TotalRow row={data.totals} />}
+            {data && (data.rows.length > 0 || data.shared) && <TotalRow row={data.totals} />}
           </table>
         </div>
       </Card>
@@ -186,15 +195,21 @@ export function UsageAdmin() {
           Sarvam speech-to-text
         </a>{' '}
         (per minute of audio). Cached tokens = input tokens OpenAI read from its prompt cache (part of the input tokens,
-        billed at the cached price); % = share of the input. Forms = forms the computer filled with at most 2 fields left empty, counted once per form (— until migration 0016 is applied). Dates follow India time.
+        billed at the cached price); % = share of the input. Forms = forms the computer filled with at most 2 fields left empty, counted once per form (— until migration 0016 is applied). Form reading (working out a form&apos;s fields) is done
+        once per form and reused by every user, so it has its own row and is left out of each user&apos;s row and a single
+        user&apos;s By day table (from migration 0017). Dates follow India time.
       </p>
     </main>
   );
 }
 
-/** All users' cost in the chosen dates: the total, and its OpenAI and Sarvam parts. */
-function SummaryCards({ totals }: { totals: UsageCosts | null }) {
+/**
+ * All users' cost in the chosen dates: the total, its OpenAI and Sarvam parts, and form reading (part of
+ * OpenAI, shared by all users: a form is read once and reused, so it is on no user's row).
+ */
+function SummaryCards({ totals, shared }: { totals: UsageCosts | null; shared: UsageCosts | null | undefined }) {
   const show = (f: (t: UsageCosts) => string) => (totals ? f(totals) : '…');
+  const reading = (f: (t: UsageCosts) => string, none: string) => (shared === undefined ? '…' : shared ? f(shared) : none);
   const cards = [
     { label: 'Total cost', value: show((t) => inr.format(t.total_inr)), note: 'OpenAI + Sarvam' },
     {
@@ -210,9 +225,17 @@ function SummaryCards({ totals }: { totals: UsageCosts | null }) {
       value: show((t) => inr.format(t.sarvam_inr)),
       note: show((t) => `${mins.format(t.minutes)} min · ${num.format(t.stt_calls)} recordings`),
     },
+    {
+      label: 'Form reading',
+      value: reading((t) => inr.format(t.openai_inr), inr.format(0)),
+      note: reading(
+        (t) => `${num.format(t.llm_calls)} readings · ${num.format(t.output_tokens)} output tokens · part of OpenAI, shared by all users`,
+        'No forms read in these dates',
+      ),
+    },
   ];
   return (
-    <div className="mb-6 grid gap-3 sm:grid-cols-3">
+    <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       {cards.map((c, i) => (
         <Card key={c.label}>
           <div className="text-xs font-medium text-muted">{c.label}</div>

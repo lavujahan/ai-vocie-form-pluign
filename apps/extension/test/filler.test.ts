@@ -127,3 +127,20 @@ describe('fillAll', () => {
     expect($<HTMLInputElement>('#gst').value).toBe('33ABCDE1234F1Z5');
   });
 });
+
+describe('values longer than the field takes', () => {
+  it('types a spaced number without spaces, and reports anything else instead of cutting it', async () => {
+    document.body.innerHTML = `
+      <label for="m">Mobile</label><input id="m" maxlength="10">
+      <label for="a">Aadhaar</label><input id="a" maxlength="12">
+      <label for="c">Code</label><input id="c" maxlength="4">`;
+    const { registry } = detect(document);
+    const report = await fillAll({ m: '98765 43210', a: '1234 5678 9012 3', c: 'ABCDE' }, registry, { settleMs: 0 });
+    expect((document.getElementById('m') as HTMLInputElement).value).toBe('9876543210');
+    expect((document.getElementById('a') as HTMLInputElement).value).toBe('');
+    expect((document.getElementById('c') as HTMLInputElement).value).toBe('');
+    expect(report.filled).toEqual(['m']);
+    expect(report.skipped.map((s) => s.field_key)).toEqual(['a', 'c']);
+    expect(report.skipped[0].reason).toContain('this field takes 12');
+  });
+});

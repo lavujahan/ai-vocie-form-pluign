@@ -18,6 +18,10 @@ const field = (field_key: string, field_type: 'text' | 'file', accept: string | 
   max: null,
   pattern: null,
   placeholder: null,
+  min_length: null,
+  max_length: null,
+  title: null,
+  inputmode: null,
   context: null,
   accept,
 });

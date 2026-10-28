@@ -5,7 +5,6 @@ import type {
   CreateSessionResponse,
   FieldFile,
   DesktopUpdateRequest,
-  FieldOption,
   LoginResponse,
   PublicUser,
   ReconnectResponse,
@@ -279,22 +278,16 @@ function valuesForFill(snap: SessionSnapshot, only?: string[]): Record<string, s
   return out;
 }
 
-const sameOptions = (a: FieldOption[], b: FieldOption[]) =>
-  a.length === b.length && a.every((o, i) => o.value === b[i].value && o.label === b[i].label);
-
 /**
- * After a fill: upload dropdown options that loaded on the page (so the phone can show them) and
- * "choose on your phone" hints for dropdowns the spoken value couldn't be matched to.
+ * After a fill: "choose on your phone" hints for dropdowns the spoken value couldn't be matched to.
+ * Options that loaded on the page are not sent: the form's field list stays as it was first saved, so
+ * the AI's prompt for this form starts with the same text every time (and is billed at the cached price).
  */
 async function reportDropdowns(s: ActiveSession, report: FillResult) {
   if (!s.snapshot || !state.auth) return;
   const byKey = new Map(s.snapshot.fields.map((f) => [f.field_key, f]));
   const updates = new Map<string, UpdateFieldsRequest['fields'][number]>();
   const upd = (k: string) => updates.get(k) ?? updates.set(k, { field_key: k }).get(k)!;
-  for (const [k, options] of Object.entries(report.options ?? {})) {
-    const f = byKey.get(k);
-    if (f && !sameOptions(f.options, options)) upd(k).options = options;
-  }
   for (const u of report.unresolved ?? []) upd(u.field_key).choice_hint = { spoken: u.spoken, top: u.top, reason: u.reason };
   for (const k of report.filled) if (byKey.get(k)?.choice_hint) upd(k).choice_hint = null;
   if (!updates.size) return;

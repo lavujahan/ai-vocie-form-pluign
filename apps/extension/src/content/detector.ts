@@ -272,6 +272,38 @@ function fileContext(input: HTMLElement): string | null {
   return own;
 }
 
+/** `minlength` / `maxlength` as set on the input (mobile 10, Aadhaar 12, PIN 6); null when not set. */
+function lengthAttr(el: HTMLElement, name: 'minlength' | 'maxlength'): number | null {
+  const n = Number.parseInt(el.getAttribute(name) ?? '', 10);
+  return Number.isInteger(n) && n >= (name === 'maxlength' ? 1 : 0) && n < 100_000 ? n : null;
+}
+
+/**
+ * Help text right after a field ("Enter 10 digit mobile number") when the site doesn't link it with
+ * aria-describedby: the next short text in the field's own block, before any other field or label.
+ */
+function helpText(el: HTMLElement): string | null {
+  // Text directly after the input ("<input> (10 digits)"), when no other field follows it in the block
+  // (then the text would be that field's label).
+  const alone = (el.parentElement?.querySelectorAll(CANDIDATES).length ?? 0) <= 1;
+  let next = el.nextSibling;
+  while (next && next.nodeType === 3 && !clean(next.textContent)) next = next.nextSibling;
+  if (next?.nodeType === 3) return alone ? clean(next.textContent).slice(0, 200) || null : null;
+
+  let node: Element | null = el;
+  for (let depth = 0; node && depth < 3; depth++, node = node.parentElement) {
+    for (let sib = node.nextElementSibling, i = 0; sib && i < 2; sib = sib.nextElementSibling, i++) {
+      // Another field, or a label (the next field's, or a checkbox's own text), is not this field's help.
+      if (sib.matches(`${CANDIDATES}, label`) || sib.querySelector(`${CANDIDATES}, label`)) return null;
+      const t = textWithoutControls(sib);
+      if (t) return t.length <= 200 ? t : null;
+    }
+    // Look further out only while the field is the only one in its block.
+    if ((node.parentElement?.querySelectorAll(CANDIDATES).length ?? 0) > 1) break;
+  }
+  return null;
+}
+
 function contextText(el: HTMLElement): string | null {
   const ids = el.getAttribute('aria-describedby');
   const t = ids ? byIds(el.getRootNode() as Document, ids) : '';
@@ -378,7 +410,12 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
           max: input.max || null,
           pattern: input.pattern || null,
           placeholder: el.getAttribute('placeholder') || null,
-          context: type === 'file' ? fileContext(el) : contextText(el),
+          min_length: lengthAttr(el, 'minlength'),
+          max_length: lengthAttr(el, 'maxlength'),
+          title: clean(el.getAttribute('title')).slice(0, 300) || null,
+          inputmode: el.getAttribute('inputmode') || null,
+          // A checkbox's following text is its own label, not help.
+          context: type === 'file' ? fileContext(el) : (contextText(el) ?? (type === 'checkbox' || type === 'radio' ? null : helpText(el))),
           accept: type === 'file' ? input.accept || null : null,
         },
       });

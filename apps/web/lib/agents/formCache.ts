@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { FieldAnalysis, FormAnalysis, FormSchema } from '@vff/shared';
+import type { FieldAnalysis, FieldDescriptor, FormAnalysis, FormSchema } from '@vff/shared';
 
 /**
  * Form readings shared by all users (table form_cache, migration 0012): a form is read by the AI once,
@@ -14,24 +14,13 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 /**
  * What identifies a form: the page (origin + path, no query or hash), the form heading, and every
- * field as the site shows it. A changed label, option or help text gives a new fingerprint, so the
- * changed form is read again. The page HTML is left out: it changes per load (dates, tokens).
+ * field's key, label and type. Nothing that depends on the page's state counts (options that loaded,
+ * help text, the page HTML), so the same form scanned with its dropdowns filled in is the same form,
+ * gets the same field list and the same prompt (see `template`). A new label or field reads it again.
  */
 export function formFingerprint(schema: FormSchema): string {
   const url = new URL(schema.page_url);
-  const fields = schema.fields.map((f) => [
-    f.field_key,
-    f.label,
-    f.field_type,
-    f.required,
-    f.multiple,
-    f.options.map((o) => o.label),
-    f.group_key,
-    f.placeholder,
-    f.pattern,
-    f.accept,
-    f.context,
-  ]);
+  const fields = schema.fields.map((f) => [f.field_key, f.label, f.field_type]);
   return sha256(JSON.stringify([url.origin + url.pathname, schema.form_title, fields]));
 }
 
@@ -47,6 +36,8 @@ export function pageOf(pageUrl: string): string {
 export type CachedReading = {
   fingerprint: string;
   analysis: FormAnalysis;
+  /** The form's field list (migration 0018); null for readings saved before it. */
+  template?: FieldDescriptor[] | null;
   model: string;
   prompt_version: string;
   created_at: string;
@@ -59,17 +50,33 @@ export function readingExpiresAt(r: Pick<CachedReading, 'created_at' | 'edited_a
 }
 
 /**
- * Reused when the admin edited it, or when it is under 30 days old and was made with today's model and
- * instructions (a better model or prompt reads the form again).
+ * Reused when the admin edited it, or when it is under 30 days old and was made with today's
+ * instructions (a new prompt reads the form again). Whatever model made it: a model change doesn't
+ * read every form again, and the form keeps its field list; the admin's Read again refreshes one.
  */
 export function isFresh(
-  r: Pick<CachedReading, 'created_at' | 'edited_at' | 'model' | 'prompt_version'>,
-  current: { model: string; promptVersion: string },
+  r: Pick<CachedReading, 'created_at' | 'edited_at' | 'prompt_version'>,
+  current: { promptVersion: string },
   now = new Date(),
 ): boolean {
   if (r.edited_at) return true;
   const expires = readingExpiresAt(r)!;
-  return now < expires && r.model === current.model && r.prompt_version === current.promptVersion;
+  return now < expires && r.prompt_version === current.promptVersion;
+}
+
+/**
+ * The form's field list, saved with its reading the first time the form is read, so every later
+ * session of the form gets exactly these fields, whatever the page showed when it was scanned.
+ * Dropdowns whose options load later (empty when scanned, or depending on another field) are saved
+ * without options: the list one district happened to show is not the form's list.
+ */
+export function formTemplate(fields: FieldDescriptor[], analysis: Pick<FieldAnalysis, 'field_key' | 'depends_on'>[]): FieldDescriptor[] {
+  const dependent = new Set(analysis.filter((a) => a.depends_on).map((a) => a.field_key));
+  return fields.map((f) =>
+    f.dynamic_options || (dependent.has(f.field_key) && f.options.length)
+      ? { ...f, options: [], dynamic_options: true }
+      : f,
+  );
 }
 
 /** The fields as the site shows them, kept with the reading for the admin page. */

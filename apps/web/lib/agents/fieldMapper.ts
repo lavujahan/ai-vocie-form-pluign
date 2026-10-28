@@ -70,6 +70,8 @@ function describeField(f: AgentField): string {
   }
   else if (f.field_type === 'select' || f.field_type === 'combobox') parts.push('options: not loaded yet');
   if (f.validation?.format) parts.push(`format: ${f.validation.format}`);
+  // The page's own length (maxlength), for the digit count of numbers spoken as words.
+  else if (f.validation?.max_length) parts.push(`max ${f.validation.max_length} characters`);
   if (f.placeholder) parts.push(`placeholder: ${f.placeholder}`);
   if (f.output_script === 'ta') parts.push('output_script=ta');
   return `- ${parts.join(' · ')}`;
@@ -85,16 +87,28 @@ export function renderRecent(recent: RecentSpeech[]): string {
     .join('\n');
 }
 
+/**
+ * The form's fields, as they start the prompt. They come first and always in full (also for the row
+ * mic), so every recording on the form starts with the same text and OpenAI bills it at the cached price.
+ */
+export const fieldsBlock = (fields: AgentField[]) => `Fields:\n${fields.map(describeField).join('\n')}`;
+
+/** Short hash of the prompt's field list, for the log: recordings on the same form should all show the same one. */
+export const fieldsHash = (fields: AgentField[]) =>
+  createHash('sha256')
+    .update(fieldsBlock(withShortIds({ fields, current: {}, transcript: '', targetFieldKey: null }).input.fields))
+    .digest('hex')
+    .slice(0, 8);
+
 export function buildMapperPrompt(input: MapInput): string {
-  const fields = input.targetFieldKey ? input.fields.filter((f) => f.field_key === input.targetFieldKey) : input.fields;
   const current = Object.entries(input.current)
     .filter(([, v]) => v)
     .map(([k, v]) => `- ${k} = ${JSON.stringify(v)}`);
   return [
+    fieldsBlock(input.fields),
     input.targetFieldKey
       ? `Mode: single field. The speech is the value for "${input.targetFieldKey}" only.`
       : 'Mode: full form. The speech may cover any number of fields.',
-    `Fields:\n${fields.map(describeField).join('\n')}`,
     `Current values:\n${current.length ? current.join('\n') : '(none)'}`,
     ...(input.recent?.length ? [`Recent speech (oldest first):\n${renderRecent(input.recent)}`] : []),
     `Speech:\n"""${input.transcript}"""`,
@@ -150,16 +164,13 @@ export async function mapTranscript(
     validateTool?: boolean;
   } = {},
 ): Promise<MapOutcome> {
-  // Same form, same prompt start (instructions + its fields): one cache key per form.
-  const formKey = createHash('sha256')
-    .update((input.targetFieldKey ? [input.targetFieldKey] : input.fields.map((f) => f.field_key)).join('|'))
-    .digest('hex')
-    .slice(0, 16);
   // From here on the fields are f1, f2, …; the answer's ids are turned back into the site's keys at the end.
   const short = withShortIds(input);
   input = short.input;
   const fields = input.targetFieldKey ? input.fields.filter((f) => f.field_key === input.targetFieldKey) : input.fields;
-  const { model, modelSettings, timeoutMs } = agentModel('mapper', opts.model, formKey);
+  // One cache key for every form: the instructions are cached for all of them, and a form's fields
+  // after its first recording (OpenAI reuses the longest start it has seen).
+  const { model, modelSettings, timeoutMs } = agentModel('mapper', opts.model);
   const withTool = opts.validateTool ?? false;
   const agent = new Agent<MapperContext, typeof MappingResult>({
     name: 'Field Mapping Agent',
@@ -175,7 +186,9 @@ export async function mapTranscript(
   try {
     const result = await runWithUsage(opts.onUsage, modelName(model), () =>
       run(agent, buildMapperPrompt(input), {
-        context: { transcript: input.transcript, fieldKeys: new Set(fields.map((f) => f.field_key)) },
+        // Every field of the form is in the prompt (also in single-field mode), so any of them is a known
+        // key; an answer for another field than the target is dropped by sanitizeMapping.
+        context: { transcript: input.transcript, fieldKeys: new Set(input.fields.map((f) => f.field_key)) },
         maxTurns: 10,
         signal: AbortSignal.timeout(timeoutMs),
       }),

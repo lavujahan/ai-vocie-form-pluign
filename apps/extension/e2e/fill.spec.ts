@@ -201,7 +201,7 @@ test('custom dropdowns: react-select, MUI, choices.js and select2 fill like a us
     religion: 'CH',
     village: 'V3',
   });
-  // Lists that loaded while filling are reported, for the phone's "Pick one" picker.
+  // Lists that loaded while filling are reported by the page (the worker keeps the form's saved field list).
   expect(report.options?.taluk?.map((o) => o.label)).toContain('Omalur');
 
   // Undo puts every widget back to empty.
@@ -210,7 +210,7 @@ test('custom dropdowns: react-select, MUI, choices.js and select2 fill like a us
   await page.close();
 });
 
-test('multi-step form: fields that appear later are reported (next step, revealed field, next page)', async () => {
+test('multi-step form: a next step and a next page are reported, a revealed field is not', async () => {
   // Capture what the page watcher sends to the worker (the worker itself ignores tabs without a session).
   await sw.evaluate(() => {
     const g = globalThis as unknown as { __changes: unknown[]; __listening?: boolean };
@@ -243,10 +243,10 @@ test('multi-step form: fields that appear later are reported (next step, reveale
   expect(known).toEqual(['full_name', 'mobile', 'other_address']);
   await toContent(url, { type: 'WATCH', known });
 
-  // A checkbox reveals a dependent field.
+  // A checkbox reveals a dependent field: present, but not added (the form keeps its field list).
   await page.check('#other_address');
-  let c = await waitForChange((x) => added(x).includes('comm_address'));
-  expect(added(c)).toEqual(['comm_address']);
+  let c = await waitForChange((x) => x.present.includes('comm_address'));
+  expect(added(c)).toEqual([]);
 
   // Next: step 1 hides, step 2 shows.
   await page.click('#next');
@@ -254,15 +254,15 @@ test('multi-step form: fields that appear later are reported (next step, reveale
   expect(added(c)).toEqual(['occupation', 'income']);
   expect(c.present).toEqual(['occupation', 'income']);
 
-  // Choosing "Other" shows "Specify occupation".
+  // Choosing "Other" shows "Specify occupation": not added either.
   await page.selectOption('#occupation', 'other');
-  c = await waitForChange((x) => added(x).includes('occupation_other'));
-  expect(added(c)).toEqual(['occupation_other']);
+  c = await waitForChange((x) => x.present.includes('occupation_other'));
+  expect(added(c)).toEqual([]);
 
   // The form's next page (a full navigation on the same site): the worker sends WATCH again on load.
   await page.click('#to_page2');
   await page.waitForSelector('#bank_name');
-  await toContent(url, { type: 'WATCH', known: [...known, 'comm_address', 'occupation', 'income', 'occupation_other'] });
+  await toContent(url, { type: 'WATCH', known: [...known, 'occupation', 'income'] });
   c = await waitForChange((x) => added(x).includes('bank_name'));
   expect(added(c)).toEqual(['bank_name', 'ifsc', 'account_no']);
   await toContent(url, { type: 'WATCH', off: true });

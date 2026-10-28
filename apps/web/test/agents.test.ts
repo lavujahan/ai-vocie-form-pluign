@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { assistantMessage, functionCall, ScriptedModel } from '@openai/agents/testing';
 import { Usage } from '@openai/agents';
-import type { FormSchema } from '@vff/shared';
-import { mapTranscript, buildMapperPrompt, mapperInstructions, withShortIds } from '@/lib/agents/fieldMapper';
+import { FieldDescriptor, validateValue, type AnalyzerAnswer, type FieldAnalysis, FormSchema } from '@vff/shared';
+import { mapTranscript, buildMapperPrompt, fieldsBlock, mapperInstructions, withShortIds } from '@/lib/agents/fieldMapper';
 import { agentModel, modelName } from '@/lib/agents/usage';
 import { baseModel } from '@/lib/usage/pricing';
-import { sanitizeAnalysis } from '@/lib/agents/formAnalyzer';
+import { analyzeForm, keyHasWords, pageRules, readingFromAnswer, sanitizeAnalysis } from '@/lib/agents/formAnalyzer';
 import { isEmptyTranscript, sanitizeMapping } from '@/lib/agents/guardrails';
 import { mapperTools, validateForField, type AgentField } from '@/lib/agents/tools';
 import { EVAL_FORM } from '../scripts/eval-fixtures';
@@ -114,7 +114,7 @@ describe('sanitizeAnalysis', () => {
       form_title: null,
       html_snippet: '',
       fields: [
-        { field_key: 'a', label: 'A', field_type: 'text', required: false, options: [], multiple: false, dynamic_options: false, group_key: null, depends_on: null, step_index: 0, min: null, max: null, pattern: null, placeholder: null, context: null, accept: null },
+        { field_key: 'a', label: 'A', field_type: 'text', required: false, options: [], multiple: false, dynamic_options: false, group_key: null, depends_on: null, step_index: 0, min: null, max: null, pattern: null, placeholder: null, min_length: null, max_length: null, title: null, inputmode: null, context: null, accept: null },
       ],
     } satisfies FormSchema;
     const base = { clean_label: 'A', semantic_type: 'other', required: false, step_index: 0, output_script: 'en', label_ta: '', file_rules: null } as const;
@@ -130,6 +130,80 @@ describe('sanitizeAnalysis', () => {
     );
     expect(out).toHaveLength(1);
     expect(out[0]).toMatchObject({ field_key: 'a', depends_on: null, validation: { regex: null } });
+  });
+});
+
+describe('Form Analyzer short answer', () => {
+  const field = (field_key: string, label: string, field_type: FormSchema['fields'][number]['field_type'] = 'text') => ({
+    field_key, label, field_type, required: false, options: [], multiple: false, dynamic_options: false, group_key: null,
+    depends_on: null, step_index: 0, min: null, max: null, pattern: null, placeholder: null, min_length: null, max_length: null, title: null, inputmode: null, context: null, accept: null,
+  });
+  const schema = {
+    page_url: 'https://x.test/form',
+    page_title: 'X',
+    form_title: null,
+    html_snippet: '',
+    fields: [
+      field('txtName', 'Name'),
+      field('txtNameTa', 'Name in regional language'),
+      field('ddlDistrict', 'District', 'select'),
+      field('ddlTaluk', 'Taluk', 'select'),
+      field('filePhoto', 'Photo', 'file'),
+    ],
+  } satisfies FormSchema;
+  const answerField = (id: string, more: Partial<AnalyzerAnswer['fields'][number]> = {}): AnalyzerAnswer['fields'][number] => ({
+    field_key: id, clean_label: id, semantic_type: 'other', required: false, validation: null, depends_on: null, label_ta: 'பெயர்', ...more,
+  });
+  const answer = {
+    form_purpose: 'Test form',
+    fields: [answerField('f1'), answerField('f2'), answerField('f3'), answerField('f4', { depends_on: 'f3' }), answerField('f5')],
+    tamil_fields: ['f2'],
+    step_starts: ['f3'],
+    uploads: [{ field_key: 'f5', kind: 'photo', formats: ['jpg'], max_kb: 50, min_kb: null, max_pages: null, width_px: null, height_px: null, shape: null, note: null }],
+  } as AnalyzerAnswer;
+
+  it('puts the site keys back and fills Tamil output, steps and upload rules from the short lists', () => {
+    const r = readingFromAnswer(answer, schema);
+    expect(r.fields.map((f) => [f.field_key, f.output_script, f.step_index])).toEqual([
+      ['txtName', 'en', 0],
+      ['txtNameTa', 'ta', 0],
+      ['ddlDistrict', 'en', 1],
+      ['ddlTaluk', 'en', 1],
+      ['filePhoto', 'en', 1],
+    ]);
+    expect(r.fields[3].depends_on).toBe('ddlDistrict');
+    expect(r.fields[4].file_rules).toMatchObject({ kind: 'photo', max_kb: 50 });
+    expect(r.fields[0].file_rules).toBeNull();
+    // The saved shape is unchanged, so readings, the phone and the mapper read it as before.
+    expect(sanitizeAnalysis(r, schema).map((f) => f.field_key)).toEqual(schema.fields.map((f) => f.field_key));
+    expect(sanitizeAnalysis(r, schema)[0].validation).toBeNull();
+  });
+
+  it('drops an id the form does not have', () => {
+    const r = readingFromAnswer({ ...answer, fields: [...answer.fields, answerField('f99')] }, schema);
+    expect(sanitizeAnalysis(r, schema)).toHaveLength(5);
+  });
+
+  it('reads the fields the answer left out again, once, on their own', async () => {
+    const first = { ...answer, fields: answer.fields.filter((f) => f.field_key !== 'f2' && f.field_key !== 'f4') };
+    // The second call lists only the two missing fields, as f1 and f2.
+    const second = { ...answer, fields: [answerField('f1', { clean_label: 'Name in Tamil' }), answerField('f2', { depends_on: 'f1' })], tamil_fields: ['f1'], step_starts: [], uploads: [] };
+    const model = new ScriptedModel([[assistantMessage(JSON.stringify(first))], [assistantMessage(JSON.stringify(second))]]);
+    const r = await analyzeForm(schema, { model });
+    expect(model.calls).toHaveLength(2);
+    const byKey = new Map(sanitizeAnalysis(r, schema).map((f) => [f.field_key, f]));
+    expect([...byKey.keys()].sort()).toEqual(schema.fields.map((f) => f.field_key).sort());
+    expect(byKey.get('txtNameTa')).toMatchObject({ clean_label: 'Name in Tamil', output_script: 'ta', step_index: 0 });
+    // Taluk follows District, which started step 1 in the first answer.
+    expect(byKey.get('ddlTaluk')?.step_index).toBe(1);
+  });
+
+  it('sends short ids with the site key as a hint, and reads the short answer', async () => {
+    const model = new ScriptedModel([[assistantMessage(JSON.stringify(answer))]]);
+    const r = await analyzeForm(schema, { model });
+    const prompt = JSON.stringify(model.calls[0]);
+    expect(prompt).toContain('f1 · key: txtName');
+    expect(r.fields[1]).toMatchObject({ field_key: 'txtNameTa', output_script: 'ta' });
   });
 });
 
@@ -224,17 +298,32 @@ describe('Field Mapping Agent (scripted model)', () => {
     });
   });
 
-  it('puts only the target field and current values in the prompt', () => {
-    const p = buildMapperPrompt({
-      fields: EVAL_FORM as AgentField[],
-      current: { phone: '9876543210', city: null },
-      transcript: 'Chennai',
-      targetFieldKey: 'city',
-    });
-    expect(p).toContain('Mode: single field');
-    expect(p).toContain('- city');
-    expect(p).not.toContain('- full_name');
-    expect(p).toContain('phone = "9876543210"');
+  it('starts with all the fields in every mode (the same, cached text), then the mode and current values', () => {
+    const input = { fields: EVAL_FORM as AgentField[], current: { phone: '9876543210', city: null }, transcript: 'Chennai' };
+    const one = buildMapperPrompt({ ...input, targetFieldKey: 'city' });
+    const whole = buildMapperPrompt({ ...input, targetFieldKey: null });
+    const start = (p: string) => p.slice(0, p.indexOf('\n\nMode:'));
+    expect(start(one)).toBe(start(whole));
+    expect(start(one)).toBe(fieldsBlock(EVAL_FORM as AgentField[]));
+    expect(one).toContain('Mode: single field. The speech is the value for "city" only.');
+    expect(one).toContain('- full_name');
+    expect(one).toContain('phone = "9876543210"');
+  });
+
+  it('answers only for the target field in single-field mode, though the prompt lists them all', async () => {
+    const ids = withShortIds({ fields: EVAL_FORM, current: {}, transcript: '', targetFieldKey: null }).input.fields;
+    const cityId = ids[EVAL_FORM.findIndex((f) => f.field_key === 'city')].field_key;
+    const final = {
+      values: [
+        { field_key: 'f1', value: 'Ramesh Kumar', confidence: 0.9, source_phrase: null, number_parts: null },
+        { field_key: 'f2', value: 'x', confidence: 0.9, source_phrase: null, number_parts: null },
+        { field_key: cityId, value: 'Chennai', confidence: 0.9, source_phrase: null, number_parts: null },
+      ],
+    };
+    const model = new ScriptedModel([[assistantMessage(JSON.stringify(final))]]);
+    const out = await mapTranscript({ fields: EVAL_FORM, current: {}, transcript: 'Chennai', targetFieldKey: 'city' }, { model });
+    if (out.empty) throw new Error('empty');
+    expect(out.values.map((v) => [v.field_key, v.value])).toEqual([['city', 'Chennai']]);
   });
 
   it('tells the model when a dropdown has no options yet', () => {
@@ -325,5 +414,83 @@ describe('model per AI step', () => {
     expect(mapperInstructions(true)).toContain('Call validate_value');
     expect(mapperInstructions(false)).not.toContain('validate_value');
     expect(mapperInstructions(false)).not.toContain('{{');
+  });
+});
+
+describe("the input's own rules (read from the page, not the AI)", () => {
+  const desc = (over: Record<string, unknown>) => FieldDescriptor.parse({ field_key: 'mobile', label: 'Mobile number', field_type: 'text', required: true, ...over });
+
+  it('a number of fixed length gets "N digits" from minlength / maxlength', () => {
+    expect(pageRules(desc({ min_length: 10, max_length: 10, inputmode: 'numeric' }))).toEqual({ regex: null, min_length: 10, max_length: 10, format: '10 digits' });
+    expect(pageRules(desc({ field_type: 'tel', min_length: 6, max_length: 6 }))?.format).toBe('6 digits');
+    expect(pageRules(desc({ max_length: 50 }))).toEqual({ regex: null, min_length: null, max_length: 50, format: null });
+    expect(pageRules(desc({}))).toBeNull();
+  });
+
+  it("a pattern's title is its format hint", () => {
+    expect(pageRules(desc({ pattern: '[6-9][0-9]{9}', title: 'Enter 10 digit mobile number' }))?.format).toBe('Enter 10 digit mobile number');
+  });
+
+  it("wins over the AI's rules, which fill in the rest; and is checked after mapping", () => {
+    const schema = FormSchema.parse({ page_url: 'https://x.test/', page_title: 'X', fields: [desc({ min_length: 10, max_length: 10, inputmode: 'numeric' })] });
+    const ai: FieldAnalysis = {
+      field_key: 'mobile', clean_label: 'Mobile number', semantic_type: 'phone', required: true, depends_on: null, step_index: 0,
+      output_script: 'en', label_ta: 'கைபேசி எண்', file_rules: null, validation: { regex: '[6-9][0-9]{9}', min_length: null, max_length: 12, format: 'mobile' },
+    };
+    const [f] = sanitizeAnalysis({ form_purpose: 'X', fields: [ai] }, schema);
+    expect(f.validation).toEqual({ regex: '[6-9][0-9]{9}', min_length: 10, max_length: 10, format: '10 digits' });
+    const field = { ...schema.fields[0], validation: f.validation, semantic_type: null };
+    expect(validateValue(field, '987654321').ok).toBe(false);
+    expect(validateValue(field, '9876543210').ok).toBe(true);
+  });
+
+  it('tells the mapper the length when there is no format hint', () => {
+    const p = buildMapperPrompt({
+      fields: [{ field_key: 'acc', label: 'Account number', field_type: 'text', required: false, options: [], validation: { regex: null, min_length: null, max_length: 18, format: null } }],
+      current: {}, transcript: 'x', targetFieldKey: null,
+    });
+    expect(p).toContain('max 18 characters');
+  });
+});
+
+describe('Tamil-only twins and the site-key hint', () => {
+  const twinSchema = FormSchema.parse({
+    page_url: 'https://x.test/', page_title: 'CAN',
+    fields: [
+      { field_key: 'canreg:enappname', label: 'Applicant Name', field_type: 'text', required: true },
+      { field_key: 'canreg:tnappname', label: 'விண்ணப்பதாரர் பெயர்', field_type: 'text', required: true },
+      { field_key: 'nameA', label: 'பெயர்', field_type: 'text', required: false },
+      { field_key: 'nameB', label: 'தந்தை பெயர்', field_type: 'text', required: false },
+    ],
+  });
+  const read = (key: string, clean: string): FieldAnalysis => ({
+    field_key: key, clean_label: clean, semantic_type: 'full_name', required: true, validation: null, depends_on: null, step_index: 0,
+    output_script: 'en', label_ta: 'பெயர்', file_rules: null,
+  });
+
+  it('a Tamil-only label with the same clean label as an English field takes Tamil and says so', () => {
+    const out = sanitizeAnalysis(
+      { form_purpose: 'CAN', fields: [read('canreg:enappname', 'Applicant name'), read('canreg:tnappname', 'Applicant name'), read('nameA', 'Name'), read('nameB', 'Name')] },
+      twinSchema,
+    );
+    expect(out[0]).toMatchObject({ clean_label: 'Applicant name', output_script: 'en' });
+    expect(out[1]).toMatchObject({ clean_label: 'Applicant name in Tamil', output_script: 'ta' });
+    // Two Tamil-only fields with the same label are not twins of an English field.
+    expect(out[2].output_script).toBe('en');
+    expect(out[3].output_script).toBe('en');
+  });
+
+  it('keeps a reading the AI already got right', () => {
+    const out = sanitizeAnalysis({ form_purpose: 'CAN', fields: [read('canreg:enappname', 'Applicant name'), { ...read('canreg:tnappname', 'Applicant name in Tamil'), output_script: 'ta' }] }, twinSchema);
+    expect(out[1]).toMatchObject({ clean_label: 'Applicant name in Tamil', output_script: 'ta' });
+  });
+
+  it('shows the site key only when it has words', () => {
+    expect(keyHasWords('txtFatherName')).toBe(true);
+    expect(keyHasWords('ddl_village')).toBe(true);
+    expect(keyHasWords('canreg:enappname')).toBe(true);
+    expect(keyHasWords('12330')).toBe(false);
+    expect(keyHasWords('radio-group-1790337220827-0')).toBe(false);
+    expect(keyHasWords('number-1790528788365-0')).toBe(false);
   });
 });
