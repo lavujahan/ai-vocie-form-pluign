@@ -63,10 +63,11 @@ export type ResolveOptionResult = ResolveOptionResponse | null;
 export type PageLoadedMessage = { type: 'PAGE_LOADED'; site: string };
 
 /**
- * From the page watcher: fields that appeared since the session's scan (`schema.fields`, may be empty)
- * and every field key on the page now (`present`), so waiting values can be filled.
+ * From the page watcher: fields that appeared since the session's scan (`schema.fields`, may be empty),
+ * whether they are a new step of the form (`new_step`; else a choice revealed them), and every field
+ * key on the page now (`present`): fields of a branch that was not chosen are hidden on the phone.
  */
-export type FieldsChangedMessage = { type: 'FIELDS_CHANGED'; schema: FormSchemaInput; present: string[] };
+export type FieldsChangedMessage = { type: 'FIELDS_CHANGED'; schema: FormSchemaInput; present: string[]; new_step?: boolean };
 
 // ---------- popup ⇄ service worker ----------
 

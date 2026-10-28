@@ -83,6 +83,10 @@ try {
   const { data: v4 } = await admin.from('field_values').select('value').eq('field_id', field.id).single();
   check('latest-wins: newer #4 overwrites', v4?.value === 'from #4');
 
+  // ---- Fields a choice hides (migration 0019) ----
+  const hiddenRes = await admin.from('form_sessions').update({ hidden_fields: ['f_hidden'] }).eq('id', session.id).select('hidden_fields').single();
+  check('Hidden fields: form_sessions.hidden_fields exists (apply migration 0019)', !hiddenRes.error && hiddenRes.data?.hidden_fields?.[0] === 'f_hidden', hiddenRes.error?.message);
+
   // ---- Start over (migration 0005): clears values at seq 10; an utterance from seq 8 finishing later loses ----
   await admin.from('utterances').insert({ session_id: session.id, seq: 9, status: 'done', transcript: 'previous applicant' });
   const reset = await admin.rpc('reset_session', { p_session: session.id, p_seq: 10, p_scope: 'both' });

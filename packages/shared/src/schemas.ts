@@ -628,6 +628,11 @@ export type SessionInfo = {
   desktop_report: DesktopReport | null;
   /** When the current phone paired (null while the QR waits to be scanned). */
   paired_at?: string | null;
+  /**
+   * Field keys a choice on the page hides now (the other branch of the form; migration 0019). Their
+   * values are kept: the phone lists them under "Not on the form now", and they fill if they come back.
+   */
+  hidden_fields?: string[];
 };
 
 /** "Connect phone again": the same QR code works once more until `expires_at` (answers are kept). */
@@ -743,8 +748,10 @@ export const DesktopUpdateRequest = z
         total: z.number().int().min(0),
       })
       .optional(),
+    /** Fields of the step on the page that a choice hides now (see SessionInfo.hidden_fields). */
+    hidden: z.array(z.string().max(500)).max(2000).optional(),
   })
-  .refine((b) => b.state || b.report, 'Nothing to update');
+  .refine((b) => b.state || b.report || b.hidden, 'Nothing to update');
 export type DesktopUpdateRequest = z.infer<typeof DesktopUpdateRequest>;
 
 /** Extension → server: pick the option the speaker meant from the options loaded on the page. */

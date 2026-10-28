@@ -39,15 +39,21 @@ describe('what the phone may do', () => {
 
 describe('fields that appear later (a wizard step, a revealed field)', () => {
   const field = (field_key: string) => ({ field_key, label: field_key, field_type: 'text' as const }) as never;
+  const existing = [
+    { field_key: 'full_name', position: 0, step_index: 0 },
+    { field_key: 'mobile', position: 1, step_index: 0 },
+  ];
   it('adds only new keys, after the last field, as the next step', () => {
-    const existing = [
-      { field_key: 'full_name', position: 0, step_index: 0 },
-      { field_key: 'mobile', position: 1, step_index: 0 },
-    ];
     const r = newFieldsPlacement(existing, [field('mobile'), field('occupation'), field('income'), field('occupation')]);
     expect(r.fresh.map((f) => f.field_key)).toEqual(['occupation', 'income']);
     expect(r.startPosition).toBe(2);
     expect(r.stepIndex).toBe(1);
+  });
+
+  it('puts fields a choice revealed in the step shown, still after the existing fields', () => {
+    const r = newFieldsPlacement(existing, [field('org_name')], false);
+    expect(r.startPosition).toBe(2);
+    expect(r.stepIndex).toBe(0);
   });
 });
 

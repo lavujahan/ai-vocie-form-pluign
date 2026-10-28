@@ -94,8 +94,8 @@ chrome.runtime.onMessage.addListener((msg: ContentRequest, _sender, sendResponse
       case 'WATCH':
         if (msg.off) stopWatch();
         else {
-          startWatch(msg.known ?? [], scan, ({ schema, present }) => {
-            const change: FieldsChangedMessage = { type: 'FIELDS_CHANGED', schema, present };
+          startWatch(msg.known ?? [], scan, ({ schema, present, newStep }) => {
+            const change: FieldsChangedMessage = { type: 'FIELDS_CHANGED', schema, present, new_step: newStep };
             void chrome.runtime.sendMessage(change).catch(() => null);
           });
         }

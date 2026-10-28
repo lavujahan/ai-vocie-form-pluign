@@ -270,6 +270,7 @@ export function useVoiceSession(code: string) {
                 reset_scope: row.reset_scope ?? s.reset_scope,
                 desktop_state: row.desktop_state ?? s.desktop_state,
                 desktop_report: row.desktop_report ?? s.desktop_report,
+                hidden_fields: row.hidden_fields ?? s.hidden_fields,
               }
             : s,
         );

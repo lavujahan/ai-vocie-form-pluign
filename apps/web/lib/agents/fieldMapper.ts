@@ -109,6 +109,10 @@ export function buildMapperPrompt(input: MapInput): string {
     input.targetFieldKey
       ? `Mode: single field. The speech is the value for "${input.targetFieldKey}" only.`
       : 'Mode: full form. The speech may cover any number of fields.',
+    // After the fields, not in them: a choice on the page changes this, and the start stays cached.
+    ...(input.hidden?.length
+      ? [`Not on the form now (another choice on the page hides them): ${input.hidden.join(', ')}. Fill these only when the speech clearly names them.`]
+      : []),
     `Current values:\n${current.length ? current.join('\n') : '(none)'}`,
     ...(input.recent?.length ? [`Recent speech (oldest first):\n${renderRecent(input.recent)}`] : []),
     `Speech:\n"""${input.transcript}"""`,
@@ -125,6 +129,8 @@ export type MapInput = {
   targetFieldKey: string | null;
   /** The last few recordings and what they set, oldest first (context for corrections). */
   recent?: RecentSpeech[];
+  /** Fields a choice on the page hides now (the other branch of the form). They stay in "Fields". */
+  hidden?: string[];
 };
 
 export type MapOutcome = (SanitizedMapping & { empty: false }) | { empty: true };
@@ -146,6 +152,7 @@ export function withShortIds(input: MapInput): { input: MapInput; realKey: (id: 
       current: renameKeys(input.current),
       targetFieldKey: input.targetFieldKey && id(input.targetFieldKey),
       recent: input.recent?.map((r) => ({ ...r, set: renameKeys(r.set) })),
+      hidden: input.hidden?.filter((k) => ids.has(k)).map(id),
     },
     realKey: (i) => keys.get(i),
   };

@@ -144,7 +144,7 @@ export const POST = route(async (req) => {
     const recent = target ? [] : await recentSpeech(session, seq, recordingId, fields, values);
     const outcome = await withRetry(() =>
       mapTranscript(
-        { fields, current, transcript: fullText, targetFieldKey: target, recent },
+        { fields, current, transcript: fullText, targetFieldKey: target, recent, hidden: session.hidden_fields },
         { onUsage: (run) => usage.push(openaiEvent(owner, 'map', run)) },
       ),
     );

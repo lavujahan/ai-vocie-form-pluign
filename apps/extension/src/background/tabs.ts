@@ -28,6 +28,20 @@ export type TabState = {
 /** Keyed by tab id (a string once it has been through chrome.storage). */
 export type Tabs = Record<string, TabState>;
 
+/**
+ * Fields a choice on the page hides now (the other branch of a form): missing from the page while
+ * other fields of their step are on it. Fields of another step (a wizard's earlier page) are not
+ * hidden: that step is just not shown. Sorted, so equal lists compare equal.
+ */
+export function hiddenFields(fields: { field_key: string; step_index?: number | null }[], present: string[]): string[] {
+  const on = new Set(present);
+  const stepsShown = new Set(fields.filter((f) => on.has(f.field_key)).map((f) => f.step_index ?? 0));
+  return fields
+    .filter((f) => !on.has(f.field_key) && stepsShown.has(f.step_index ?? 0))
+    .map((f) => f.field_key)
+    .sort();
+}
+
 /** Throws if a new form can't be started in `tabId` (rescanning a tab that already has one is fine). */
 export function assertRoom(tabs: Tabs, tabId: number) {
   if (!tabs[tabId] && Object.keys(tabs).length >= MAX_TABS) {

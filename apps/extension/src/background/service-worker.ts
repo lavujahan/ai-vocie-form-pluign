@@ -41,6 +41,7 @@ import {
   assertRoom,
   changesSince,
   endTab,
+  hiddenFields,
   mergeFill,
   migrate,
   otherSessions,
@@ -193,8 +194,10 @@ const withFields = (snap: SessionSnapshot, fields: SessionField[]): SessionSnaps
 });
 
 /**
- * The page watcher saw a change: new fields are added to the session (the phone shows them). Values
- * waiting for their field are filled on the next "Fill form", like everything else.
+ * The page watcher saw a change: new fields are added to the session (the phone shows them), as the
+ * next step or, when a choice revealed them, in the step on the page. Then the phone is told which
+ * fields a choice hides now (the other branch of the form). Values waiting for their field are filled
+ * on the next "Fill form", like everything else.
  */
 async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
   await ready;
@@ -202,7 +205,8 @@ async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
   if (!t || !state.auth || (t.desktop ?? 'open') !== 'open') return;
   if (change.schema.fields.length) {
     try {
-      const res = await api<AddFieldsResponse>(`/api/sessions/${t.session.session_code}/fields`, {
+      const step = change.new_step === false ? 'same' : 'next';
+      const res = await api<AddFieldsResponse>(`/api/sessions/${t.session.session_code}/fields?step=${step}`, {
         body: change.schema,
         token: state.auth.token,
       });
@@ -214,6 +218,19 @@ async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
       console.warn('could not add the new fields', e);
     }
   }
+  await reportHidden(tabId, change.present);
+}
+
+/** Tells the phone (and the popup) which fields a choice on the page hides now, when that changed. */
+async function reportHidden(tabId: number, present: string[]) {
+  const s = tabOf(tabId)?.session;
+  if (!s?.snapshot || !state.auth) return;
+  const hidden = hiddenFields(s.snapshot.fields, present);
+  const before = [...(s.snapshot.session.hidden_fields ?? [])].sort();
+  if (hidden.join('\u0001') === before.join('\u0001')) return;
+  patchSnapshot(tabId, (snap) => ({ ...snap, session: { ...snap.session, hidden_fields: hidden } }));
+  await save();
+  await reportDesktop(s, { hidden });
 }
 
 // ---------- content script ----------
@@ -620,6 +637,7 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
           reset_scope: row.reset_scope ?? snap.session.reset_scope,
           desktop_state: row.desktop_state ?? snap.session.desktop_state,
           desktop_report: row.desktop_report ?? snap.session.desktop_report,
+          hidden_fields: row.hidden_fields ?? snap.session.hidden_fields,
         },
       }));
       await save();

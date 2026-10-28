@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertRoom, changesSince, endTab, MAX_TABS, mergeFill, migrate, otherSessions, patchTab, reopenQr, startTab, tabOfSession, watermarkOf, type Tabs } from '../src/background/tabs';
+import { assertRoom, changesSince, endTab, hiddenFields, MAX_TABS, mergeFill, migrate, otherSessions, patchTab, reopenQr, startTab, tabOfSession, watermarkOf, type Tabs } from '../src/background/tabs';
 import { siteOf, type ActiveSession } from '../src/messages';
 
 const session = (tab_id: number, id = `s${tab_id}`): ActiveSession => ({
@@ -115,5 +115,24 @@ describe('Connect phone again', () => {
     expect(next[1]).toMatchObject({ filledUpTo: 7, canUndo: true });
     expect(next[2]).toBe(tabs[2]);
     expect(reopenQr(tabs, 9, '2030-01-01T01:00:00Z')).toBe(tabs);
+  });
+});
+
+describe('fields a choice hides (branches of a form)', () => {
+  const fields = [
+    { field_key: 'name', step_index: 0 },
+    { field_key: 'dob', step_index: 0 },
+    { field_key: 'org_name', step_index: 0 },
+    { field_key: 'bank', step_index: 1 },
+  ];
+
+  it('hides a missing field of the step on the page', () => {
+    expect(hiddenFields(fields, ['name', 'org_name'])).toEqual(['dob']);
+    expect(hiddenFields(fields, ['org_name', 'name', 'dob'])).toEqual([]);
+  });
+
+  it("does not hide another step's fields: that step is just not shown", () => {
+    expect(hiddenFields(fields, ['bank'])).toEqual([]);
+    expect(hiddenFields(fields, ['name'])).toEqual(['dob', 'org_name']);
   });
 });

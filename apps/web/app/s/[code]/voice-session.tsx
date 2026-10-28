@@ -220,17 +220,24 @@ function SessionScreen({ code }: { code: string }) {
   const latestTranscript = [...s.utterances.values()]
     .filter((u) => u.transcript)
     .sort((a, b) => b.seq - a.seq)[0]?.transcript;
-  const filledCount = s.fields.filter((f) =>
+  // Fields an answer on the computer hides now (the other branch of the form): listed apart at the
+  // end, answers kept, not counted and never asked for.
+  const hiddenList = s.session?.hidden_fields;
+  const [shown, hiddenFields] = useMemo(() => {
+    const hidden = new Set(hiddenList ?? []);
+    return [s.fields.filter((f) => !hidden.has(f.field_key)), s.fields.filter((f) => hidden.has(f.field_key))];
+  }, [s.fields, hiddenList]);
+  const filledCount = shown.filter((f) =>
     isFile(f)
       ? ['uploaded', 'filled'].includes(s.files.get(f.id)?.status ?? '')
       : !!s.valueByKey.get(f.field_key)?.value,
   ).length;
   // Row mics are for corrections: the first pass is spoken with the big mic (one AI call for the whole
   // form; field by field measured ~1.8× the cost and ~5× the wait), so they show once most fields are filled.
-  const voiceFields = s.fields.filter((f) => !isFile(f));
+  const voiceFields = shown.filter((f) => !isFile(f));
   const voiceFilled = voiceFields.filter((f) => !!s.valueByKey.get(f.field_key)?.value).length;
   const rowMic = voiceFields.length > 0 && voiceFilled / voiceFields.length >= ROW_MIC_AT;
-  const steps = useMemo(() => stepStarts(s.fields), [s.fields]);
+  const steps = useMemo(() => stepStarts(shown), [shown]);
 
   const desktop = s.session?.desktop_state ?? 'open';
   const sent = s.session?.status === 'filled';
@@ -242,7 +249,7 @@ function SessionScreen({ code }: { code: string }) {
     ? unsentChanges(values, files, resetSeq, sentUpTo, s.session?.desktop_report?.at)
     : 0;
   const send = useSend({
-    fields: s.fields,
+    fields: shown,
     statusOf,
     sent,
     unsent,
@@ -407,7 +414,7 @@ function SessionScreen({ code }: { code: string }) {
   }
 
   const sheetField = fileSheet ? s.fields.find((f) => f.field_key === fileSheet) : undefined;
-  const attention = s.fields.filter((f) => needsAttention(f, statusOf(f)));
+  const attention = shown.filter((f) => needsAttention(f, statusOf(f)));
 
   /** Banners and sheets shown above the fields. */
   const top = (
@@ -498,22 +505,34 @@ function SessionScreen({ code }: { code: string }) {
       <div className="flex flex-1 flex-col gap-3 px-4 pt-3 pb-6">
         {top}
         <div>
-          {s.fields.map((f, i) => (
+          {shown.map((f, i) => (
             <Fragment key={f.id}>
               <StepDivider step={steps.get(f.id)} />
               {/* Upload fields are listed together under their own heading. */}
-              {isFile(f) && (i === 0 || !isFile(s.fields[i - 1])) && (
+              {isFile(f) && (i === 0 || !isFile(shown[i - 1])) && (
                 <GroupLabel>{t('files')}</GroupLabel>
               )}
               {item(f)}
             </Fragment>
           ))}
+          {hiddenFields.length > 0 && (
+            // The other branch of the form: kept with its answers, back in the list if the choice comes back.
+            <details className="mt-2">
+              <summary className="cursor-pointer pt-4 pb-1 text-[11.5px] font-bold tracking-wider text-muted uppercase">
+                {t('notOnForm', { n: hiddenFields.length })}
+              </summary>
+              <p className="pb-2 text-xs text-muted">{t('notOnFormHint')}</p>
+              {hiddenFields.map((f) => (
+                <Fragment key={f.id}>{item(f)}</Fragment>
+              ))}
+            </details>
+          )}
         </div>
       </div>
       <BottomBar
         heard={recording && !recordingTarget ? t('listenAll') : (latestTranscript ?? null)}
         filled={filledCount}
-        total={s.fields.length}
+        total={shown.length}
         processing={processing}
         waitStep={waitStep}
         attention={attention.length}

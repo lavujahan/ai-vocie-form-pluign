@@ -65,15 +65,18 @@ export type FieldRow = {
 const BASE_COLUMNS =
   'id, user_id, session_code, status, form_name, page_url, page_origin, page_title, analysis_status, expires_at, paired_at, created_at';
 const SESSION_COLUMNS = `${BASE_COLUMNS}, reset_seq, reset_scope, desktop_state, desktop_report`;
+/** With migration 0019 (fields a choice hides). */
+const ALL_SESSION_COLUMNS = `${SESSION_COLUMNS}, hidden_fields`;
 
-/** Defaults for the migration-0005 columns (Start over, desktop tab state) on rows read without them. */
+/** Defaults for the migration-0005 / 0019 columns (Start over, desktop tab state, hidden fields) on rows read without them. */
 export function withSessionDefaults(row: Record<string, unknown>): SessionRow {
-  return { reset_seq: 0, reset_scope: null, desktop_state: 'open', desktop_report: null, ...row } as SessionRow;
+  return { reset_seq: 0, reset_scope: null, desktop_state: 'open', desktop_report: null, hidden_fields: [] as string[], ...row } as SessionRow;
 }
 
-/** Reads one session. Works before migration 0005 is applied too (its columns get their defaults). */
+/** Reads one session. Works before migrations 0005 / 0019 are applied too (their columns get their defaults). */
 async function selectSession(column: 'id' | 'session_code', value: string): Promise<SessionRow> {
-  let res = await db().from('form_sessions').select(SESSION_COLUMNS).eq(column, value).maybeSingle();
+  let res = await db().from('form_sessions').select(ALL_SESSION_COLUMNS).eq(column, value).maybeSingle();
+  if (res.error?.code === '42703') res = await db().from('form_sessions').select(SESSION_COLUMNS).eq(column, value).maybeSingle();
   if (res.error?.code === '42703') res = await db().from('form_sessions').select(BASE_COLUMNS).eq(column, value).maybeSingle();
   const row = must(res);
   if (!row) throw fail(404, 'Session not found');
@@ -124,14 +127,22 @@ export async function insertFieldRows(rows: ReturnType<typeof fieldRows>): Promi
 }
 
 /** Fields the session doesn't have yet, with where they go: after the last field, in the next step. */
-export function newFieldsPlacement(existing: Pick<FieldRow, 'field_key' | 'position' | 'step_index'>[], fields: FieldDescriptor[]) {
+export function newFieldsPlacement(
+  existing: Pick<FieldRow, 'field_key' | 'position' | 'step_index'>[],
+  fields: FieldDescriptor[],
+  /** A new step of the form (next page, wizard step); false: fields a choice revealed on the step shown. */
+  nextStep = true,
+) {
   const have = new Set(existing.map((f) => f.field_key));
   const seen = new Set<string>();
   const fresh = fields.filter((f) => !have.has(f.field_key) && !seen.has(f.field_key) && seen.add(f.field_key));
+  const lastStep = Math.max(0, ...existing.map((f) => f.step_index ?? 0));
   return {
     fresh,
+    // Always after the existing fields: the mapper's prompt lists fields in this order, so its start
+    // (instructions and the fields before) stays the same and is billed at the cached price.
     startPosition: Math.max(-1, ...existing.map((f) => f.position)) + 1,
-    stepIndex: Math.max(0, ...existing.map((f) => f.step_index ?? 0)) + 1,
+    stepIndex: nextStep ? lastStep + 1 : lastStep,
   };
 }
 
@@ -172,6 +183,7 @@ export const toSessionInfo = (s: SessionRow): SessionInfo => ({
   desktop_state: s.desktop_state ?? 'open',
   desktop_report: s.desktop_report ?? null,
   paired_at: s.paired_at ?? null,
+  hidden_fields: s.hidden_fields ?? [],
 });
 
 export async function getValues(sessionId: string): Promise<SessionValue[]> {

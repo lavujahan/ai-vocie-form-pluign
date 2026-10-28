@@ -386,6 +386,47 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
   const processing = snap.utterances.filter((u) => u.status === 'processing').length;
   const skipped = new Map((state.lastFill?.skipped ?? []).map((x) => [x.field_key, x.reason]));
   const hasValues = snap.values.some((v) => v.value) || (snap.files ?? []).some((f) => f.status === 'uploaded');
+  // Fields a choice on the page hides now (the other branch of the form): listed apart, answers kept.
+  const hiddenKeys = new Set(snap.session.hidden_fields ?? []);
+  const shown = snap.fields.filter((f) => !hiddenKeys.has(f.field_key));
+  const hidden = snap.fields.filter((f) => hiddenKeys.has(f.field_key));
+
+  const row = (f: SessionField, isHidden = false) => {
+    if (f.field_type === 'file') {
+      return <FileRow key={f.id} field={f} file={fileOf.get(f.id)} needsClick={state.uploadClicks.includes(f.field_key)} />;
+    }
+    const v = valueOf.get(f.id);
+    const reason = skipped.get(f.field_key);
+    let content: React.ReactNode;
+    if (processingKeys.has(f.field_key)) content = <Loader2 size={14} className="inline animate-spin text-muted" />;
+    else if (v?.value)
+      content =
+        (v.confidence ?? 1) < LOW_CONFIDENCE ? (
+          <span className="inline-flex items-center gap-1.5">
+            {displayValue(f, v.value)} <Pill tone="warn">Check</Pill>
+          </span>
+        ) : (
+          displayValue(f, v.value)
+        );
+    else if (f.required && !isHidden) content = <Pill tone="warn">Missing</Pill>;
+    else content = <span className="text-muted">—</span>;
+    return (
+      <FieldRow
+        key={f.id}
+        label={f.label}
+        sub={
+          !reason ? undefined : reason === NOT_ON_PAGE ? (
+            // Fills by itself when the field appears (next step, or shown by another answer).
+            <span className="text-muted">{reason}</span>
+          ) : (
+            <span className="text-danger-ink">Not filled: {reason}</span>
+          )
+        }
+      >
+        {content}
+      </FieldRow>
+    );
+  };
 
   async function act(type: 'FILL' | 'UNDO' | 'RECONNECT') {
     setBusy(type === 'FILL' ? 'fill' : type === 'UNDO' ? 'undo' : 'reconnect');
@@ -430,42 +471,14 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
       )}
 
       <div className="mt-2 max-h-72 overflow-x-hidden overflow-y-auto">
-        {snap.fields.map((f) => {
-          if (f.field_type === 'file') {
-            return <FileRow key={f.id} field={f} file={fileOf.get(f.id)} needsClick={state.uploadClicks.includes(f.field_key)} />;
-          }
-          const v = valueOf.get(f.id);
-          const reason = skipped.get(f.field_key);
-          let content: React.ReactNode;
-          if (processingKeys.has(f.field_key)) content = <Loader2 size={14} className="inline animate-spin text-muted" />;
-          else if (v?.value)
-            content =
-              (v.confidence ?? 1) < LOW_CONFIDENCE ? (
-                <span className="inline-flex items-center gap-1.5">
-                  {displayValue(f, v.value)} <Pill tone="warn">Check</Pill>
-                </span>
-              ) : (
-                displayValue(f, v.value)
-              );
-          else if (f.required) content = <Pill tone="warn">Missing</Pill>;
-          else content = <span className="text-muted">—</span>;
-          return (
-            <FieldRow
-              key={f.id}
-              label={f.label}
-              sub={
-                !reason ? undefined : reason === NOT_ON_PAGE ? (
-                  // Fills by itself when the field appears (next step, or shown by another answer).
-                  <span className="text-muted">{reason}</span>
-                ) : (
-                  <span className="text-danger-ink">Not filled: {reason}</span>
-                )
-              }
-            >
-              {content}
-            </FieldRow>
-          );
-        })}
+        {shown.map((f) => row(f))}
+        {hidden.length > 0 && (
+          // The other branch of the form: kept with its answers, filled again if the choice comes back.
+          <details className="mt-1">
+            <summary className="cursor-pointer py-1 text-xs text-muted">Not on the form now ({hidden.length})</summary>
+            {hidden.map((f) => row(f, true))}
+          </details>
+        )}
       </div>
 
       <div className="mt-3 flex gap-2">

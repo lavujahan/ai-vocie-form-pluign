@@ -310,6 +310,17 @@ describe('Field Mapping Agent (scripted model)', () => {
     expect(one).toContain('phone = "9876543210"');
   });
 
+  it('names fields a choice hides after the fields, so the start of the prompt stays the same', () => {
+    const input = { fields: EVAL_FORM as AgentField[], current: {}, transcript: 'Chennai', targetFieldKey: null };
+    const shown = buildMapperPrompt(withShortIds(input).input);
+    const hidden = buildMapperPrompt(withShortIds({ ...input, hidden: ['city', 'not_a_field'] }).input);
+    const start = (p: string) => p.slice(0, p.indexOf('\n\nMode:'));
+    expect(start(hidden)).toBe(start(shown));
+    const cityId = `f${EVAL_FORM.findIndex((f) => f.field_key === 'city') + 1}`;
+    expect(hidden).toContain(`Not on the form now (another choice on the page hides them): ${cityId}.`);
+    expect(shown).not.toContain('Not on the form now');
+  });
+
   it('answers only for the target field in single-field mode, though the prompt lists them all', async () => {
     const ids = withShortIds({ fields: EVAL_FORM, current: {}, transcript: '', targetFieldKey: null }).input.fields;
     const cityId = ids[EVAL_FORM.findIndex((f) => f.field_key === 'city')].field_key;

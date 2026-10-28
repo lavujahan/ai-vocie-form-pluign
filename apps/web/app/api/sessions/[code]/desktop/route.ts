@@ -12,9 +12,10 @@ export const runtime = 'nodejs';
 type Ctx = { params: Promise<{ code: string }> };
 
 /**
- * From the extension: the form tab's state ('open' | 'moved' to another site | 'closed') and the
- * result of a full fill. The phone gets both through Realtime (form_sessions UPDATE): it stops
- * sending when the tab isn't open, and shows "Filled on computer ✓ 14/16" after Send to desktop.
+ * From the extension: the form tab's state ('open' | 'moved' to another site | 'closed'), the
+ * result of a full fill, and the fields a choice on the page hides now. The phone gets them through
+ * Realtime (form_sessions UPDATE): it stops sending when the tab isn't open, shows "Filled on
+ * computer ✓ 14/16" after Send to desktop, and lists hidden fields under "Not on the form now".
  */
 export const PATCH = route<Ctx>(async (req, { params }) => {
   const { code } = await params;
@@ -27,7 +28,15 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
   // A closed tab is final for this QR code: a late 'open' or 'moved' must not revive it.
   if (body.state && session.desktop_state !== 'closed') patch.desktop_state = body.state;
   if (body.report) patch.desktop_report = { ...body.report, at: new Date().toISOString() } satisfies DesktopReport;
-  if (Object.keys(patch).length) must(await db().from('form_sessions').update(patch).eq('id', session.id));
+  if (body.hidden) patch.hidden_fields = body.hidden;
+  if (Object.keys(patch).length) {
+    const res = await db().from('form_sessions').update(patch).eq('id', session.id);
+    // Migration 0019 not applied yet: no hidden fields, the rest as before.
+    if (body.hidden && (res.error?.code === '42703' || res.error?.code === 'PGRST204')) {
+      const { hidden_fields: _h, ...rest } = patch;
+      if (Object.keys(rest).length) must(await db().from('form_sessions').update(rest).eq('id', session.id));
+    } else must(res);
+  }
   if (body.report) await recordCompletion(session, body.report.filled);
   // The form tab is closed: nothing can use the uploaded files any more.
   if (body.state === 'closed') {

@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql` and `0018_form_template.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql`, `0018_form_template.sql` and `0019_hidden_fields.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -112,7 +112,7 @@ The Form Analyzer reads a form **once**; every later scan of the same form, by *
 
 **Checking a change to the reader:** `pnpm eval:analyzer` reads the saved forms with the reader before the short answer (`scripts/eval-analyzer-old.ts`) and with today's, on the same input. It prints the tokens, the cost and every field that reads differently. `--self` runs old against old, to see how much two runs differ anyway.
 
-**Saved field list** (migration `0018`): the first scan's fields are saved with the reading, and every later session of the form gets exactly that list, not the live scan. Dropdowns whose options load later (or that depend on another field) are saved without options; the extension matches the spoken value when it fills. A field shown by a checkbox is not added later. So the mapping prompt for a form always starts with the same text (all fields first, also for the row mic, and one cache key for all forms), and OpenAI bills it at the cached price. The server log shows `fields=<hash> cached=<cached>/<input>` per recording: the same form shows the same hash.
+**Saved field list** (migration `0018`): the first scan's fields are saved with the reading, and every later session of the form gets exactly that list, not the live scan. Dropdowns whose options load later (or that depend on another field) are saved without options; the extension matches the spoken value when it fills. Fields that appear later (a next step, or shown by a choice) are added **after** these, never in between. So the mapping prompt for a form always starts with the same text (all fields first, also for the row mic, and one cache key for all forms), and OpenAI bills it at the cached price. The server log shows `fields=<hash> cached=<cached>/<input>` per recording: the same form shows the same hash.
 
 **Admin → Forms** (`/admin/forms`) lists the saved readings: form name, website, fields, model, read on, expires, times reused, last used and the one-time cost, with search and sort. **Edit labels** changes a field's English label, Tamil label or required flag for later scans (an edited reading is kept until cleared; fields the website marks required stay required). **Read again** clears a reading, so the next scan is read by the AI. Until migration `0012` is applied, every scan is read as before.
 
@@ -227,9 +227,11 @@ Test page: `test-fixtures/dropdowns.html`.
 ## Fields that appear later (multi-step forms, dependent fields)
 
 While a form session is active, the extension watches the page (`apps/extension/src/content/watch.ts`).
-- **A new step's fields are added to the session.** That covers a wizard's next step and the form's next page on the same site: fewer than half of the fields that were on the page are still there. It uses `POST /api/sessions/[code]/fields`, and the Form Analyzer reads only the new fields (a step read before gets its saved field list, like a whole form).
-- **A field shown by a checkbox or by choosing "Other" is not added.** The form keeps its saved field list (see Saved form readings), so the user types such a field.
-- **The phone shows them right away:** "3 new fields on the computer (step 2)", under a **Step 2** heading.
+- **New fields are added to the session**, after the existing ones, with `POST /api/sessions/[code]/fields`. The Form Analyzer reads only the new fields (a set read before, by anyone, gets its saved field list, like a whole form).
+  - `?step=next`: a wizard's next step or the form's next page on the same site (fewer than half of the fields that were on the page are still there). The phone shows "3 new fields on the computer (step 2)", under a **Step 2** heading.
+  - `?step=same`: fields a choice revealed (a checkbox, "Other", one branch of the form) while the others stay. They join the step on the page: "6 new fields on the computer".
+- **Prompt caching still holds.** The mapper lists fields in session order, so appending keeps the start of the prompt (instructions and the earlier fields) the same; only the new fields' lines are new text, once.
+- **Branches of a form** (migration `0019`): "Individual" shows some fields, "Organisation" others. The session's field list only grows; the extension reports which fields of the step on the page are missing now (`PATCH /api/sessions/[code]/desktop` with `hidden`, stored in `form_sessions.hidden_fields`). The phone and the popup list them under **Not on the form now**, with their answers kept, not counted and not required for Send. The mapper is told about them on a line after the fields (so the cached start doesn't change). Choosing the branch again brings them back. Fields of another step (a wizard's earlier page) are not hidden.
 - **Values wait for their field.** A value spoken for a field that isn't on the page yet shows as "Waiting: this field isn't on the page yet" in the popup. It fills as soon as the field appears.
 
 Test page: `test-fixtures/wizard.html`.

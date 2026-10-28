@@ -20,10 +20,12 @@ export const maxDuration = 120;
 type Ctx = { params: Promise<{ code: string }> };
 
 /**
- * From the extension: the fields of a wizard's next step or a new page of the form (fields a checkbox
- * shows are not sent). They go after the existing fields, as the next step; the phone gets them through
- * Realtime (form_fields INSERT). The Form Analyzer reads just these; a step read before (by anyone)
- * gets its saved field list, like a whole form.
+ * From the extension: fields that appeared after the first scan. `?step=next` (or no `step`, from older
+ * extensions): a wizard's next step or a new page of the form, shown on the phone as the next step.
+ * `?step=same`: fields a choice revealed (a checkbox, "Other", a branch of the form), in the step shown.
+ * Either way they go after the existing fields, so the mapper's prompt still starts with the same text
+ * (cached). The phone gets them through Realtime (form_fields INSERT). The Form Analyzer reads just these;
+ * a set read before (by anyone) gets its saved field list, like a whole form.
  */
 export const POST = route<Ctx>(async (req, { params }) => {
   const { code } = await params;
@@ -33,7 +35,8 @@ export const POST = route<Ctx>(async (req, { params }) => {
   assertWritable(session);
 
   const schema = FormSchema.parse(await req.json());
-  const { fresh, startPosition, stepIndex } = newFieldsPlacement(await getFieldRows(session.id), schema.fields);
+  const nextStep = new URL(req.url).searchParams.get('step') !== 'same';
+  const { fresh, startPosition, stepIndex } = newFieldsPlacement(await getFieldRows(session.id), schema.fields, nextStep);
   if (!fresh.length) return NextResponse.json({ fields: [] } satisfies AddFieldsResponse);
 
   const step = { ...schema, fields: fresh };
