@@ -1,6 +1,47 @@
 @import 'tailwindcss';
 @import '@vff/shared/ui/tokens.css';
 
+/*
+ * The popup is light, on a mild gold background, in either Chrome theme: `html:root` wins over the
+ * shared tokens' :root (also their dark-mode block). Rows sit on white cards for contrast; the
+ * header is a deeper honey gold with the blue brand mark.
+ */
+html:root {
+  --vf-page: #fbf3dc;
+  --vf-card: #ffffff;
+  --vf-subtle: #f1e4bd;
+  --vf-border: #dfcb92;
+  --vf-text: #1a1813;
+  --vf-muted: #574e3c;
+  --vf-accent-bg: #dce8fb;
+  --vf-accent-text: #1a4590;
+  --vf-live-bg: #d3eed6;
+  --vf-live-text: #17602a;
+  --vf-warn-bg: #f8dc9c;
+  --vf-warn-text: #6b3f00;
+  --vf-danger: #d4433d;
+  --vf-danger-bg: #fbe0de;
+  --vf-danger-text: #9a2621;
+  --vf-brand: #1e4e9c;
+  --vf-brand-ink: #ffffff;
+  --vf-header: #ebc865;
+  --vf-header-line: #cfa63c;
+  --vf-header-ink: #1a1813;
+  --vf-row-line: #efe4c6;
+  --vf-track: #e8d7a6;
+  --vf-live-dot: #1f8a34;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-header: var(--vf-header);
+  --color-header-line: var(--vf-header-line);
+  --color-header-ink: var(--vf-header-ink);
+  --color-row-line: var(--vf-row-line);
+  --color-track: var(--vf-track);
+  --color-live-dot: var(--vf-live-dot);
+}
+
 body {
   width: 360px;
   margin: 0;

@@ -15,7 +15,7 @@ These terms apply to Voice Form Filler ("the service"): the Chrome extension, th
 
 ## 1. Your account
 
-- We create your account with your phone number and a 5-digit PIN. Keep the PIN secret; you are responsible for what is done with your account.
+- We create your account with your phone number and a 6-digit PIN. Keep the PIN secret; you are responsible for what is done with your account.
 - One account is for one person. Don't share it or resell access.
 - We may suspend an account that is used to break the law, to abuse the service or someone else's website, or that isn't paid for.
 

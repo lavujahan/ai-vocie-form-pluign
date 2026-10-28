@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { ClipboardList, Clock, Loader2, Mic, Smartphone } from 'lucide-react';
-import { formatSize, LOCK_MINUTES, LOW_CONFIDENCE, MAX_PIN_ATTEMPTS, type AccountResponse, type FieldFile, type SessionField } from '@vff/shared';
+import { AlertTriangle, Check, Clock, Loader2, Smartphone } from 'lucide-react';
+import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, type AccountResponse, type FieldFile, type SessionField } from '@vff/shared';
 import { NOT_ON_PAGE, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
 import { ACCOUNT_URL, PRIVACY_URL } from '../env';
-import { Button, Card, FieldRow, Input, LinkButton, Pill } from './ui';
+import { groupFields, type FieldGroup, type FieldItem } from './groups';
+import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, Input, Menu, Pill, Progress, Screen } from './ui';
 
 /** State of the form session in the tab this popup was opened on (each tab has its own). */
 function useExtState() {
@@ -45,11 +46,24 @@ function useExtState() {
     setState(res.state);
     return res.ok ? null : res.error;
   };
-  return { state, send };
+  // Read at render: the first STATE arrives after the tab (and so the site) is known.
+  return { state, send, site: site.current };
 }
 
+/** "forms.example.in" from an origin or URL (as it is, if it isn't one). */
+const hostOf = (url: string | null | undefined) => {
+  if (!url) return '';
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+/** The header's second line: the parts that are set, joined with " · ". */
+const join = (...parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(' · ');
+
 export function App() {
-  const { state, send } = useExtState();
+  const { state, send, site } = useExtState();
 
   const polling = !!state?.session && !state.live;
   useEffect(() => {
@@ -59,7 +73,7 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [polling]);
 
-  // The minutes meter moves while the user speaks: re-read the plan every 30 s while the popup is open.
+  // The minutes chip moves while the user speaks: re-read the plan every 30 s while the popup is open.
   const signedIn = !!state?.auth;
   useEffect(() => {
     if (!signedIn) return;
@@ -68,32 +82,32 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn]);
 
+  const others =
+    state?.auth && state.otherSessions > 0
+      ? state.otherSessions === 1
+        ? '1 other form open'
+        : `${state.otherSessions} other forms open`
+      : null;
+
   let body: React.ReactNode;
   if (!state) {
     body = (
-      <Card className="flex items-center gap-2 text-sm text-muted">
-        <Loader2 size={16} className="animate-spin" /> Loading…
-      </Card>
+      <Screen header={<Header />}>
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <Loader2 size={16} className="animate-spin" /> Loading…
+        </p>
+      </Screen>
     );
   } else if (!state.auth) {
     body = <SignIn send={send} />;
   } else if (!state.session) {
-    body = <StartCard state={state} send={send} />;
+    body = <StartCard state={state} send={send} site={site} others={others} />;
   } else if (!state.session.snapshot || (state.session.snapshot.session.status === 'waiting' && !state.session.reconnect)) {
-    body = <QrCard state={state} send={send} />;
+    body = <QrCard state={state} send={send} others={others} />;
   } else {
-    body = <PairedCard state={state} send={send} />;
+    body = <PairedCard state={state} send={send} others={others} />;
   }
-  return (
-    <main className="bg-page p-3">
-      {body}
-      {!!state?.auth && state.otherSessions > 0 && (
-        <p className="mt-2 text-center text-xs text-muted">
-          {state.otherSessions === 1 ? '1 other tab has' : `${state.otherSessions} other tabs have`} a form in progress
-        </p>
-      )}
-    </main>
-  );
+  return <main className="bg-page text-ink">{body}</main>;
 }
 
 type Send = (req: PopupRequest) => Promise<string | null>;
@@ -105,24 +119,9 @@ function SignIn({ send }: { send: Send }) {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <Card>
-      <h1 className="flex items-center gap-2 text-sm font-semibold">
-        <Mic size={16} /> Voice2Fill
-      </h1>
-      <p className="mt-1.5 text-sm text-muted">
-        Sign in with your Voice2Fill account.
-        {ACCOUNT_URL && (
-          <>
-            {' '}
-            No account yet?{' '}
-            <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="text-accent-ink underline underline-offset-2">
-              Get one
-            </a>
-          </>
-        )}
-      </p>
+    <Screen header={<Header sub="Fill web forms by speaking on your phone" />}>
       <form
-        className="mt-3 space-y-2.5"
+        className="grid gap-2.5"
         onSubmit={async (e) => {
           e.preventDefault();
           setBusy(true);
@@ -130,54 +129,82 @@ function SignIn({ send }: { send: Send }) {
           setBusy(false);
         }}
       >
-        <Input
-          inputMode="numeric"
-          placeholder="9876543210"
-          aria-label="Phone number"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
-          autoFocus
-        />
-        <Input
-          type="password"
-          inputMode="numeric"
-          placeholder="5-digit PIN"
-          aria-label="PIN"
-          maxLength={5}
-          value={pin}
-          onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 5))}
-        />
-        <Button type="submit" className="w-full" loading={busy} disabled={phone.length < 6 || pin.length !== 5}>
+        <label className="grid gap-1 text-xs text-muted">
+          Phone number
+          <Input
+            inputMode="numeric"
+            placeholder="9876543210"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
+            autoFocus
+          />
+        </label>
+        <label className="grid gap-1 text-xs text-muted">
+          PIN
+          <Input
+            type="password"
+            inputMode="numeric"
+            placeholder={`${PIN_LENGTH}-digit PIN`}
+            maxLength={PIN_LENGTH}
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_LENGTH))}
+          />
+        </label>
+        <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={phone.length < 6 || pin.length !== PIN_LENGTH}>
           Sign in
         </Button>
         <p className={error ? 'text-xs text-danger-ink' : 'text-xs text-muted'}>
           {error ?? `Locks for ${LOCK_MINUTES} min after ${MAX_PIN_ATTEMPTS} failed tries.`}
         </p>
       </form>
+      {ACCOUNT_URL && (
+        <p className="text-xs text-muted">
+          No account yet?{' '}
+          <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="text-accent-ink underline underline-offset-2">
+            Get one
+          </a>
+        </p>
+      )}
       {/* Chrome Web Store: data use must be disclosed in the product, before collection, and agreed to by an action. */}
-      <p className="mt-3 border-t border-line pt-3 text-xs text-muted">
+      <p className="border-t border-line pt-3 text-xs text-muted">
         When you scan a form, its page address and fields are sent to Voice2Fill. Your spoken answers are turned
         into text by Sarvam AI and OpenAI and deleted within about an hour. By signing in you agree to this.{' '}
         <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="text-accent-ink underline underline-offset-2">
           Privacy policy
         </a>
       </p>
-    </Card>
+    </Screen>
   );
 }
 
-function StartCard({ state, send }: { state: ExtState; send: Send }) {
+const STEPS = ['Scan the form', 'Pair your phone', 'Speak the answers', 'Click Fill form'];
+
+function StartCard({ state, send, site, others }: { state: ExtState; send: Send; site: string | null; others: string | null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
-    <Card>
-      <h1 className="flex items-center gap-2 text-sm font-semibold">
-        <Mic size={16} /> Voice2Fill
-      </h1>
-      <p className="mt-1.5 text-sm text-muted">Open the page with the form, then scan it to pair your phone.</p>
-      {state.account && <PlanMeter account={state.account} />}
+    <Screen
+      header={
+        <Header sub={join(`Signed in as ${state.auth?.user.name}`, others)}>
+          <MinutesChip account={state.account} />
+        </Header>
+      }
+      footer={
+        <>
+          <span className="flex-1" />
+          <Menu items={[{ label: 'Sign out', onSelect: () => send({ type: 'LOGOUT' }) }]} />
+        </>
+      }
+    >
+      {site && (
+        <p className="flex items-center gap-2 rounded-lg border border-line bg-card px-2.5 py-2 text-[13px]">
+          <span className="text-muted">This page</span>
+          <span className="min-w-0 truncate font-medium">{hostOf(site)}</span>
+        </p>
+      )}
       <Button
-        className="mt-3 w-full"
+        variant="primary"
+        className="w-full"
         loading={busy}
         onClick={async () => {
           setBusy(true);
@@ -188,12 +215,19 @@ function StartCard({ state, send }: { state: ExtState; send: Send }) {
         Scan form on this page
       </Button>
       {/* A plan refusal is already explained by the plan note. */}
-      {error && !planBlocked(state.account) && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
-      <div className="mt-3 flex items-center justify-between text-xs text-muted">
-        <span>Signed in as {state.auth?.user.name}</span>
-        <LinkButton onClick={() => send({ type: 'LOGOUT' })}>Sign out</LinkButton>
-      </div>
-    </Card>
+      {error && !planBlocked(state.account) && <p className="text-xs text-danger-ink">{error}</p>}
+      <ol className="grid grid-cols-2 gap-1.5">
+        {STEPS.map((step, i) => (
+          <li key={step} className="flex items-center gap-1.5 text-[12.5px] text-muted">
+            <span className="grid size-[18px] shrink-0 place-items-center rounded-full bg-accent-bg text-[11px] font-semibold text-accent-ink">
+              {i + 1}
+            </span>
+            {step}
+          </li>
+        ))}
+      </ol>
+      {state.account && <PlanMeter account={state.account} />}
+    </Screen>
   );
 }
 
@@ -210,12 +244,32 @@ function planBlocked(a: AccountResponse | null): string | null {
   return null;
 }
 
+type Plan = NonNullable<AccountResponse['plan']>;
+const minutesUsed = (p: Plan) => Math.min(p.minutes_total, Math.max(0, p.minutes_used));
+const usedPct = (p: Plan) => (p.minutes_total > 0 ? Math.round((minutesUsed(p) / p.minutes_total) * 100) : 100);
+/** Most minutes used, or the paid time about to end: shown in amber, with Renew. */
+const isLow = (p: Plan) => usedPct(p) >= 80 || (!!p.paid_until && Date.parse(p.paid_until) - Date.now() < 3 * DAY_MS);
+
+/** Voice minutes left, in the header: amber when low, red when the plan doesn't allow speaking. */
+function MinutesChip({ account }: { account: AccountResponse | null }) {
+  if (!account || account.unlimited) return null;
+  const p = account.plan;
+  if (!p?.plan_id) return <HeaderChip tone="danger">No plan</HeaderChip>;
+  if (!p.active) return <HeaderChip tone="danger">Plan ended</HeaderChip>;
+  const left = Math.max(0, Math.floor(p.minutes_left));
+  return (
+    <HeaderChip tone={left <= 0 ? 'danger' : isLow(p) ? 'warn' : 'plain'} title={`${p.plan_name} plan · voice minutes left`}>
+      {left} min
+    </HeaderChip>
+  );
+}
+
 /** The plan and its voice minutes, used of allowed with a bar, or why scanning is refused with a Renew link. */
 function PlanMeter({ account }: { account: AccountResponse }) {
   const blocked = planBlocked(account);
   if (blocked) {
     return (
-      <p className="mt-2 rounded-md bg-danger-bg px-2.5 py-2 text-xs text-danger-ink">
+      <Banner tone="danger">
         {blocked}{' '}
         {ACCOUNT_URL ? (
           <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2">
@@ -224,17 +278,22 @@ function PlanMeter({ account }: { account: AccountResponse }) {
         ) : (
           'Contact us to renew.'
         )}
-      </p>
+      </Banner>
     );
   }
   const p = account.plan;
-  if (account.unlimited || !p) return <FormsDone account={account} />;
-  const used = Math.min(p.minutes_total, Math.max(0, p.minutes_used));
-  const pct = p.minutes_total > 0 ? Math.round((used / p.minutes_total) * 100) : 100;
-  // Most minutes used, or the paid time about to end: amber, with Renew.
-  const low = pct >= 80 || (!!p.paid_until && Date.parse(p.paid_until) - Date.now() < 3 * DAY_MS);
+  if (account.unlimited || !p) {
+    return account.forms_completed ? (
+      <div className="rounded-lg border border-line bg-card p-2.5">
+        <FormsDone account={account} />
+      </div>
+    ) : null;
+  }
+  const used = minutesUsed(p);
+  const pct = usedPct(p);
+  const low = isLow(p);
   return (
-    <div className="mt-2 text-xs">
+    <div className="grid gap-1.5 rounded-lg border border-line bg-card p-2.5 text-xs">
       <div className="flex items-baseline justify-between gap-2">
         <span className={low ? 'text-warn-ink' : 'text-muted'}>
           {p.plan_name} plan · till {shortDate(p.paid_until)}
@@ -248,7 +307,7 @@ function PlanMeter({ account }: { account: AccountResponse }) {
           )}
         </span>
         <span className={`shrink-0 tabular-nums ${low ? 'font-medium text-warn-ink' : 'text-muted'}`}>
-          {Math.floor(used)} / {p.minutes_total} min · {pct}%
+          <b className="font-semibold text-ink">{Math.floor(used)}</b> / {p.minutes_total} min · {pct}%
         </span>
       </div>
       <div
@@ -257,7 +316,7 @@ function PlanMeter({ account }: { account: AccountResponse }) {
         aria-valuemin={0}
         aria-valuemax={p.minutes_total}
         aria-valuenow={Math.floor(used)}
-        className="mt-1 h-1.5 overflow-hidden rounded-full bg-subtle"
+        className="h-1.5 overflow-hidden rounded-full bg-track"
       >
         <div className={`h-full rounded-full ${low ? 'bg-warn-ink' : 'bg-accent-ink'}`} style={{ width: `${pct}%` }} />
       </div>
@@ -272,8 +331,8 @@ function FormsDone({ account }: { account: AccountResponse }) {
   if (!f) return null;
   const period = account.plan && !account.unlimited ? 'this plan' : 'in 30 days';
   return (
-    <p className="mt-1 text-xs text-muted">
-      Forms completed: <span className="font-medium text-ink tabular-nums">{f.period}</span> {period} ·{' '}
+    <p className="text-xs text-muted">
+      Forms completed: <span className="font-semibold text-ink tabular-nums">{f.period}</span> {period} ·{' '}
       <span className="tabular-nums">{f.total}</span> total
     </p>
   );
@@ -298,47 +357,45 @@ function QrBlock({ url, expiresAt, hint, expired }: { url: string; expiresAt: st
   }, [url]);
   if (left <= 0) return <>{expired}</>;
   return (
-    <>
-      <div className="mt-3 grid place-items-center">
-        {qr ? <img src={qr} alt="QR code to open on your phone" className="size-44 rounded-md bg-white p-1" /> : <div className="size-44" />}
-      </div>
-      <p className="mt-2 text-center text-sm text-ink/80">{hint}</p>
-      <p className="mt-0.5 flex items-center justify-center gap-1 text-xs text-muted">
+    <div className="grid justify-items-center gap-1.5 py-1">
+      {qr ? <img src={qr} alt="QR code to open on your phone" className="size-44 rounded-lg bg-white p-1.5" /> : <div className="size-44" />}
+      <p className="text-center text-[13.5px] text-ink">{hint}</p>
+      <p className="flex items-center gap-1 text-xs text-muted tabular-nums">
         <Clock size={12} /> Expires in {text}
       </p>
-    </>
+    </div>
   );
 }
 
-function QrCard({ state, send }: { state: ExtState; send: Send }) {
+function QrCard({ state, send, others }: { state: ExtState; send: Send; others: string | null }) {
   const s = state.session!;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const name = s.snapshot?.session.form_name || s.form_name;
 
   return (
-    <Card>
-      <div className="flex items-start justify-between gap-2">
-        <h1 className="flex items-start gap-2 text-sm font-semibold">
-          <ClipboardList size={16} className="mt-0.5 shrink-0" /> {name}
-        </h1>
-        <Pill tone="accent">{s.field_count} fields</Pill>
-      </div>
-      {state.account && !planBlocked(state.account) && <PlanMeter account={state.account} />}
-      {s.site_access === false && /^https?:/.test(s.page_site) && (
-        <p className="mt-2 rounded-lg bg-warn-bg px-3 py-1.5 text-xs text-warn-ink">
-          Allow access to this site when you scan, so the next pages of the form fill too. This page works now.
-        </p>
-      )}
+    <Screen
+      header={
+        <Header sub={join(name, hostOf(s.page_site), others)}>
+          <HeaderChip>{s.field_count} fields</HeaderChip>
+        </Header>
+      }
+      footer={
+        <>
+          <span className="flex-1 text-xs text-muted">Waiting for your phone…</span>
+          <Button onClick={() => send({ type: 'END_SESSION' })}>Cancel</Button>
+        </>
+      }
+    >
       <QrBlock
         url={s.qr_url}
         expiresAt={s.expires_at}
-        hint="Scan with your phone"
+        hint="Scan with your phone camera"
         expired={
-          <div className="mt-4 text-center">
+          <div className="grid justify-items-center gap-2 py-4 text-center">
             <p className="text-sm text-muted">This QR code has expired.</p>
             <Button
-              className="mt-3"
+              variant="primary"
               loading={busy}
               onClick={async () => {
                 setBusy(true);
@@ -352,15 +409,17 @@ function QrCard({ state, send }: { state: ExtState; send: Send }) {
             {planBlocked(state.account) ? (
               <PlanMeter account={state.account!} />
             ) : (
-              error && <p className="mt-2 text-xs text-danger-ink">{error}</p>
+              error && <p className="text-xs text-danger-ink">{error}</p>
             )}
           </div>
         }
       />
-      <div className="mt-3 text-center">
-        <LinkButton onClick={() => send({ type: 'END_SESSION' })}>Cancel</LinkButton>
-      </div>
-    </Card>
+      {s.site_access === false && /^https?:/.test(s.page_site) && (
+        <Banner tone="warn" icon={<AlertTriangle size={16} />}>
+          Allow access to this site when you scan, so the next pages of the form fill too. This page works now.
+        </Banner>
+      )}
+    </Screen>
   );
 }
 
@@ -369,7 +428,13 @@ function displayValue(f: SessionField, v: string) {
   return v;
 }
 
-function PairedCard({ state, send }: { state: ExtState; send: Send }) {
+/** The state icon at the start of a row: ✓ filled, ⚠ needs a look. */
+const ICON: Partial<Record<FieldGroup, React.ReactNode>> = {
+  filled: <Check size={16} className="text-live-ink" aria-label="Filled" />,
+  look: <AlertTriangle size={16} className="text-warn-ink" aria-label="Needs a look" />,
+};
+
+function PairedCard({ state, send, others }: { state: ExtState; send: Send; others: string | null }) {
   const s = state.session!;
   const snap = s.snapshot!;
   const [busy, setBusy] = useState<'fill' | 'undo' | 'reconnect' | null>(null);
@@ -377,42 +442,59 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
   /** The QR code is shown again ("Connect phone again") and no phone has scanned it yet. */
   const waiting = snap.session.status === 'waiting';
 
-  const valueOf = useMemo(() => new Map(snap.values.map((v) => [v.field_id, v])), [snap.values]);
-  const fileOf = useMemo(() => new Map((snap.files ?? []).map((f) => [f.field_id, f])), [snap.files]);
+  const groups = useMemo(() => groupFields(snap, state.lastFill?.skipped, state.uploadClicks), [snap, state.lastFill, state.uploadClicks]);
   const processingKeys = useMemo(
     () => new Set(snap.utterances.filter((u) => u.status === 'processing' && u.target_field_key).map((u) => u.target_field_key!)),
     [snap.utterances],
   );
   const processing = snap.utterances.filter((u) => u.status === 'processing').length;
-  const skipped = new Map((state.lastFill?.skipped ?? []).map((x) => [x.field_key, x.reason]));
   const hasValues = snap.values.some((v) => v.value) || (snap.files ?? []).some((f) => f.status === 'uploaded');
-  // Fields a choice on the page hides now (the other branch of the form): listed apart, answers kept.
-  const hiddenKeys = new Set(snap.session.hidden_fields ?? []);
-  const shown = snap.fields.filter((f) => !hiddenKeys.has(f.field_key));
-  const hidden = snap.fields.filter((f) => hiddenKeys.has(f.field_key));
+  const fresh = state.unfilledChanges ?? 0;
 
-  const row = (f: SessionField, isHidden = false) => {
-    if (f.field_type === 'file') {
-      return <FileRow key={f.id} field={f} file={fileOf.get(f.id)} needsClick={state.uploadClicks.includes(f.field_key)} />;
-    }
-    const v = valueOf.get(f.id);
-    const reason = skipped.get(f.field_key);
+  async function act(type: 'FILL' | 'UNDO' | 'RECONNECT') {
+    setBusy(type === 'FILL' ? 'fill' : type === 'UNDO' ? 'undo' : 'reconnect');
+    setError(await send({ type }));
+    setBusy(null);
+  }
+
+  // One status line: the most important thing that happened, and what to do about it.
+  let banner: React.ReactNode = null;
+  if (error) banner = <Banner tone="danger">{error}</Banner>;
+  else if (state.notice) banner = <Banner tone="accent" icon={<Smartphone size={16} />}>{state.notice}</Banner>;
+  else if (fresh) {
+    // The page only changes on "Fill form": newer answers wait here until then.
+    banner = (
+      <Banner tone="accent" icon={<Smartphone size={16} />}>
+        <b className="font-semibold">{fresh === 1 ? '1 new answer' : `${fresh} new answers`}</b> from the phone. Click Fill form to add them.
+      </Banner>
+    );
+  } else if (snap.session.status === 'filled') {
+    banner = (
+      <Banner tone="live" icon={<Check size={16} />}>
+        Your phone marked the form as done.
+      </Banner>
+    );
+  }
+
+  const row = ({ field: f, value: v, file, reason, needsClick, low }: FieldItem, group: FieldGroup) => {
+    if (f.field_type === 'file') return <FileRow key={f.id} field={f} file={file} needsClick={needsClick} group={group} />;
     let content: React.ReactNode;
     if (processingKeys.has(f.field_key)) content = <Loader2 size={14} className="inline animate-spin text-muted" />;
     else if (v?.value)
-      content =
-        (v.confidence ?? 1) < LOW_CONFIDENCE ? (
-          <span className="inline-flex items-center gap-1.5">
-            {displayValue(f, v.value)} <Pill tone="warn">Check</Pill>
-          </span>
-        ) : (
-          displayValue(f, v.value)
-        );
-    else if (f.required && !isHidden) content = <Pill tone="warn">Missing</Pill>;
-    else content = <span className="text-muted">—</span>;
+      content = low ? (
+        <span className="inline-flex items-center gap-1.5">
+          {displayValue(f, v.value)} <Pill tone="warn">Check</Pill>
+        </span>
+      ) : (
+        displayValue(f, v.value)
+      );
+    else if (f.required && group === 'look') content = <Pill tone="warn">Missing</Pill>;
+    else if (f.required && group !== 'hidden') content = <Pill>Required</Pill>;
+    else content = <span className="font-normal text-muted">—</span>;
     return (
       <FieldRow
         key={f.id}
+        icon={ICON[group]}
         label={f.label}
         sub={
           !reason ? undefined : reason === NOT_ON_PAGE ? (
@@ -428,40 +510,56 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
     );
   };
 
-  async function act(type: 'FILL' | 'UNDO' | 'RECONNECT') {
-    setBusy(type === 'FILL' ? 'fill' : type === 'UNDO' ? 'undo' : 'reconnect');
-    setError(await send({ type }));
-    setBusy(null);
-  }
-
   return (
-    <Card>
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="flex items-center gap-2 text-sm font-semibold">
-          <Smartphone size={16} /> {waiting ? 'Connect your phone' : 'Phone paired'}
-        </h1>
-        <div className="flex items-center gap-1.5">
+    <Screen
+      header={
+        <Header sub={join(snap.session.form_name, hostOf(s.page_site), others)}>
           {processing > 0 && (
-            <Pill>
+            <HeaderChip title="Recordings being read">
               <Loader2 size={11} className="animate-spin" /> {processing}
-            </Pill>
+            </HeaderChip>
           )}
-          {state.live ? <Pill tone="live">Live</Pill> : <Pill>Reconnecting</Pill>}
-        </div>
-      </div>
-      <p className="mt-0.5 truncate text-xs text-muted">{snap.session.form_name}</p>
-      {state.account && <PlanMeter account={state.account} />}
-
+          <HeaderChip>
+            <span className={`size-[7px] rounded-full ${state.live ? 'bg-live-dot' : 'bg-header-ink/40'}`} />
+            {state.live ? 'Live' : 'Reconnecting'}
+          </HeaderChip>
+          <MinutesChip account={state.account} />
+        </Header>
+      }
+      footer={
+        <>
+          <Button variant="primary" className="flex-1" loading={busy === 'fill'} disabled={!hasValues} onClick={() => act('FILL')}>
+            Fill form
+            {fresh > 0 && <span className="rounded-full bg-page/20 px-1.5 text-xs font-semibold tabular-nums">{fresh} new</span>}
+          </Button>
+          <Button loading={busy === 'undo'} disabled={!state.canUndo} onClick={() => act('UNDO')}>
+            Undo
+          </Button>
+          <Menu
+            items={[
+              {
+                label: 'New form',
+                confirm: { text: 'End this form? The phone stops sending.', action: 'End form' },
+                onSelect: () => send({ type: 'END_SESSION' }),
+              },
+              // The phone page was closed (back button, tab closed): same form, answers kept.
+              ...(waiting ? [] : [{ label: 'Connect phone again', onSelect: () => act('RECONNECT') }]),
+              { label: 'Sign out', last: true, onSelect: () => send({ type: 'LOGOUT' }) },
+            ]}
+          />
+        </>
+      }
+    >
       {waiting && (
-        <div className="mt-1 border-b border-line pb-3">
+        <div className="rounded-lg border border-line bg-card p-2">
           <QrBlock
             url={s.qr_url}
             expiresAt={s.expires_at}
             hint="Scan with your phone. Answers so far are kept."
             expired={
-              <div className="mt-3 text-center">
+              <div className="grid justify-items-center gap-2 py-2 text-center">
                 <p className="text-sm text-muted">This QR code has expired.</p>
-                <Button className="mt-2" loading={busy === 'reconnect'} onClick={() => act('RECONNECT')}>
+                <Button loading={busy === 'reconnect'} onClick={() => act('RECONNECT')}>
                   Show QR again
                 </Button>
               </div>
@@ -469,59 +567,53 @@ function PairedCard({ state, send }: { state: ExtState; send: Send }) {
           />
         </div>
       )}
-
-      <div className="mt-2 max-h-72 overflow-x-hidden overflow-y-auto">
-        {shown.map((f) => row(f))}
-        {hidden.length > 0 && (
-          // The other branch of the form: kept with its answers, filled again if the choice comes back.
-          <details className="mt-1">
-            <summary className="cursor-pointer py-1 text-xs text-muted">Not on the form now ({hidden.length})</summary>
-            {hidden.map((f) => row(f, true))}
-          </details>
-        )}
-      </div>
-
-      <div className="mt-3 flex gap-2">
-        <Button className="flex-1" loading={busy === 'fill'} disabled={!hasValues} onClick={() => act('FILL')}>
-          {state.unfilledChanges ? `Fill form (${state.unfilledChanges} new)` : 'Fill form'}
-        </Button>
-        <Button loading={busy === 'undo'} disabled={!state.canUndo} onClick={() => act('UNDO')}>
-          Undo
-        </Button>
-      </div>
-      {error && <p className="mt-2 text-xs text-danger-ink">{error}</p>}
-      {state.notice && !error && <p className="mt-2 text-xs text-accent-ink">{state.notice}</p>}
-      {!!state.unfilledChanges && !error && (
-        // The page only changes on "Fill form": newer answers wait here until then.
-        <p className="mt-2 text-xs text-accent-ink">
-          {state.unfilledChanges === 1 ? '1 new answer from the phone' : `${state.unfilledChanges} new answers from the phone`} · not on the page yet
-        </p>
+      {planBlocked(state.account) && <PlanMeter account={state.account!} />}
+      <Progress done={groups.filledCount} total={groups.total} label="filled" />
+      {banner}
+      {groups.look.length > 0 && (
+        <GroupCard title="Needs a look" count={groups.look.length} tone="warn">
+          {groups.look.map((it) => row(it, 'look'))}
+        </GroupCard>
       )}
-      {snap.session.status === 'filled' && <p className="mt-1 text-xs text-live-ink">Your phone marked the form as done.</p>}
-      <div className="mt-3 flex flex-wrap justify-between gap-x-3 gap-y-1">
-        <LinkButton onClick={() => send({ type: 'END_SESSION' })}>New form</LinkButton>
-        {/* The phone page was closed (back button, tab closed): same form, answers kept. */}
-        {!waiting && <LinkButton onClick={() => act('RECONNECT')}>Connect phone again</LinkButton>}
-        <LinkButton onClick={() => send({ type: 'LOGOUT' })}>Sign out</LinkButton>
-      </div>
-    </Card>
+      {groups.filled.length > 0 && (
+        <GroupCard title="Filled" count={groups.filled.length}>
+          {groups.filled.map((it) => row(it, 'filled'))}
+        </GroupCard>
+      )}
+      {groups.todo.length > 0 && (
+        <GroupCard title="Not answered yet" count={groups.todo.length}>
+          {groups.todo.map((it) => row(it, 'todo'))}
+        </GroupCard>
+      )}
+      {groups.hidden.length > 0 && (
+        // The other branch of the form: kept with its answers, filled again if the choice comes back.
+        <FoldedGroup title={`Not on the form now (${groups.hidden.length})`} hint="A choice on the page hides these fields. Their answers are kept.">
+          {groups.hidden.map((it) => row(it, 'hidden'))}
+        </FoldedGroup>
+      )}
+    </Screen>
   );
 }
 
 /** An upload field: waiting for the phone, received, in the page (maybe needing the page's Upload button), or refused. */
-function FileRow({ field, file, needsClick }: { field: SessionField; file: FieldFile | undefined; needsClick: boolean }) {
+function FileRow({ field, file, needsClick, group }: { field: SessionField; file: FieldFile | undefined; needsClick: boolean; group: FieldGroup }) {
   let content: React.ReactNode;
   let sub: React.ReactNode;
-  if (!file) content = field.required ? <Pill tone="warn">From phone</Pill> : <span className="text-muted">Waiting for phone</span>;
-  else if (file.status === 'rejected') {
+  if (!file) {
+    content = field.required ? (
+      <Pill tone={group === 'look' ? 'warn' : 'neutral'}>From phone</Pill>
+    ) : (
+      <span className="font-normal text-muted">Waiting for phone</span>
+    );
+  } else if (file.status === 'rejected') {
     content = <Pill tone="warn">Refused</Pill>;
     sub = <span className="text-danger-ink">Refused by the site: {file.reason ?? 'check its size / type rules'}</span>;
   } else if (file.status === 'filled') {
-    content = `✓ ${formatSize(file.bytes)}`;
+    content = formatSize(file.bytes);
     if (needsClick) sub = <span className="text-accent-ink">Click “Upload” next to this field on the page</span>;
-  } else content = <span className="text-muted">Received · {formatSize(file.bytes)}</span>;
+  } else content = <span className="font-normal text-muted">Received · {formatSize(file.bytes)}</span>;
   return (
-    <FieldRow label={field.label} sub={sub}>
+    <FieldRow icon={ICON[group]} label={field.label} sub={sub}>
       {content}
     </FieldRow>
   );

@@ -1,6 +1,6 @@
 /**
  * Creates (or promotes) an admin user.
- *   pnpm seed:admin --phone 9876543210 --pin 12345 --name "Admin"
+ *   pnpm seed:admin --phone 9876543210 --pin 482915 --name "Admin"
  * Reads SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY from apps/web/.env.local.
  */
 import { parseArgs } from 'node:util';
@@ -15,7 +15,7 @@ const { values } = parseArgs({
 const phone = Phone.safeParse(values.phone);
 const pin = Pin.safeParse(values.pin);
 if (!phone.success || !pin.success) {
-  console.error('Usage: pnpm seed:admin --phone <6-15 digits> --pin <5 digits> [--name "Admin"]');
+  console.error('Usage: pnpm seed:admin --phone <6-15 digits> --pin <6 digits> [--name "Admin"]');
   process.exit(1);
 }
 

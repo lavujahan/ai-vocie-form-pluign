@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PIN_LENGTH } from './pin';
 
 // ---------- Detector output ----------
 
@@ -202,7 +203,7 @@ export type MappingResult = z.infer<typeof MappingResult>;
 // ---------- API DTOs ----------
 
 export const Phone = z.string().regex(/^\d{6,15}$/, 'Phone must be 6–15 digits');
-export const Pin = z.string().regex(/^\d{5}$/, 'PIN must be 5 digits');
+export const Pin = z.string().regex(new RegExp(`^\\d{${PIN_LENGTH}}$`), `PIN must be ${PIN_LENGTH} digits`);
 
 export const LoginRequest = z.object({ phone: Phone, pin: Pin });
 export type LoginRequest = z.infer<typeof LoginRequest>;

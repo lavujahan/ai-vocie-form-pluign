@@ -548,7 +548,9 @@ function SessionScreen({ code }: { code: string }) {
         }}
         recording={recording}
         elapsed={recorder.elapsed}
-        micDisabled={recorder.state === 'unsupported'}
+        // Until the last recording is uploaded and turned into answers (and while sending), the big mic
+        // waits: a new recording would race the one in progress. While recording it stays: it is Stop.
+        micDisabled={recorder.state === 'unsupported' || (!recording && (processing > 0 || send.sending))}
         notice={
           leaveWarn
             ? t('backAgainToLeave')
@@ -1042,13 +1044,16 @@ function BottomBar({
               recording && 'ring-8 ring-danger/20',
             )}
           >
-            {recording ? <Square size={28} fill="currentColor" /> : <Mic size={32} />}
+            <span className="relative flex flex-col items-center gap-0.5">
+              {recording ? <Square size={22} fill="currentColor" /> : <Mic size={26} />}
+              <span className="text-[10px] font-semibold leading-none">{t(recording ? 'micStop' : 'micStart')}</span>
+            </span>
             {recording && (
               <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />
             )}
           </button>
           <span className="text-[11.5px] text-muted tabular-nums">
-            {recording ? fmtTime(elapsed) : waitStep ? t('waitPlease') : t('tapToSpeak')}
+            {recording ? fmtTime(elapsed) : waitStep || send.sending ? t('waitPlease') : t('tapToSpeak')}
           </span>
         </div>
         {/* While speech is still being turned into answers, Send waits (else they'd miss this Send). */}

@@ -36,6 +36,10 @@ App UI colours:
   "live"/success text #1F6B2A on #D7F0D9
   warning text #7A5000 on #F9E2B0
   danger text #A32B26 on #FBE0DE
+Extension popup colours (the popup only; always light):
+  page background mild gold #FBF3DC · cards white #FFFFFF with 1px #DFCB92 border · row dividers #EFE4C6
+  header band honey gold #EBC865 with a 1px #CFA63C line under it, text #1A1813
+  text #1A1813 · muted text #574E3C · progress track #E8D7A6 · live dot #1F8A34
 Do not use gradients, glows, neon or purple.
 
 TYPE
@@ -47,11 +51,13 @@ APP UI COMPONENTS (draw the app screens with exactly these)
 - Button (outline): white, 1px border, 8px radius, 40px tall, 14px medium text, optional 16px Lucide icon left of the label.
 - Button (primary): background #1F1E1C, text #FAF9F7, 8px radius, 40px tall.
 - Pill: 6px radius, 12px medium text, 2px×8px padding. Tones: accent (#1E4E9C on #DCE8FB), live (#1F6B2A on #D7F0D9), warn (#7A5000 on #F9E2B0), danger (#A32B26 on #FBE0DE), neutral (#6B6863 on #F4F3F0).
-- Field row: label on the left (text at 80% opacity), value right-aligned in medium weight, 1px divider between rows. A filled value has a small green (#1F6B2A) check icon before it.
+- Field row: a 16px state icon first (green #1F6B2A check when filled, amber #6B3F00 warning triangle when it needs a look, nothing otherwise), then the label, then the value right-aligned in semibold, 1px divider between rows.
+- Popup header: the honey-gold band. Left: the brand mark (white Lucide "mic" on a 22px #1E4E9C rounded square) + "Voice2Fill" 14px bold. Right: small chips (12px, 6px radius, dark text on a 10% dark tint), e.g. "● Live" (green dot) and "42 min". Second line, 12px: the form name · site.
+- Popup field groups: white cards, each with an 11px bold uppercase muted title and a count ("FILLED 10"); "NEEDS A LOOK" titles are amber.
 - Icons: Lucide, outline, 2px stroke.
 
 THE TWO APP SCREENS
-1) Extension popup: 360px wide, page colour #FAF9F7 with 12px padding, one card inside. It opens under the Chrome toolbar icon.
+1) Extension popup: 360px wide, mild gold page (#FBF3DC). Top to bottom: the honey-gold header, the content (14px side padding, 10px between blocks), and a white footer bar with a 1px top border holding the buttons. It opens under the Chrome toolbar icon.
 2) Phone page: mobile web page in a plain modern phone frame, page colour #FAF9F7, 16px side padding. Top right: a small outline button that switches language ("தமிழ்" when in English, "English" when in Tamil). Below it, cards.
 
 SAMPLE DATA (made up; use it consistently)
@@ -106,12 +112,12 @@ Left panel (white text, left-aligned, vertically centred, 64 px left margin):
 - Headline, 44 px semibold, 2 lines max: "Scan once, then just talk"
 - One line, 20 px, 80% white: "Click Scan, then scan the QR code with your phone."
 
-Right side: a Chrome window (light theme) cropped at the right edge, showing the generic "Applicant registration" form from the brief. The extension popup is open, attached under the toolbar icon at the top right of the window, drawn at about 1.3x so it is easy to read. Popup content, top to bottom, inside one card:
-  - Row: Lucide "clipboard-list" icon + "Applicant registration" (14px semibold), and on the right an accent pill "16 fields".
-  - A QR code, 176×176 px at 1x, on white with 4 px padding and 6 px radius, centred. Use a real-looking QR pattern.
-  - "Scan with your phone" (14 px, centred).
+Right side: a Chrome window (light theme) cropped at the right edge, showing the generic "Applicant registration" form from the brief. The extension popup is open, attached under the toolbar icon at the top right of the window, drawn at about 1.3x so it is easy to read. Popup content, top to bottom:
+  - Header band: brand mark + "Voice2Fill", on the right a chip "16 fields"; second line "Applicant registration · forms.example.in".
+  - A QR code, 176×176 px at 1x, on white with 6 px padding and 8 px radius, centred. Use a real-looking QR pattern.
+  - "Scan with your phone camera" (14 px, centred).
   - Lucide "clock" icon (12 px) + "Expires in 9:42" (12 px muted, centred).
-  - "Cancel" as a small muted text link, centred.
+  - Footer bar: "Waiting for your phone…" (12px muted) on the left, an outline "Cancel" button on the right.
 Nothing else in the popup.
 ```
 
@@ -139,11 +145,12 @@ A) A phone (front, upright, plain modern frame) showing the phone page:
 
 B) Behind/left of the phone, the Chrome window with the form. The "Mobile number" input shows "9876543210" with a 2px #F2B705 outline 2px outside the input (the real "just filled" highlight). Name and Father's name are already filled.
   The extension popup is open on the window:
-    - Header: Lucide "smartphone" icon + "Phone paired" (14px semibold); on the right a live pill "Live".
-    - Small muted line: "Applicant registration".
-    - Field rows: Name — Ramesh Kumar · Father's name — Murugan · Mobile number — 9876543210 · Email — "—" (muted) · Date of birth — warn pill "Missing".
-    - Two buttons in a row: "Fill form" (wide) and "Undo".
-    - Small muted line: "New answers from your phone fill in automatically."
+    - Header band: brand mark + "Voice2Fill"; chips "● Live" and "42 min"; second line "Applicant registration · forms.example.in".
+    - "3 of 16 filled" (12px muted, the number in semibold ink) with 19% on the right, and a 7px progress bar under it.
+    - Accent banner with a Lucide "smartphone" icon: "1 new answer from the phone. Click Fill form to add them." ("1 new answer" in semibold)
+    - Card "FILLED 3": ✓ Name — Ramesh Kumar · ✓ Father's name — Murugan · ✓ Mobile number — 9876543210.
+    - Card "NOT ANSWERED YET 13": Email — "—" (muted) · Date of birth — neutral pill "Required".
+    - Footer bar: primary "Fill form" with a small "1 new" badge (wide), an outline "Undo", and an outline square "⋯" button.
 ```
 
 ## Prompt 4: screenshot 3 – "Dependent dropdowns, filled in order"

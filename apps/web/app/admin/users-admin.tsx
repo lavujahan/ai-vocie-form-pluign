@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CreditCard, KeyRound, LogOut, Pencil, Plus, Power, Search, Unlock, X } from 'lucide-react';
-import type { AdminUserRow, UserRole } from '@vff/shared';
+import { PIN_LENGTH, randomPin, type AdminUserRow, type UserRole } from '@vff/shared';
 import { Button, Card, Input, Pill } from '@/components/ui';
 import { AdminNav } from './admin-nav';
 import { api } from './api';
@@ -171,10 +171,10 @@ export function UsersAdmin() {
         <UserDialog
           dialog={dialog}
           onClose={() => setDialog(null)}
+          // The dialog closes itself (after showing a new PIN once).
           onSaved={(u, created) => {
             if (created) setUsers((list) => [u, ...list]);
             else replace(u);
-            setDialog(null);
           }}
         />
       )}
@@ -210,13 +210,33 @@ function UserDialog({
   const [phone, setPhone] = useState(user?.phone ?? '');
   const [role, setRole] = useState<UserRole>(user?.role ?? 'user');
   const [pin, setPin] = useState('');
+  /** A generated PIN is shown in clear text, so the admin can pass it on. */
+  const [pinVisible, setPinVisible] = useState(false);
+  /** After saving a new PIN: shown once (it is stored hashed and can't be seen again). */
+  const [savedPin, setSavedPin] = useState<{ name: string; pin: string } | null>(null);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const title = dialog.kind === 'create' ? 'Add user' : dialog.kind === 'edit' ? 'Edit user' : `Reset PIN for ${user?.name}`;
   const showProfile = dialog.kind !== 'pin';
   const showPin = dialog.kind !== 'edit';
-  const valid = (!showProfile || (name.trim() && phone.length >= 6)) && (!showPin || pin.length === 5);
+  const valid = (!showProfile || (name.trim() && phone.length >= 6)) && (!showPin || pin.length === PIN_LENGTH);
+
+  function generate() {
+    setPin(randomPin());
+    setPinVisible(true);
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setError('Copy failed: select the PIN and copy it by hand.');
+    }
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -234,6 +254,8 @@ function UserDialog({
         { method: dialog.kind === 'create' ? 'POST' : 'PATCH', body: JSON.stringify(body) },
       );
       onSaved(saved, dialog.kind === 'create');
+      if (showPin) setSavedPin({ name: saved.name, pin });
+      else onClose();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -270,21 +292,50 @@ function UserDialog({
               </div>
             </>
           )}
-          {showPin && (
-            <Input
-              type="password"
-              inputMode="numeric"
-              placeholder="5-digit PIN"
-              maxLength={5}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 5))}
-              autoFocus={dialog.kind === 'pin'}
-            />
+          {savedPin ? (
+            <div className="space-y-3">
+              <p className="text-sm">
+                PIN for <span className="font-medium">{savedPin.name}</span>. Pass it on now: it is stored hashed and can&apos;t be
+                shown again.
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="flex-1 select-all rounded-lg bg-subtle px-3 py-2 text-center font-mono text-xl tracking-[0.3em]">
+                  {savedPin.pin}
+                </span>
+                <Button type="button" onClick={() => copy(savedPin.pin)}>
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              {error && <p className="text-xs text-danger-ink">{error}</p>}
+              <Button type="button" className="w-full" onClick={onClose}>
+                Done
+              </Button>
+            </div>
+          ) : (
+            <>
+              {showPin && (
+                <div className="flex gap-2">
+                  <Input
+                    type={pinVisible ? 'text' : 'password'}
+                    inputMode="numeric"
+                    placeholder={`${PIN_LENGTH}-digit PIN`}
+                    maxLength={PIN_LENGTH}
+                    value={pin}
+                    onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_LENGTH))}
+                    autoFocus={dialog.kind === 'pin'}
+                    className={pinVisible ? 'font-mono tracking-widest' : undefined}
+                  />
+                  <Button type="button" onClick={generate} title="A random PIN that is hard to guess">
+                    Generate
+                  </Button>
+                </div>
+              )}
+              {error && <p className="text-xs text-danger-ink">{error}</p>}
+              <Button type="submit" className="w-full" loading={busy} disabled={!valid}>
+                Save
+              </Button>
+            </>
           )}
-          {error && <p className="text-xs text-danger-ink">{error}</p>}
-          <Button type="submit" className="w-full" loading={busy} disabled={!valid}>
-            Save
-          </Button>
         </form>
       </Card>
       </div>

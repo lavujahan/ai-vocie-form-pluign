@@ -20,7 +20,7 @@ Don't send PINs, OTPs or screenshots that show someone's personal details.
 ## Getting started
 
 **How do I get an account?**
-Your administrator creates it with your phone number and a 5-digit PIN. Sign in from the extension's popup.
+Your administrator creates it with your phone number and a 6-digit PIN. Sign in from the extension's popup.
 
 **"Locked" after wrong PINs**
 After too many wrong PINs the account locks for a few minutes. Wait, then try again, or ask your administrator to check your PIN.

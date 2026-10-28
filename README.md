@@ -47,7 +47,7 @@ cp apps/extension/.env.example apps/extension/.env.local  # API base + Supabase 
 ### 3. First admin and checks
 
 ```bash
-pnpm --filter web seed:admin --phone 9876543210 --pin 12345 --name "Admin"
+pnpm --filter web seed:admin --phone 9876543210 --pin 482915 --name "Admin"
 pnpm --filter web check:db     # latest-wins ordering, single-use pairing, RLS isolation
 ```
 
@@ -65,7 +65,7 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 
 ### 5. Try it
 
-1. Sign in at `/admin/login` and add a user (phone number and 5-digit PIN).
+1. Sign in at `/admin/login` and add a user (phone number and 6-digit PIN; **Generate** makes a random one, shown once after Save so you can pass it on).
 2. Open `http://localhost:5174/vanilla.html` (or the React or Vue fixture), click the extension and sign in as that user.
 3. Click **Scan form on this page** and scan the QR code with your phone.
 4. Say *"My name is Ramesh Kumar, email ramesh at gmail dot com, phone nine eight seven six five four three two one zero"*, or in Tanglish, *"en peru Ramesh, ooru Chennai, naan aan"*.

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shield } from 'lucide-react';
-import { LOCK_MINUTES, MAX_PIN_ATTEMPTS, type ApiError, type LoginResponse } from '@vff/shared';
+import { LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, type ApiError, type LoginResponse } from '@vff/shared';
 import { Button, Card, Input } from '@/components/ui';
 
 export default function AdminLogin() {
@@ -61,13 +61,13 @@ export default function AdminLogin() {
             type="password"
             inputMode="numeric"
             autoComplete="current-password"
-            placeholder="5-digit PIN"
-            maxLength={5}
+            placeholder={`${PIN_LENGTH}-digit PIN`}
+            maxLength={PIN_LENGTH}
             value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 5))}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_LENGTH))}
             aria-label="PIN"
           />
-          <Button type="submit" className="w-full" loading={busy} disabled={phone.length < 6 || pin.length !== 5}>
+          <Button type="submit" className="w-full" loading={busy} disabled={phone.length < 6 || pin.length !== PIN_LENGTH}>
             Sign in
           </Button>
           <p className={error ? 'text-xs text-danger-ink' : 'text-xs text-muted'}>

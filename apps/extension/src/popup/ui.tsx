@@ -1,12 +1,52 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import { ChevronRight, Loader2, Mic, MoreHorizontal } from 'lucide-react';
 
-// Same components and tokens as apps/web/components/ui.tsx, sized for a 360px popup.
+// Same tokens as apps/web/components/ui.tsx, sized for a 360px popup (light, on a mild gold background: popup.css).
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <section className={cx('rounded-xl border border-line bg-card p-4', className)}>{children}</section>;
+/**
+ * One popup screen: the header, the content (the only part that scrolls) and a footer that stays in
+ * view. Chrome caps a popup at 600px tall.
+ */
+export function Screen({ header, footer, children }: { header: ReactNode; footer?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex max-h-[600px] flex-col">
+      {header}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
+        <div className="grid gap-2.5">{children}</div>
+      </div>
+      {footer && <footer className="flex items-center gap-2 border-t border-line bg-card px-3.5 py-2.5">{footer}</footer>}
+    </div>
+  );
+}
+
+/** Honey-gold band: the brand mark (white mic on blue), status chips on the right, a line about the form. */
+export function Header({ sub, children }: { sub?: ReactNode; children?: ReactNode }) {
+  return (
+    <header className="border-b border-header-line bg-header px-3.5 pt-2.5 pb-2 text-header-ink">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-sm font-bold">
+          <span className="grid size-[22px] place-items-center rounded-md bg-brand text-brand-ink">
+            <Mic size={14} strokeWidth={2.4} />
+          </span>
+          Voice2Fill
+        </span>
+        {children && <span className="flex shrink-0 items-center gap-1.5">{children}</span>}
+      </div>
+      {sub && <p className="mt-0.5 truncate text-xs text-header-ink/80">{sub}</p>}
+    </header>
+  );
+}
+
+const CHIP = { plain: 'bg-header-ink/10', warn: 'bg-warn-bg text-warn-ink', danger: 'bg-danger-bg text-danger-ink' };
+
+export function HeaderChip({ tone = 'plain', title, children }: { tone?: keyof typeof CHIP; title?: string; children: ReactNode }) {
+  return (
+    <span title={title} className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap tabular-nums', CHIP[tone])}>
+      {children}
+    </span>
+  );
 }
 
 export type PillTone = 'accent' | 'live' | 'warn' | 'danger' | 'neutral';
@@ -15,7 +55,7 @@ const PILL: Record<PillTone, string> = {
   live: 'bg-live-bg text-live-ink',
   warn: 'bg-warn-bg text-warn-ink',
   danger: 'bg-danger-bg text-danger-ink',
-  neutral: 'bg-subtle text-muted',
+  neutral: 'bg-subtle text-ink/75',
 };
 
 export function Pill({ tone = 'neutral', children }: { tone?: PillTone; children: ReactNode }) {
@@ -26,18 +66,97 @@ export function Pill({ tone = 'neutral', children }: { tone?: PillTone; children
   );
 }
 
+const BANNER = {
+  accent: 'border-accent-ink/25 bg-accent-bg text-accent-ink',
+  live: 'border-live-ink/25 bg-live-bg text-live-ink',
+  warn: 'border-warn-ink/25 bg-warn-bg text-warn-ink',
+  danger: 'border-danger-ink/25 bg-danger-bg text-danger-ink',
+};
+
+/** The one status line of a screen (what happened, what to do next). */
+export function Banner({ tone, icon, children }: { tone: keyof typeof BANNER; icon?: ReactNode; children: ReactNode }) {
+  return (
+    <div role="status" className={cx('flex items-start gap-2 rounded-lg border px-2.5 py-2 text-[13px]', BANNER[tone])}>
+      {icon && <span className="mt-px shrink-0">{icon}</span>}
+      <span className="min-w-0">{children}</span>
+    </div>
+  );
+}
+
+export function Progress({ done, total, label }: { done: number; total: number; label: string }) {
+  const pct = total ? Math.round((100 * done) / total) : 0;
+  return (
+    <div className="grid gap-1">
+      <div className="flex justify-between text-xs text-muted tabular-nums">
+        <span>
+          <b className="font-semibold text-ink">{done}</b> of {total} {label}
+        </span>
+        <span>{pct}%</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label={`Fields ${label}`}
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-valuenow={done}
+        className="h-[7px] overflow-hidden rounded-full bg-track"
+      >
+        <div className="h-full rounded-full bg-accent-ink" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+const groupTitle = 'text-[11px] font-bold tracking-wider uppercase';
+
+/** A group of field rows on a white card (rows read clearly against the gold page). */
+export function GroupCard({ title, count, tone, children }: { title: string; count: number; tone?: 'warn'; children: ReactNode }) {
+  return (
+    <section className="rounded-lg border border-line bg-card px-2.5 pt-1.5 pb-0.5">
+      <h2 className={cx('flex justify-between', groupTitle, tone === 'warn' ? 'text-warn-ink' : 'text-muted')}>
+        <span>{title}</span>
+        <span className="tabular-nums">{count}</span>
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+/** A group folded away until clicked (fields a choice on the page hides now). */
+export function FoldedGroup({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-lg border border-line bg-card px-2.5 pt-1.5 pb-0.5">
+      <summary className={cx('flex cursor-pointer list-none items-center gap-1 pb-1 text-muted [&::-webkit-details-marker]:hidden', groupTitle)}>
+        <ChevronRight size={12} className="transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+        {title}
+      </summary>
+      <p className="text-xs text-muted">{hint}</p>
+      {children}
+    </details>
+  );
+}
+
+const BUTTON = {
+  outline: 'border-line bg-card text-ink hover:bg-subtle',
+  primary: 'border-ink bg-ink text-page hover:bg-ink/90',
+  danger: 'border-transparent bg-danger-bg text-danger-ink hover:bg-danger-bg/80',
+};
+
 export function Button({
   className,
   loading,
+  variant = 'outline',
   children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean; variant?: keyof typeof BUTTON }) {
   return (
     <button
+      type="button"
       {...props}
       disabled={props.disabled || loading}
       className={cx(
-        'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-line bg-card px-4 text-sm font-medium text-ink transition-colors hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ink disabled:cursor-not-allowed disabled:opacity-50',
+        BUTTON[variant],
         className,
       )}
     >
@@ -56,23 +175,101 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   );
 }
 
-export function FieldRow({ label, children, sub }: { label: ReactNode; children: ReactNode; sub?: ReactNode }) {
+/** A field: state icon (✓ filled, ⚠ needs a look), label, value on the right with an optional line under it. */
+export function FieldRow({ label, children, sub, icon }: { label: ReactNode; children: ReactNode; sub?: ReactNode; icon?: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-line py-2 text-sm last:border-b-0">
+    <div className="flex items-start gap-2 border-b border-row-line py-[7px] text-[13.5px] last:border-b-0">
+      <span className="mt-px w-4 shrink-0">{icon}</span>
       {/* Long (often bilingual) labels wrap instead of pushing the row wider than the popup. */}
-      <span className="min-w-0 flex-1 break-words text-ink/80">{label}</span>
+      <span className="min-w-0 flex-1 break-words text-ink">{label}</span>
       <span className="min-w-0 max-w-[55%] shrink-0 text-right">
-        <span className="break-words font-medium">{children}</span>
-        {sub && <span className="mt-0.5 block text-xs text-muted">{sub}</span>}
+        <span className="break-words font-semibold">{children}</span>
+        {sub && <span className="mt-0.5 block text-xs font-normal text-muted">{sub}</span>}
       </span>
     </div>
   );
 }
 
-export function LinkButton({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
+export type MenuItem = {
+  label: string;
+  onSelect: () => void;
+  /** Ask first (e.g. ending the form): the question and the button that does it. */
+  confirm?: { text: string; action: string };
+  /** Set apart at the bottom (Sign out). */
+  last?: boolean;
+};
+
+/** The ⋯ button and its list, opening upwards from the footer. Closes on a click outside or Esc. */
+export function Menu({ items }: { items: MenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const [asking, setAsking] = useState<MenuItem | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = () => {
+    setOpen(false);
+    setAsking(null);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && close();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   return (
-    <button {...props} className="text-xs text-muted underline-offset-2 hover:text-ink hover:underline">
-      {children}
-    </button>
+    <div ref={ref} className="relative">
+      <Button aria-label="More" aria-haspopup="menu" aria-expanded={open} className="w-10 px-0" onClick={() => (open ? close() : setOpen(true))}>
+        <MoreHorizontal size={16} />
+      </Button>
+      {open && (
+        <div role="menu" className="absolute right-0 bottom-full z-10 mb-2 grid w-52 rounded-lg border border-line bg-card p-1 shadow-lg">
+          {asking?.confirm ? (
+            <div className="grid gap-2 p-2">
+              <p className="text-[13px]">{asking.confirm.text}</p>
+              <div className="flex justify-end gap-1.5">
+                <Button className="min-h-8 px-2.5 text-[13px]" onClick={close}>
+                  Keep
+                </Button>
+                <Button
+                  variant="danger"
+                  className="min-h-8 px-2.5 text-[13px]"
+                  onClick={() => {
+                    close();
+                    asking.onSelect();
+                  }}
+                >
+                  {asking.confirm.action}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            items.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                role="menuitem"
+                className={cx(
+                  'rounded-md px-2.5 py-2 text-left text-[13.5px] hover:bg-subtle focus-visible:outline-2 focus-visible:outline-accent-ink',
+                  item.last ? 'mt-1 rounded-t-none border-t border-line pt-2.5 text-muted' : 'text-ink',
+                )}
+                onClick={() => {
+                  if (item.confirm) setAsking(item);
+                  else {
+                    close();
+                    item.onSelect();
+                  }
+                }}
+              >
+                {item.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }

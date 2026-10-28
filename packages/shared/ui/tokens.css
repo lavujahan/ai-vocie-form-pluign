@@ -16,6 +16,9 @@
   --vf-danger: #d4433d;
   --vf-danger-bg: #fbe0de;
   --vf-danger-text: #a32b26;
+  /* The brand mark: white mic on a blue rounded square. */
+  --vf-brand: #1e4e9c;
+  --vf-brand-ink: #ffffff;
   color-scheme: light;
 }
 
@@ -36,6 +39,8 @@
     --vf-danger: #e2574f;
     --vf-danger-bg: #4a1f1d;
     --vf-danger-text: #f3a39e;
+    --vf-brand: #1f3557;
+    --vf-brand-ink: #dce8fb;
     color-scheme: dark;
   }
 }
@@ -56,6 +61,8 @@
   --color-danger: var(--vf-danger);
   --color-danger-bg: var(--vf-danger-bg);
   --color-danger-ink: var(--vf-danger-text);
+  --color-brand: var(--vf-brand);
+  --color-brand-ink: var(--vf-brand-ink);
 }
 
 body {
