@@ -40,6 +40,8 @@ function store(key: string, value: unknown) {
   }
 }
 const keyOf = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+/** The bubble's distance from the bottom: up to just under the top edge, but above the bottom bar's buttons. */
+const clampBottom = (b: number) => Math.min(Math.max(b, 88), window.innerHeight - BUBBLE - 12);
 
 export function TamilHelper({ translate, hidden }: { translate: Translate; hidden?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -58,13 +60,45 @@ function Bubble({ onOpen }: { onOpen: () => void }) {
   const [spot, setSpot] = useState<Spot>({ side: 'right', bottom: 140 });
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const start = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const last = useRef<{ x: number; y: number } | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
   // Read after mount: the server render has no localStorage.
   useEffect(() => setSpot(load<Spot>(SPOT_KEY, { side: 'right', bottom: 140 })), []);
 
-  const clampBottom = (b: number) => Math.min(Math.max(b, 88), window.innerHeight - BUBBLE - 72);
+  // Some phone browsers (in-app browsers opened by QR scanner apps, Samsung Internet) don't honour
+  // touch-action: a drag upwards scrolls the page and cancels the drag. Stop the page scrolling
+  // while the bubble is held (React's touch listeners are passive, so this one is added by hand).
+  useEffect(() => {
+    const el = button.current;
+    if (!el) return;
+    const hold = (e: TouchEvent) => {
+      if (start.current && e.cancelable) e.preventDefault();
+    };
+    el.addEventListener('touchmove', hold, { passive: false });
+    return () => el.removeEventListener('touchmove', hold);
+  }, []);
+
+  // A smaller screen (rotated, the browser's address bar shown) keeps the bubble on screen.
+  useEffect(() => {
+    const fit = () => setSpot((s) => ({ ...s, bottom: Math.round(clampBottom(s.bottom)) }));
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, []);
+
+  /** Drops the bubble where the finger left it, on the nearer side. */
+  const drop = (x: number, y: number) => {
+    const next: Spot = {
+      side: x < window.innerWidth / 2 ? 'left' : 'right',
+      bottom: Math.round(clampBottom(window.innerHeight - y - BUBBLE / 2)),
+    };
+    setDrag(null);
+    setSpot(next);
+    store(SPOT_KEY, next);
+  };
 
   return (
     <button
+      ref={button}
       type="button"
       aria-label={t('helperOpen')}
       className={cx(
@@ -82,13 +116,15 @@ function Bubble({ onOpen }: { onOpen: () => void }) {
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         start.current = { x: e.clientX, y: e.clientY, moved: false };
+        last.current = null;
       }}
       onPointerMove={(e) => {
         const s = start.current;
         if (!s) return;
         if (!s.moved && Math.hypot(e.clientX - s.x, e.clientY - s.y) < 8) return;
         s.moved = true;
-        setDrag({ x: e.clientX, y: e.clientY });
+        last.current = { x: e.clientX, y: e.clientY };
+        setDrag(last.current);
       }}
       onPointerUp={(e) => {
         const s = start.current;
@@ -98,17 +134,14 @@ function Bubble({ onOpen }: { onOpen: () => void }) {
           onOpen();
           return;
         }
-        const next: Spot = {
-          side: e.clientX < window.innerWidth / 2 ? 'left' : 'right',
-          bottom: Math.round(clampBottom(window.innerHeight - e.clientY - BUBBLE / 2)),
-        };
-        setDrag(null);
-        setSpot(next);
-        store(SPOT_KEY, next);
+        drop(e.clientX, e.clientY);
       }}
       onPointerCancel={() => {
+        // The browser took the gesture over: keep the bubble where it got to, rather than snapping back.
+        const s = start.current;
         start.current = null;
-        setDrag(null);
+        if (s?.moved && last.current) drop(last.current.x, last.current.y);
+        else setDrag(null);
       }}
     >
       த

@@ -87,20 +87,33 @@ export async function startTrial(userId: string): Promise<void> {
 }
 
 export const PAYMENT_COLUMNS =
-  'id, user_id, kind, amount_inr, method, reference, note, paid_at, users!payments_user_id_fkey(name, phone), subscriptions(plans(name))';
+  'id, user_id, kind, amount_inr, method, reference, note, paid_at, users!payments_user_id_fkey(name, phone), recorder:users!payments_recorded_by_fkey(name), subscriptions(plans(name))';
 
-type RawPayment = Omit<PaymentRow, 'name' | 'phone' | 'plan_name' | 'amount_inr'> & {
+type RawPayment = Omit<PaymentRow, 'name' | 'phone' | 'plan_name' | 'amount_inr' | 'recorded_by_name'> & {
   amount_inr: number | string;
   users: { name: string; phone: string } | null;
+  recorder: { name: string } | null;
   subscriptions: { plans: { name: string } | null } | null;
 };
 
 export function toPaymentRows(raw: unknown[]): PaymentRow[] {
-  return (raw as RawPayment[]).map(({ users, subscriptions, ...p }) => ({
+  return (raw as RawPayment[]).map(({ users, recorder, subscriptions, ...p }) => ({
     ...p,
     amount_inr: Number(p.amount_inr),
     name: users?.name ?? null,
     phone: users?.phone ?? null,
     plan_name: subscriptions?.plans?.name ?? null,
+    recorded_by_name: recorder?.name ?? null,
   }));
+}
+
+const IST_MS = 330 * 60_000;
+
+/**
+ * The payment moved to another India date (YYYY-MM-DD), at the same India time of day: payments of
+ * one day stay in their order, and the day it counts on in Billing is the day chosen.
+ */
+export function paidAtOn(day: string, oldIso: string): string {
+  const time = new Date(Date.parse(oldIso) + IST_MS).toISOString().slice(10); // "T14:05:09.123Z" in India time
+  return new Date(Date.parse(`${day}${time}`) - IST_MS).toISOString();
 }

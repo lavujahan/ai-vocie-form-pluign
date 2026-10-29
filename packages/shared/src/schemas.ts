@@ -346,6 +346,28 @@ export const TopUpRequest = z.object({
 });
 export type TopUpRequest = z.infer<typeof TopUpRequest>;
 
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullish()
+    .transform((s) => s || null);
+
+/**
+ * Admin → Payments: fix a payment's details. The plan or minutes it paid for are not changed.
+ * `method` also takes 'razorpay', which older rows may have, so they can be saved unchanged.
+ */
+export const PaymentUpdate = z.object({
+  /** India date, YYYY-MM-DD; the payment keeps its time of day. */
+  paid_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
+  amount_inr: z.number().gt(0, 'Amount must be more than ₹0').max(1_000_000),
+  method: z.enum([...PaymentMethod.options, 'razorpay']),
+  reference: optionalText(100),
+  note: optionalText(300),
+});
+export type PaymentUpdate = z.infer<typeof PaymentUpdate>;
+
 export type PaymentRow = {
   id: string;
   user_id: string | null;
@@ -358,7 +380,12 @@ export type PaymentRow = {
   reference: string | null;
   note: string | null;
   paid_at: string;
+  /** The admin who recorded it (null: the Trial, started automatically). */
+  recorded_by_name: string | null;
 };
+
+/** Admin → Payments: every payment in the chosen dates, newest first. */
+export type PaymentsResponse = { from: string; to: string; payments: PaymentRow[] };
 
 export type SubscriptionRow = {
   id: string;

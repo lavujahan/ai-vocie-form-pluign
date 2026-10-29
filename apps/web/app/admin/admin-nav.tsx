@@ -7,12 +7,13 @@ import { cx } from '@/components/ui';
 const TABS = [
   { href: '/admin', label: 'Users' },
   { href: '/admin/billing', label: 'Billing' },
+  { href: '/admin/payments', label: 'Payments' },
   { href: '/admin/plans', label: 'Plans' },
   { href: '/admin/usage', label: 'Usage' },
   { href: '/admin/forms', label: 'Forms' },
 ];
 
-/** Users · Billing · Plans · Usage · Forms tabs at the top of the admin pages. */
+/** Users · Billing · Payments · Plans · Usage · Forms tabs at the top of the admin pages. */
 export function AdminNav() {
   const path = usePathname();
   return (

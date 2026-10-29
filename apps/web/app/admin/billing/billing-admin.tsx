@@ -1,17 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { LogOut, MessageCircle } from 'lucide-react';
 import type { BillingResponse } from '@vff/shared';
-import { Button, Card, Input, Pill, cx } from '@/components/ui';
+import { Button, Card, Pill, cx } from '@/components/ui';
 import { AdminNav } from '../admin-nav';
 import { api } from '../api';
-import { inr, isDay, monthRange, shortDate, todayIst } from '../dates';
+import { DateRange } from '../date-range';
+import { inr, isDay, monthRange, shortDate } from '../dates';
 import { planBadge } from '../plan-dialog';
 
 const mins = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 });
-const METHOD: Record<string, string> = { upi: 'UPI', bank: 'Bank', cash: 'Cash', razorpay: 'Razorpay', other: 'Other' };
 const date = (iso: string | null) => (iso ? shortDate.format(new Date(iso)) : '—');
 
 /** wa.me link for a renewal reminder; 10-digit numbers are Indian (+91). */
@@ -22,7 +23,7 @@ function whatsApp(phone: string, name: string, until: string | null): string {
   return `https://wa.me/${n}?text=${encodeURIComponent(text)}`;
 }
 
-/** Money received against the AI cost of the same dates, renewals that are due, and every payment. */
+/** Money received against the AI cost of the same dates, and renewals that are due; payments are in Payments. */
 export function BillingAdmin() {
   const router = useRouter();
   const [range, setRange] = useState(() => monthRange(0));
@@ -55,10 +56,6 @@ export function BillingAdmin() {
     router.replace('/admin/login');
   }
 
-  const presets = [
-    { label: 'This month', ...monthRange(0) },
-    { label: 'Last month', ...monthRange(1) },
-  ];
   const empty = (n: number, cols: number, text: string) =>
     !n && (
       <tr>
@@ -125,36 +122,7 @@ export function BillingAdmin() {
       </Card>
 
       <div className="mb-4 grid gap-3 md:grid-cols-[auto_1fr]">
-        <Card>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="block">
-              <span className="text-xs font-medium text-muted">From</span>
-              <Input type="date" value={range.from} max={range.to} onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))} className="mt-1" />
-            </label>
-            <label className="block">
-              <span className="text-xs font-medium text-muted">To</span>
-              <Input
-                type="date"
-                value={range.to}
-                min={range.from}
-                max={todayIst()}
-                onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
-                className="mt-1"
-              />
-            </label>
-          </div>
-          <div className="mt-2 flex gap-3">
-            {presets.map((p) => (
-              <button
-                key={p.label}
-                onClick={() => setRange({ from: p.from, to: p.to })}
-                className={`text-xs underline-offset-2 hover:underline ${range.from === p.from && range.to === p.to ? 'font-semibold text-ink' : 'text-muted'}`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </Card>
+        <DateRange range={range} onChange={setRange} />
         <div className="grid grid-cols-3 gap-3">
           <Stat label="Received" value={data && inr.format(data.totals.revenue_inr)} />
           <Stat
@@ -211,41 +179,23 @@ export function BillingAdmin() {
       </Card>
 
       <h2 className="mb-2 text-sm font-semibold">Payments</h2>
-      <Card className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-muted">
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">User</th>
-                <th className="px-4 py-2 font-medium">For</th>
-                <th className="px-4 py-2 font-medium">Paid by</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.payments.map((p) => (
-                <tr key={p.id} className="border-t border-line">
-                  <td className="px-4 py-2.5 whitespace-nowrap tabular-nums">{date(p.paid_at)}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="font-medium">{p.name ?? 'Deleted user'}</div>
-                    {p.phone && <div className="text-xs tabular-nums text-muted">{p.phone}</div>}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {p.kind === 'topup' ? 'Extra minutes' : (p.plan_name ?? 'Plan')}
-                    {p.note && <div className="text-xs text-muted">{p.note}</div>}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {METHOD[p.method] ?? p.method}
-                    {p.reference && <div className="text-xs break-all text-muted">{p.reference}</div>}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-medium tabular-nums">{inr.format(p.amount_inr)}</td>
-                </tr>
-              ))}
-              {empty(data?.payments.length ?? 0, 5, 'No payments in these dates.')}
-            </tbody>
-          </table>
-        </div>
+      <Card className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span>
+          {data ? (
+            <>
+              <b className="tabular-nums">{data.payments.length}</b> payment{data.payments.length === 1 ? '' : 's'} ·{' '}
+              <b className="tabular-nums">{inr.format(data.totals.revenue_inr)}</b> in these dates
+            </>
+          ) : (
+            <span className="text-muted">{loading ? 'Loading…' : '—'}</span>
+          )}
+        </span>
+        <Link
+          href={`/admin/payments?${new URLSearchParams(range)}`}
+          className="font-medium text-accent-ink underline-offset-2 hover:underline"
+        >
+          Manage in Payments →
+        </Link>
       </Card>
     </main>
   );

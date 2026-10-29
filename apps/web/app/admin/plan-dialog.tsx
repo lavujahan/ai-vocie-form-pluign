@@ -13,15 +13,10 @@ import {
 import { Button, Card, Input, Pill, cx, type PillTone } from '@/components/ui';
 import { api } from './api';
 import { inr, shortDate } from './dates';
+import { METHODS, methodLabel } from './methods';
 
 const DAY_MS = 86_400_000;
-const METHODS: { id: PaymentMethod; label: string }[] = [
-  { id: 'upi', label: 'UPI' },
-  { id: 'bank', label: 'Bank transfer' },
-  { id: 'cash', label: 'Cash' },
-  { id: 'other', label: 'Other' },
-];
-const SELECT = 'min-h-11 w-full rounded-lg border border-line bg-card px-3 text-base text-ink focus:border-accent-ink focus:outline-none';
+export const SELECT ='min-h-11 w-full rounded-lg border border-line bg-card px-3 text-base text-ink focus:border-accent-ink focus:outline-none';
 
 const date = (iso: string | null) => (iso ? shortDate.format(new Date(iso)) : '—');
 
@@ -277,7 +272,7 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
                     <span>
                       {date(p.paid_at)} · {p.kind === 'topup' ? 'Minutes' : (p.plan_name ?? 'Plan')}
                       <span className="block text-xs text-muted">
-                        {METHODS.find((m) => m.id === p.method)?.label ?? p.method}
+                        {methodLabel(p.method)}
                         {p.reference && ` · ${p.reference}`}
                         {p.note && ` · ${p.note}`}
                       </span>

@@ -14,6 +14,9 @@ export function monthRange(back: number): { from: string; to: string } {
 
 export const isDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
+/** The India date (YYYY-MM-DD) of a time. */
+export const istDay = (iso: string) => new Date(Date.parse(iso) + IST_MS).toISOString().slice(0, 10);
+
 export const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** "24 Nov 2026" in India time. */
