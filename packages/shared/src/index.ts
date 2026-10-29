@@ -4,3 +4,4 @@ export * from './normalize';
 export * from './validate';
 export * from './files';
 export * from './pin';
+export * from './voice-tips';

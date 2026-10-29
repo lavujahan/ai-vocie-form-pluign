@@ -35,8 +35,15 @@ import { FileSheet, FileStatusMarker } from './file-upload';
 import { LangCtx, useI18n, type T } from './lang';
 import { sendWatermark, unsentChanges } from './send-state';
 import { TamilHelper } from './tamil-helper';
-import { useRecorder } from './use-recorder';
+import { useRecorder, type RecorderNotice } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
+
+/** What the bottom bar says after a recording ended by itself. */
+const RECORDER_NOTICE = {
+  interrupted: 'interrupted',
+  silence: 'autoStopped',
+  too_short: 'tooShort',
+} as const satisfies Record<NonNullable<RecorderNotice>, string>;
 
 /**
  * The phone page: one page shows every field live while the user speaks. The big mic at the bottom
@@ -569,6 +576,7 @@ function SessionScreen({ code }: { code: string }) {
         }}
         recording={recording}
         elapsed={recorder.elapsed}
+        stopsIn={recorder.stopsIn}
         // Until the last recording is uploaded and turned into answers (and while sending), the big mic
         // waits: a new recording would race the one in progress. While recording it stays: it is Stop.
         micDisabled={recorder.state === 'unsupported' || (!recording && (processing > 0 || send.sending))}
@@ -576,14 +584,14 @@ function SessionScreen({ code }: { code: string }) {
           leaveWarn
             ? t('backAgainToLeave')
             : !recording && recorder.notice
-              ? t(recorder.notice === 'interrupted' ? 'interrupted' : 'tooShort')
+              ? t(RECORDER_NOTICE[recorder.notice])
               : null
         }
         onMic={toggleMic}
         send={send}
       />
-      {/* English → Tamil for labels and help lines; hidden while recording so it never covers the mic. */}
-      <TamilHelper translate={s.translate} hidden={recording} />
+      {/* English → Tamil for labels and help lines, and voice tips on a voice form; hidden while recording so they never cover the mic. */}
+      <TamilHelper translate={s.translate} hidden={recording} tips={voice} />
     </Page>
   );
 }
@@ -965,6 +973,7 @@ function BottomBar({
   onAttention,
   recording,
   elapsed,
+  stopsIn,
   micDisabled,
   notice,
   onMic,
@@ -987,6 +996,8 @@ function BottomBar({
   onAttention: () => void;
   recording: boolean;
   elapsed: number;
+  /** Seconds until auto-stop (0: not counting down). */
+  stopsIn: number;
   micDisabled: boolean;
   notice: string | null;
   onMic: () => void;
@@ -1045,6 +1056,12 @@ function BottomBar({
         {unsent > 0 && (
           <span className="rounded-full bg-accent-bg px-2.5 py-0.5 font-semibold text-accent-ink">
             {t('notSentYet', { n: unsent })}
+          </span>
+        )}
+        {/* Silence after speech: the recording stops by itself when this reaches 0 (speaking again hides it). */}
+        {recording && stopsIn > 0 && (
+          <span className="rounded-full bg-warn-bg px-2.5 py-0.5 font-semibold text-warn-ink tabular-nums" aria-live="polite">
+            {t('quietStops', { n: stopsIn })}
           </span>
         )}
       </div>

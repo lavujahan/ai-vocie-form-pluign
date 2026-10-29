@@ -2,6 +2,8 @@
 @import '@vff/shared/ui/tokens.css';
 
 @source '../components';
+/* The voice tips cards, shared with the extension popup. */
+@source '../../../packages/shared/ui';
 
 html,
 body {

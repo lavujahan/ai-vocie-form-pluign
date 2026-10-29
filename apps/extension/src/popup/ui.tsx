@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
 import { ChevronRight, Loader2, Mic, MoreHorizontal } from 'lucide-react';
+import { TIPS_TEXT } from '@vff/shared';
+import { BulbIcon, TipsDeck } from '@vff/shared/ui/voice-tips';
 
 // Same tokens as apps/web/components/ui.tsx, sized for a 360px popup (light, on a mild gold background: popup.css).
 
@@ -9,14 +11,85 @@ export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Bool
  * One popup screen: the header, the content (the only part that scrolls) and a footer that stays in
  * view. Chrome caps a popup at 600px tall.
  */
-export function Screen({ header, footer, children }: { header: ReactNode; footer?: ReactNode; children: ReactNode }) {
+export function Screen({
+  header,
+  footer,
+  tips = false,
+  children,
+}: {
+  header: ReactNode;
+  footer?: ReactNode;
+  /** Show the voice-tips bubble (a voice form): the operator shows the tips to the customer. */
+  tips?: boolean;
+  children: ReactNode;
+}) {
+  const [tipsOpen, setTipsOpen] = useState(false);
   return (
-    <div className="flex max-h-[600px] flex-col">
+    <div className={cx('relative flex max-h-[600px] flex-col', tipsOpen && 'min-h-[560px]')}>
       {header}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
-        <div className="grid gap-2.5">{children}</div>
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3.5 py-3">
+          <div className={cx('grid gap-2.5', tips && 'pb-12')}>{children}</div>
+        </div>
+        {tips && <TipsBubble onOpen={() => setTipsOpen(true)} />}
       </div>
       {footer && <footer className="flex items-center gap-2 border-t border-line bg-card px-3.5 py-2.5">{footer}</footer>}
+      {tipsOpen && (
+        <div className="absolute inset-0 z-50" role="dialog" aria-modal="true" aria-label={TIPS_TEXT.en.title}>
+          <TipsDeck lang="en" operatorNote="Tell your customer before handing over the phone" onClose={() => setTipsOpen(false)} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+const TIPS_SEEN_KEY = 'vf-voice-tips-seen';
+
+/**
+ * The blue lightbulb at the bottom right of the screen. Until the tips are opened (or the callout
+ * closed) once, it pulses with a callout.
+ */
+function TipsBubble({ onOpen }: { onOpen: () => void }) {
+  const [fresh, setFresh] = useState(false);
+  useEffect(() => {
+    chrome.storage.local.get(TIPS_SEEN_KEY).then((r) => setFresh(r[TIPS_SEEN_KEY] !== true), () => null);
+  }, []);
+  const seen = () => {
+    setFresh(false);
+    void chrome.storage.local.set({ [TIPS_SEEN_KEY]: true });
+  };
+  return (
+    <div className="absolute right-3.5 bottom-3 z-10 flex items-end gap-2.5">
+      {fresh && (
+        <div className="relative mb-0.5 w-48 rounded-xl bg-ink px-3 py-2 text-xs leading-snug text-page shadow-[0_8px_20px_rgba(0,0,0,0.25)]">
+          <button type="button" onClick={() => (seen(), onOpen())} className="block pr-5 text-left">
+            <b className="block text-[12.5px]">Voice tips</b>6 quick tips that save minutes. Show them to your customer.
+          </button>
+          <button
+            type="button"
+            aria-label="Hide this"
+            onClick={seen}
+            className="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded text-sm opacity-70 hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+      <button
+        type="button"
+        aria-label="Voice tips"
+        title="Voice tips"
+        onClick={() => (seen(), onOpen())}
+        className="relative grid size-11 shrink-0 place-items-center rounded-full border-2 border-white bg-brand text-brand-ink shadow-[0_6px_18px_rgba(0,0,0,0.25)]"
+      >
+        {fresh && (
+          <>
+            <span className="absolute -inset-[7px] animate-[vf-pulse_1.8s_ease-out_infinite] rounded-full border-[3px] border-brand/35 motion-reduce:animate-none" />
+            <span className="absolute -top-[3px] -right-[3px] size-[13px] rounded-full border-2 border-white bg-danger" />
+          </>
+        )}
+        <BulbIcon size={21} />
+      </button>
     </div>
   );
 }

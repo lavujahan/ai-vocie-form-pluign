@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ClipboardPaste, Copy, Loader2, X } from 'lucide-react';
-import { TRANSLATE_MAX_CHARS } from '@vff/shared';
+import { TIPS_TEXT, TRANSLATE_MAX_CHARS } from '@vff/shared';
+import { BulbIcon } from '@vff/shared/ui/voice-tips';
 import { cx } from '@/components/ui';
 import { useI18n } from './lang';
+import { TIPS_SEEN_KEY, TipsSheet } from './voice-tips';
 
 /**
  * English → Tamil helper: a gold "த" bubble at the screen edge opens a bottom sheet where the operator
- * types or pastes English (a label, a help line) and gets the Tamil to read out or copy. The bubble can be
- * dragged up and down and snaps to the nearer side; it hides while recording, so it never covers the mic.
+ * types or pastes English (a label, a help line) and gets the Tamil to read out or copy. On a voice form
+ * the voice-tips bubble sits above it. The bubbles move together: dragged up and down, they snap to the
+ * nearer side; they hide while recording, so they never cover the mic.
  */
 
 export type Translate = (text: string, signal?: AbortSignal) => Promise<{ tamil: string } | { error: string }>;
@@ -40,36 +43,60 @@ function store(key: string, value: unknown) {
   }
 }
 const keyOf = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
-/** The bubble's distance from the bottom: up to just under the top edge, but above the bottom bar's buttons. */
-const clampBottom = (b: number) => Math.min(Math.max(b, 88), window.innerHeight - BUBBLE - 12);
+const GAP = 10;
+/** The stack's distance from the bottom: up to just under the top edge, but above the bottom bar's buttons. */
+const clampBottom = (b: number, height: number) => Math.min(Math.max(b, 88), window.innerHeight - height - 12);
 
-export function TamilHelper({ translate, hidden }: { translate: Translate; hidden?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
+type Panel = 'tamil' | 'tips';
+/** What a tap on the stack does, from the `data-act` of the part tapped. */
+type Act = Panel | 'dismiss';
+
+/**
+ * The floating helpers: the gold "த" bubble, and with `tips` (a voice form) the blue voice-tips bubble
+ * above it. They hide while recording, so they never cover the mic.
+ */
+export function TamilHelper({ translate, hidden, tips }: { translate: Translate; hidden?: boolean; tips?: boolean }) {
+  const [open, setOpen] = useState<Panel | null>(null);
+  // Until the tips are opened (or the callout closed) once on this phone, the tips bubble calls out.
+  const [tipsSeen, setTipsSeen] = useState(true);
+  useEffect(() => setTipsSeen(load(TIPS_SEEN_KEY, false)), []);
+  const close = useCallback(() => setOpen(null), []);
+  const act = (a: Act) => {
+    if (a !== 'tamil') {
+      setTipsSeen(true);
+      store(TIPS_SEEN_KEY, true);
+    }
+    if (a !== 'dismiss') setOpen(a);
+  };
   return (
     <>
-      {!hidden && !open && <Bubble onOpen={() => setOpen(true)} />}
-      {open && <Sheet translate={translate} onClose={close} />}
+      {!hidden && !open && <Bubbles tips={!!tips} fresh={!!tips && !tipsSeen} onAct={act} />}
+      {open === 'tamil' && <Sheet translate={translate} onClose={close} />}
+      {open === 'tips' && <TipsSheet onClose={close} />}
     </>
   );
 }
 
-/** The floating "த" button. A tap opens the helper; a drag moves it (it snaps to the nearer side). */
-function Bubble({ onOpen }: { onOpen: () => void }) {
-  const { t } = useI18n();
+/**
+ * The bubbles, one stack: a tap opens a helper; a drag moves the stack (it snaps to the nearer side).
+ * The pointer is captured by the stack, so the part tapped is read when the finger goes down.
+ */
+function Bubbles({ tips, fresh, onAct }: { tips: boolean; fresh: boolean; onAct: (a: Act) => void }) {
+  const { t, lang } = useI18n();
   const [spot, setSpot] = useState<Spot>({ side: 'right', bottom: 140 });
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
-  const start = useRef<{ x: number; y: number; moved: boolean } | null>(null);
+  const start = useRef<{ x: number; y: number; moved: boolean; act: Act | null; dx: number; dy: number } | null>(null);
   const last = useRef<{ x: number; y: number } | null>(null);
-  const button = useRef<HTMLButtonElement>(null);
+  const stack = useRef<HTMLDivElement>(null);
+  const height = tips ? BUBBLE * 2 + GAP : BUBBLE;
   // Read after mount: the server render has no localStorage.
   useEffect(() => setSpot(load<Spot>(SPOT_KEY, { side: 'right', bottom: 140 })), []);
 
   // Some phone browsers (in-app browsers opened by QR scanner apps, Samsung Internet) don't honour
   // touch-action: a drag upwards scrolls the page and cancels the drag. Stop the page scrolling
-  // while the bubble is held (React's touch listeners are passive, so this one is added by hand).
+  // while the stack is held (React's touch listeners are passive, so this one is added by hand).
   useEffect(() => {
-    const el = button.current;
+    const el = stack.current;
     if (!el) return;
     const hold = (e: TouchEvent) => {
       if (start.current && e.cancelable) e.preventDefault();
@@ -78,44 +105,50 @@ function Bubble({ onOpen }: { onOpen: () => void }) {
     return () => el.removeEventListener('touchmove', hold);
   }, []);
 
-  // A smaller screen (rotated, the browser's address bar shown) keeps the bubble on screen.
+  // A smaller screen (rotated, the browser's address bar shown) keeps the stack on screen.
   useEffect(() => {
-    const fit = () => setSpot((s) => ({ ...s, bottom: Math.round(clampBottom(s.bottom)) }));
+    const fit = () => setSpot((s) => ({ ...s, bottom: Math.round(clampBottom(s.bottom, height)) }));
+    fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, []);
+  }, [height]);
 
-  /** Drops the bubble where the finger left it, on the nearer side. */
+  /** Drops the stack where the finger left it, on the nearer side. */
   const drop = (x: number, y: number) => {
+    const s = start.current;
+    const top = y - (s?.dy ?? BUBBLE / 2);
     const next: Spot = {
       side: x < window.innerWidth / 2 ? 'left' : 'right',
-      bottom: Math.round(clampBottom(window.innerHeight - y - BUBBLE / 2)),
+      bottom: Math.round(clampBottom(window.innerHeight - top - height, height)),
     };
     setDrag(null);
     setSpot(next);
     store(SPOT_KEY, next);
   };
+  const grab = start.current;
+  // Keyboard: Enter / Space on a bubble (a pointer tap is handled on pointer up, below).
+  const keyAct = (a: Act) => (e: React.MouseEvent) => e.detail === 0 && onAct(a);
 
   return (
-    <button
-      ref={button}
-      type="button"
-      aria-label={t('helperOpen')}
+    <div
+      ref={stack}
       className={cx(
-        'fixed z-30 grid touch-none place-items-center rounded-full border-2 border-white bg-gold text-[22px] font-semibold text-gold-ink shadow-[0_6px_18px_rgba(0,0,0,0.25)] select-none',
+        'fixed z-30 flex touch-none flex-col items-center select-none',
         !drag && 'transition-[left,right,bottom] duration-150 motion-reduce:transition-none',
       )}
       style={{
         width: BUBBLE,
-        height: BUBBLE,
-        fontFamily: TA_FONT,
-        ...(drag
-          ? { left: drag.x - BUBBLE / 2, top: drag.y - BUBBLE / 2 }
+        height,
+        gap: GAP,
+        ...(drag && grab
+          ? { left: drag.x - grab.dx, top: drag.y - grab.dy }
           : { [spot.side]: 12, bottom: `calc(${spot.bottom}px + env(safe-area-inset-bottom, 0px))` }),
       }}
       onPointerDown={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const act = ((e.target as Element).closest('[data-act]') as HTMLElement | null)?.dataset.act as Act | undefined;
         e.currentTarget.setPointerCapture(e.pointerId);
-        start.current = { x: e.clientX, y: e.clientY, moved: false };
+        start.current = { x: e.clientX, y: e.clientY, moved: false, act: act ?? null, dx: e.clientX - r.left, dy: e.clientY - r.top };
         last.current = null;
       }}
       onPointerMove={(e) => {
@@ -128,25 +161,68 @@ function Bubble({ onOpen }: { onOpen: () => void }) {
       }}
       onPointerUp={(e) => {
         const s = start.current;
-        start.current = null;
         if (!s?.moved) {
+          start.current = null;
           setDrag(null);
-          onOpen();
+          if (s?.act) onAct(s.act);
           return;
         }
         drop(e.clientX, e.clientY);
+        start.current = null;
       }}
       onPointerCancel={() => {
-        // The browser took the gesture over: keep the bubble where it got to, rather than snapping back.
+        // The browser took the gesture over: keep the stack where it got to, rather than snapping back.
         const s = start.current;
-        start.current = null;
         if (s?.moved && last.current) drop(last.current.x, last.current.y);
         else setDrag(null);
+        start.current = null;
       }}
     >
-      த
-      <span className="absolute -right-1 -bottom-0.5 rounded-md bg-brand px-1 font-sans text-[10px] leading-[15px] font-bold text-brand-ink">EN</span>
-    </button>
+      {tips && (
+        <button
+          type="button"
+          data-act="tips"
+          aria-label={TIPS_TEXT[lang].open}
+          onClick={keyAct('tips')}
+          className="relative grid shrink-0 place-items-center rounded-full border-2 border-white bg-brand text-brand-ink shadow-[0_6px_18px_rgba(0,0,0,0.25)]"
+          style={{ width: BUBBLE, height: BUBBLE }}
+        >
+          {fresh && (
+            <>
+              <span className="absolute -inset-[7px] animate-[vf-pulse_1.8s_ease-out_infinite] rounded-full border-[3px] border-brand/35 motion-reduce:animate-none" />
+              <span className="absolute -top-[3px] -right-[3px] size-[13px] rounded-full border-2 border-white bg-danger" />
+            </>
+          )}
+          <BulbIcon size={24} />
+        </button>
+      )}
+      <button
+        type="button"
+        data-act="tamil"
+        aria-label={t('helperOpen')}
+        onClick={keyAct('tamil')}
+        className="relative grid shrink-0 place-items-center rounded-full border-2 border-white bg-gold text-[22px] font-semibold text-gold-ink shadow-[0_6px_18px_rgba(0,0,0,0.25)]"
+        style={{ width: BUBBLE, height: BUBBLE, fontFamily: TA_FONT }}
+      >
+        த
+        <span className="absolute -right-1 -bottom-0.5 rounded-md bg-brand px-1 font-sans text-[10px] leading-[15px] font-bold text-brand-ink">EN</span>
+      </button>
+      {fresh && !drag && (
+        // First visit: a short callout beside the tips bubble, on the side facing the page.
+        <div
+          className="absolute top-0 w-48 rounded-xl bg-ink px-3 py-2 text-xs leading-snug text-page shadow-[0_8px_20px_rgba(0,0,0,0.25)]"
+          style={{ [spot.side === 'right' ? 'right' : 'left']: BUBBLE + 12 }}
+        >
+          <button type="button" data-act="tips" onClick={keyAct('tips')} className="block pr-5 text-left">
+            <b className="block text-[12.5px]">{t('tipsCallout')}</b>
+            {t('tipsCalloutSub')}
+          </button>
+          <button type="button" data-act="dismiss" aria-label={t('tipsDismiss')} onClick={keyAct('dismiss')} className="absolute top-1.5 right-1.5 grid size-6 place-items-center rounded opacity-70 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

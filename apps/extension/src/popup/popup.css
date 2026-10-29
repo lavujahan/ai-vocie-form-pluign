@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 @import '@vff/shared/ui/tokens.css';
+/* The voice tips cards, shared with the phone page. */
+@source '../../../../packages/shared/ui';
 
 /*
  * The popup is light, on a mild gold background, in either Chrome theme: `html:root` wins over the

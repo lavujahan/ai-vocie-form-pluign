@@ -202,6 +202,7 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
   const steps = ['Scan the form', 'Pair your phone', typingOnly ? 'Customer types answers' : 'Speak the answers', 'Click Fill form'];
   return (
     <Screen
+      tips={!typingOnly}
       header={
         <Header sub={join(`Signed in as ${state.auth?.user.name}`, others)}>
           <MinutesChip account={state.account} />
@@ -426,6 +427,7 @@ function QrCard({ state, send, others }: { state: ExtState; send: Send; others: 
 
   return (
     <Screen
+      tips={voiceOn(s)}
       header={
         <Header sub={join(name, hostOf(s.page_site), others)}>
           {!voiceOn(s) && <TypingChip />}
@@ -566,6 +568,7 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
 
   return (
     <Screen
+      tips={voiceOn(s)}
       header={
         <Header sub={join(snap.session.form_name, hostOf(s.page_site), others)}>
           {!voice && <TypingChip />}
