@@ -209,7 +209,8 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
       }
       footer={
         <>
-          <span className="flex-1" />
+          {/* The plan and its minutes, beside Sign out; a plan that refuses scanning is a banner above instead. */}
+          {state.account && !planBlocked(state.account) ? <PlanMeter account={state.account} inFooter /> : <span className="flex-1" />}
           <Menu items={[{ label: 'Sign out', onSelect: () => send({ type: 'LOGOUT' }) }]} />
         </>
       }
@@ -261,7 +262,7 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
           </li>
         ))}
       </ol>
-      {state.account && <PlanMeter account={state.account} />}
+      {planBlocked(state.account) && <PlanMeter account={state.account!} />}
     </Screen>
   );
 }
@@ -308,8 +309,12 @@ function MinutesChip({ account }: { account: AccountResponse | null }) {
   );
 }
 
-/** The plan and its voice minutes, used of allowed with a bar, or why scanning is refused with a Renew link. */
-function PlanMeter({ account }: { account: AccountResponse }) {
+/**
+ * The plan and its voice minutes, used of allowed with a bar, or why scanning is refused with a Renew link.
+ * `inFooter`: no card around it, filling the footer row beside the ⋯ menu.
+ */
+function PlanMeter({ account, inFooter = false }: { account: AccountResponse; inFooter?: boolean }) {
+  const box = inFooter ? 'grid min-w-0 flex-1 gap-1 text-xs' : 'grid gap-1.5 rounded-lg border border-line bg-card p-2.5 text-xs';
   const blocked = planBlocked(account);
   if (blocked) {
     return (
@@ -328,17 +333,19 @@ function PlanMeter({ account }: { account: AccountResponse }) {
   const p = account.plan;
   if (account.unlimited || !p) {
     return account.forms_completed ? (
-      <div className="rounded-lg border border-line bg-card p-2.5">
+      <div className={box}>
         <FormsDone account={account} />
       </div>
+    ) : inFooter ? (
+      <span className="flex-1" />
     ) : null;
   }
   const used = minutesUsed(p);
   const pct = usedPct(p);
   const low = isLow(p);
   return (
-    <div className="grid gap-1.5 rounded-lg border border-line bg-card p-2.5 text-xs">
-      <div className="flex items-baseline justify-between gap-2">
+    <div className={box}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
         <span className={low ? 'text-warn-ink' : 'text-muted'}>
           {p.plan_name} plan · till {shortDate(p.paid_until)}
           {(low || isTrial(p)) && ACCOUNT_URL && (
