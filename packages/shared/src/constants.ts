@@ -13,6 +13,9 @@ export const IP_ATTEMPT_LIMIT = 20;
 /** Below this, the phone and popup show the value as "check this". */
 export const LOW_CONFIDENCE = 0.6;
 
+/** Tamil helper on the phone page: the longest English text translated at once. */
+export const TRANSLATE_MAX_CHARS = 500;
+
 export const USER_COOKIE = 'vf_session';
 
 /** Admin → Users → Add minutes: the default top-up. */

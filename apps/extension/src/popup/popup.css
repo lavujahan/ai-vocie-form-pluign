@@ -24,9 +24,9 @@ html:root {
   --vf-danger-text: #9a2621;
   --vf-brand: #1e4e9c;
   --vf-brand-ink: #ffffff;
-  --vf-header: #ebc865;
-  --vf-header-line: #cfa63c;
-  --vf-header-ink: #1a1813;
+  --vf-header: var(--vf-gold);
+  --vf-header-line: var(--vf-gold-line);
+  --vf-header-ink: var(--vf-gold-ink);
   --vf-row-line: #efe4c6;
   --vf-track: #e8d7a6;
   --vf-live-dot: #1f8a34;

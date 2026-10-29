@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql`, `0018_form_template.sql` and `0019_hidden_fields.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql`, `0018_form_template.sql`, `0019_hidden_fields.sql` and `0020_translate_usage.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -99,7 +99,7 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
   2. **Join before mapping** (`lib/recordings.ts`): pieces share a `recording_id` and a `part` number (migration `0003`). For piece N, the server maps the joined transcript of pieces 0…N. A sentence or number cut across pieces ("mobile number 95432 | 49890") is read whole, and the later piece's higher seq replaces the earlier partial values.
 - **Interpretation is done by the AI.** The mapping agent interprets everything: Tanglish fillers, Tamil script, numbers listed piece by piece as `number_parts`, and option choice. It has no tools: the server checks every value (format, options) and marks doubtful ones "Check this". (A `validate_value` tool for the model exists but is off: on real recordings it cost about 40% more and was no more accurate.)
 
-**Models and limits.** Every AI step (form analysis, mapping, dropdown matching) uses **`gpt-5.4-mini` at low reasoning effort**, chosen by comparing models on real English and Tamil recordings ([docs/ai-model-plan.md](docs/ai-model-plan.md)): as accurate as gpt-4o on every key field for about a tenth of the cost (≈ ₹0.4 per whole-form recording). Override with `AGENT_MODEL`, or per step `MAPPER_MODEL` / `ANALYZER_MODEL` / `RESOLVER_MODEL` (e.g. `gpt-4o`, `gpt-5.4-mini@none`). Each step has an output-token limit and a timeout (mapping 4,000 tokens / 30 s, analysis 16,000 / 90 s, dropdown matching 2,000 / 20 s), so a runaway reply fails fast instead of making the user wait. The fixed instructions are cached by OpenAI (billed at 10%): each request carries a `prompt_cache_key` per step and form, and GPT-5.x models keep the cache up to 24 h. The mapper's answer holds only the values, their confidence and the spoken words of each value (no list of missing fields: the phone works that out itself), and the fields are named `f1, f2, …` in the prompt instead of the site's long keys, which keeps output tokens, the costliest part, small.
+**Models and limits.** Every AI step (form analysis, mapping, dropdown matching) uses **`gpt-5.4-mini` at low reasoning effort**, chosen by comparing models on real English and Tamil recordings ([docs/ai-model-plan.md](docs/ai-model-plan.md)): as accurate as gpt-4o on every key field for about a tenth of the cost (≈ ₹0.4 per whole-form recording). Override with `AGENT_MODEL`, or per step `MAPPER_MODEL` / `ANALYZER_MODEL` / `RESOLVER_MODEL` / `TRANSLATOR_MODEL` (e.g. `gpt-4o`, `gpt-5.4-mini@none`). Each step has an output-token limit and a timeout (mapping 4,000 tokens / 30 s, analysis 16,000 / 90 s, dropdown matching 2,000 / 20 s), so a runaway reply fails fast instead of making the user wait. The fixed instructions are cached by OpenAI (billed at 10%): each request carries a `prompt_cache_key` per step and form, and GPT-5.x models keep the cache up to 24 h. The mapper's answer holds only the values, their confidence and the spoken words of each value (no list of missing fields: the phone works that out itself), and the fields are named `f1, f2, …` in the prompt instead of the site's long keys, which keeps output tokens, the costliest part, small.
 - **Timings:** the Vercel logs show one line per recording: `utterance seq=… stt=…ms map=…ms values=…`.
 
 ## Saved form readings (migration `0012`)
@@ -199,6 +199,13 @@ The **தமிழ் / English** switch at the top of the phone page changes ev
 - The choice is remembered on the phone; the default follows the phone's language.
 - Field labels show both languages, like "தந்தை பெயர் · Father's name". The Form Analyzer writes `label_ta` (migration `0006`), and the English label stays so it matches the computer screen.
 - Values filled into the form stay in English.
+
+## Tamil helper on the phone (migration `0020`)
+
+A gold **த** bubble floats at the edge of the phone page (`app/s/[code]/tamil-helper.tsx`). Tapping it opens a bottom sheet: type or paste English (a field label, a help line) and the Tamil appears after a short pause, with **Copy** and a **Recent** list. It translates the meaning ("Date of birth" → பிறந்த தேதி) and writes names and places by their sound ("Ramesh Kumar, Gandhi Street" → ரமேஷ் குமார், காந்தி தெரு). Nothing is put into the form by itself.
+- The bubble can be dragged up and down and snaps to the nearer side (remembered on the phone). It hides while recording.
+- `POST /api/translate` (phone token, up to 500 characters) runs the OpenAI Tamil Translator agent (`lib/agents/translator.ts`, model `TRANSLATOR_MODEL`, 1,500 tokens / 15 s). It needs an active plan, like speaking, but uses no voice minutes. Calls are billed as usage kind `translate` (Admin → Usage).
+- Each phone may ask about 60 times in 5 minutes. A text already translated is answered from memory (on the phone, and on the server instance) at no cost.
 
 ## Custom dropdowns (react-select, MUI, choices.js, select2)
 

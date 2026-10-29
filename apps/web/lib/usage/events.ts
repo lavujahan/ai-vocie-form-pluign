@@ -2,7 +2,7 @@ import type { Usage } from '@openai/agents';
 import type { AgentRunUsage } from '../agents/usage';
 import { openaiCostUsd } from './pricing';
 
-export type UsageKind = 'stt' | 'map' | 'analyze' | 'resolve';
+export type UsageKind = 'stt' | 'map' | 'analyze' | 'resolve' | 'translate';
 
 /** One row of usage_events: a paid Sarvam or OpenAI call. */
 export type UsageEvent = {

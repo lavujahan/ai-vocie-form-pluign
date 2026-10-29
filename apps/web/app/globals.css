@@ -7,3 +7,11 @@ html,
 body {
   -webkit-tap-highlight-color: transparent;
 }
+
+/* The Tamil helper's bottom sheet (app/s/[code]/tamil-helper.tsx). */
+@keyframes sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}

@@ -243,6 +243,8 @@ try {
       ]);
       const s1 = await status();
       check('Plans: only audio inside the period counts', Number(s1?.used_ms) === 60_000, audio.error?.message ?? JSON.stringify(s1));
+      const tr = await admin.from('usage_events').insert({ user_id: b.id, kind: 'translate', provider: 'openai', model: 'check-db', created_at: new Date().toISOString() });
+      check('Billing: Tamil helper calls can be recorded (apply migration 0020)', !tr.error, tr.error?.message);
 
       const renew = await admin.rpc('grant_plan', {
         p_user: b.id, p_plan: 'basic', p_starts_at: s1!.ends_at, p_amount: 199, p_method: 'upi', p_reference: 'check-db', p_note: null, p_admin: null,

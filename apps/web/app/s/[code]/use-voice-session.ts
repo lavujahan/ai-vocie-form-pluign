@@ -12,6 +12,8 @@ import type {
   SessionInfo,
   SessionSnapshot,
   SessionValue,
+  TranslateRequest,
+  TranslateResponse,
   UtteranceResponse,
   UtteranceRow,
 } from '@vff/shared';
@@ -379,6 +381,26 @@ export function useVoiceSession(code: string) {
     [authFetch, code, takeSeq, refresh],
   );
 
+  /** Tamil helper: English form text into Tamil. Aborted when the user types on (`signal`). */
+  const translate = useCallback(
+    async (text: string, signal?: AbortSignal): Promise<{ tamil: string } | { error: string }> => {
+      try {
+        const res = await authFetch('/api/translate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text } satisfies TranslateRequest),
+          signal,
+        });
+        const body = (await res.json().catch(() => ({}))) as Partial<TranslateResponse> & ApiError;
+        return res.ok && body.tamil ? { tamil: body.tamil } : { error: body.error || "Couldn't translate. Try again." };
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') throw e;
+        return { error: NETWORK_ERROR };
+      }
+    },
+    [authFetch],
+  );
+
   /** "Send to desktop". Resolves to an error message, or null when sent. */
   const complete = useCallback(async (): Promise<string | null> => {
     try {
@@ -499,6 +521,7 @@ export function useVoiceSession(code: string) {
     sendUtterance,
     retry,
     editValue,
+    translate,
     complete,
     reset,
     online,

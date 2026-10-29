@@ -19,6 +19,10 @@
   /* The brand mark: white mic on a blue rounded square. */
   --vf-brand: #1e4e9c;
   --vf-brand-ink: #ffffff;
+  /* Honey gold: the popup's header and the phone's Tamil helper (the same in both themes). */
+  --vf-gold: #ebc865;
+  --vf-gold-line: #cfa63c;
+  --vf-gold-ink: #1a1813;
   color-scheme: light;
 }
 
@@ -63,6 +67,9 @@
   --color-danger-ink: var(--vf-danger-text);
   --color-brand: var(--vf-brand);
   --color-brand-ink: var(--vf-brand-ink);
+  --color-gold: var(--vf-gold);
+  --color-gold-line: var(--vf-gold-line);
+  --color-gold-ink: var(--vf-gold-ink);
 }
 
 body {

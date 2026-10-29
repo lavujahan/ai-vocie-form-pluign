@@ -34,6 +34,7 @@ import { Button, Card, Pill, cx } from '@/components/ui';
 import { FileSheet, FileStatusMarker } from './file-upload';
 import { LangCtx, useI18n, type T } from './lang';
 import { sendWatermark, unsentChanges } from './send-state';
+import { TamilHelper } from './tamil-helper';
 import { useRecorder } from './use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
 
@@ -561,6 +562,8 @@ function SessionScreen({ code }: { code: string }) {
         onMic={toggleMic}
         send={send}
       />
+      {/* English → Tamil for labels and help lines; hidden while recording so it never covers the mic. */}
+      <TamilHelper translate={s.translate} hidden={recording} />
     </Page>
   );
 }

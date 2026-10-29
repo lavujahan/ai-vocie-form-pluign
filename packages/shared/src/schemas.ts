@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TRANSLATE_MAX_CHARS } from './constants';
 import { PIN_LENGTH } from './pin';
 
 // ---------- Detector output ----------
@@ -771,6 +772,11 @@ export type ResolveOptionResponse = {
   /** Best candidates (labels), most likely first. */
   top: string[];
 };
+
+/** Phone → server: the Tamil helper, English form text into Tamil (names keep their sound). */
+export const TranslateRequest = z.object({ text: z.string().trim().min(1).max(TRANSLATE_MAX_CHARS) });
+export type TranslateRequest = z.infer<typeof TranslateRequest>;
+export type TranslateResponse = { tamil: string };
 
 // ---------- Extension messaging ----------
 

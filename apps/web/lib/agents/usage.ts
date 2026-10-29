@@ -9,10 +9,15 @@ export function modelName(model: Model | string): string {
   return typeof model === 'string' ? parseModelSpec(model).model : 'custom';
 }
 
-export type AgentStep = 'mapper' | 'analyzer' | 'resolver';
+export type AgentStep = 'mapper' | 'analyzer' | 'resolver' | 'translator';
 type Effort = NonNullable<NonNullable<ModelSettings['reasoning']>['effort']>;
 
-const STEP_ENV: Record<AgentStep, string> = { mapper: 'MAPPER_MODEL', analyzer: 'ANALYZER_MODEL', resolver: 'RESOLVER_MODEL' };
+const STEP_ENV: Record<AgentStep, string> = {
+  mapper: 'MAPPER_MODEL',
+  analyzer: 'ANALYZER_MODEL',
+  resolver: 'RESOLVER_MODEL',
+  translator: 'TRANSLATOR_MODEL',
+};
 /**
  * Used when no MAPPER_MODEL / ANALYZER_MODEL / RESOLVER_MODEL / AGENT_MODEL is set. Chosen with
  * a comparison on real recordings (English and Tamil; docs/ai-model-plan.md): as accurate as gpt-4o for about a tenth of the cost.
@@ -27,6 +32,7 @@ export const STEP_LIMITS: Record<AgentStep, { maxTokens: number; timeoutMs: numb
   mapper: { maxTokens: 4_000, timeoutMs: 30_000 }, // about 850 used for a whole form
   analyzer: { maxTokens: 16_000, timeoutMs: 90_000 }, // big forms: many fields, each with a Tamil label
   resolver: { maxTokens: 2_000, timeoutMs: 20_000 }, // picks one option
+  translator: { maxTokens: 1_500, timeoutMs: 15_000 }, // a label or a short phrase, as the user types
 };
 
 /** "gpt-5-mini@minimal" → model and reasoning effort (the part after @ is optional). */
@@ -49,7 +55,7 @@ function defaultEffort(model: string): Effort | null {
 }
 
 /**
- * The model for one AI step and its settings: MAPPER_MODEL / ANALYZER_MODEL / RESOLVER_MODEL, else
+ * The model for one AI step and its settings: MAPPER_MODEL / ANALYZER_MODEL / RESOLVER_MODEL / TRANSLATOR_MODEL, else
  * AGENT_MODEL, else the default. AGENT_REASONING sets the reasoning effort for all reasoning models.
  * A Model object (tests) is used as it is. Every step gets its STEP_LIMITS.
  *
