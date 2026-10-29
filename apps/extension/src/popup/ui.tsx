@@ -41,9 +41,25 @@ export function Header({ sub, children }: { sub?: ReactNode; children?: ReactNod
 
 const CHIP = { plain: 'bg-header-ink/10', warn: 'bg-warn-bg text-warn-ink', danger: 'bg-danger-bg text-danger-ink' };
 
-export function HeaderChip({ tone = 'plain', title, children }: { tone?: keyof typeof CHIP; title?: string; children: ReactNode }) {
-  return (
-    <span title={title} className={cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap tabular-nums', CHIP[tone])}>
+/** `href`: the chip is a link, opened in a new tab (e.g. "Plan ended" → the upgrade page). */
+export function HeaderChip({
+  tone = 'plain',
+  title,
+  href,
+  children,
+}: {
+  tone?: keyof typeof CHIP;
+  title?: string;
+  href?: string;
+  children: ReactNode;
+}) {
+  const className = cx('inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium whitespace-nowrap tabular-nums', CHIP[tone]);
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" title={title} className={cx(className, 'underline-offset-2 hover:underline')}>
+      {children}
+    </a>
+  ) : (
+    <span title={title} className={className}>
       {children}
     </span>
   );

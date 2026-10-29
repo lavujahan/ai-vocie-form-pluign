@@ -284,16 +284,25 @@ const minutesUsed = (p: Plan) => Math.min(p.minutes_total, Math.max(0, p.minutes
 const usedPct = (p: Plan) => (p.minutes_total > 0 ? Math.round((minutesUsed(p) / p.minutes_total) * 100) : 100);
 /** Most minutes used, or the paid time about to end: shown in amber, with Renew. */
 const isLow = (p: Plan) => usedPct(p) >= 80 || (!!p.paid_until && Date.parse(p.paid_until) - Date.now() < 3 * DAY_MS);
+/** The free Trial: its link says Upgrade (to a paid plan) and is always shown; paid plans say Renew. */
+const isTrial = (p: Plan | null | undefined) => p?.plan_id === 'trial';
+const renewLabel = (p: Plan | null | undefined) => (isTrial(p) ? 'Upgrade' : 'Renew');
 
-/** Voice minutes left, in the header: amber when low, red when the plan doesn't allow speaking. */
+/** Voice minutes left, in the header: amber when low, red (and a link to renew) when the plan doesn't allow speaking. */
 function MinutesChip({ account }: { account: AccountResponse | null }) {
   if (!account || account.unlimited) return null;
   const p = account.plan;
-  if (!p?.plan_id) return <HeaderChip tone="danger">No plan</HeaderChip>;
-  if (!p.active) return <HeaderChip tone="danger">Plan ended</HeaderChip>;
+  const href = ACCOUNT_URL || undefined;
+  const title = `${renewLabel(p)} your plan`;
+  if (!p?.plan_id) return <HeaderChip tone="danger" href={href} title={title}>No plan</HeaderChip>;
+  if (!p.active) return <HeaderChip tone="danger" href={href} title={title}>Plan ended</HeaderChip>;
   const left = Math.max(0, Math.floor(p.minutes_left));
   return (
-    <HeaderChip tone={left <= 0 ? 'danger' : isLow(p) ? 'warn' : 'plain'} title={`${p.plan_name} plan · voice minutes left`}>
+    <HeaderChip
+      tone={left <= 0 ? 'danger' : isLow(p) ? 'warn' : 'plain'}
+      href={left <= 0 ? href : undefined}
+      title={left <= 0 ? title : `${p.plan_name} plan · voice minutes left`}
+    >
       {left} min
     </HeaderChip>
   );
@@ -308,10 +317,10 @@ function PlanMeter({ account }: { account: AccountResponse }) {
         {blocked}{' '}
         {ACCOUNT_URL ? (
           <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="font-medium underline underline-offset-2">
-            Renew
+            {renewLabel(account.plan)}
           </a>
         ) : (
-          'Contact us to renew.'
+          `Contact us to ${renewLabel(account.plan).toLowerCase()}.`
         )}
       </Banner>
     );
@@ -332,11 +341,11 @@ function PlanMeter({ account }: { account: AccountResponse }) {
       <div className="flex items-baseline justify-between gap-2">
         <span className={low ? 'text-warn-ink' : 'text-muted'}>
           {p.plan_name} plan · till {shortDate(p.paid_until)}
-          {low && ACCOUNT_URL && (
+          {(low || isTrial(p)) && ACCOUNT_URL && (
             <>
               {' · '}
-              <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-                Renew
+              <a href={ACCOUNT_URL} target="_blank" rel="noreferrer" className={`font-medium underline underline-offset-2 ${low ? '' : 'text-accent-ink'}`}>
+                {renewLabel(p)}
               </a>
             </>
           )}
