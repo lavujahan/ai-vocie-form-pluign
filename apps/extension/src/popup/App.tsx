@@ -332,15 +332,7 @@ function PlanMeter({ account, inFooter = false }: { account: AccountResponse; in
     );
   }
   const p = account.plan;
-  if (account.unlimited || !p) {
-    return account.forms_completed ? (
-      <div className={box}>
-        <FormsDone account={account} />
-      </div>
-    ) : inFooter ? (
-      <span className="flex-1" />
-    ) : null;
-  }
+  if (account.unlimited || !p) return inFooter ? <span className="flex-1" /> : null;
   const used = minutesUsed(p);
   const pct = usedPct(p);
   const low = isLow(p);
@@ -372,23 +364,10 @@ function PlanMeter({ account, inFooter = false }: { account: AccountResponse; in
       >
         <div className={`h-full rounded-full ${low ? 'bg-warn-ink' : 'bg-accent-ink'}`} style={{ width: `${pct}%` }} />
       </div>
-      <FormsDone account={account} />
     </div>
   );
 }
 
-/** Forms the computer filled (at most 2 fields left empty): this plan period (30 days without a plan) and in total. */
-function FormsDone({ account }: { account: AccountResponse }) {
-  const f = account.forms_completed;
-  if (!f) return null;
-  const period = account.plan && !account.unlimited ? 'this plan' : 'in 30 days';
-  return (
-    <p className="text-xs text-muted">
-      Forms completed: <span className="font-semibold text-ink tabular-nums">{f.period}</span> {period} ·{' '}
-      <span className="tabular-nums">{f.total}</span> total
-    </p>
-  );
-}
 
 function useCountdown(until: string) {
   const [now, setNow] = useState(Date.now());
