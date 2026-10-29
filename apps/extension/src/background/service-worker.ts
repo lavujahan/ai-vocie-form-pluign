@@ -638,6 +638,7 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
           desktop_state: row.desktop_state ?? snap.session.desktop_state,
           desktop_report: row.desktop_report ?? snap.session.desktop_report,
           hidden_fields: row.hidden_fields ?? snap.session.hidden_fields,
+          voice_enabled: row.voice_enabled ?? snap.session.voice_enabled,
         },
       }));
       await save();
@@ -706,7 +707,9 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
         throw new Error("Can't read this page. Reload it and try again.");
       }
       if (!scan?.schema?.fields?.length) throw new Error('No form fields found on this page');
-      const created = await api<CreateSessionResponse>('/api/sessions', { body: scan.schema, token: state.auth.token });
+      // Typing only: the customer's phone shows no mic and the server refuses recordings.
+      const voice = req.voice !== false;
+      const created = await api<CreateSessionResponse>(`/api/sessions${voice ? '' : '?voice=0'}`, { body: scan.schema, token: state.auth.token });
       // Only this tab's session is replaced (its phone is told it ended); forms in other tabs keep going.
       const previous = tabOf(tab.id)?.session;
       const session: ActiveSession = {
@@ -716,12 +719,24 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
         page_site: siteOf(scan.schema.page_url),
         snapshot: null,
         site_access: siteAccess,
+        voice_enabled: voice,
       };
       await save({ tabs: startTab(state.tabs, tab.id, session) });
       await ensureRealtime();
       if (previous) void reportDesktop(previous, { state: 'closed' });
       await refreshSnapshot(tab.id);
       void watchTab(tab.id, scan.schema.fields.map((f) => f.field_key));
+      return;
+    }
+
+    case 'SET_VOICE': {
+      const s = tabId === undefined ? null : tabOf(tabId)?.session;
+      if (tabId === undefined || !s) return;
+      if (!state.auth) throw new Error('Please sign in');
+      await api(`/api/sessions/${s.session_code}/desktop`, { method: 'PATCH', body: { voice: req.voice }, token: state.auth.token });
+      // The phone gets it through Realtime; the popup shows it now.
+      patchSnapshot(tabId, (snap) => ({ ...snap, session: { ...snap.session, voice_enabled: req.voice } }));
+      await setTab(tabId, { session: { ...tabOf(tabId)!.session, voice_enabled: req.voice } });
       return;
     }
 

@@ -36,11 +36,18 @@ export function toPlanStatus(r: RawPlanStatus, now = new Date()): PlanStatus {
   };
 }
 
-/** Why a user can't scan or speak (null = allowed). Admins are never blocked. */
-export function planBlock(role: UserRole, plan: PlanStatus | null): { code: 'plan_expired' | 'quota_exceeded'; error: string } | null {
+/**
+ * Why a user can't scan or speak (null = allowed). Admins are never blocked. With `minutes: false`
+ * (a typing-only form, the Tamil helper: no voice minutes used) only an ended plan blocks.
+ */
+export function planBlock(
+  role: UserRole,
+  plan: PlanStatus | null,
+  { minutes = true }: { minutes?: boolean } = {},
+): { code: 'plan_expired' | 'quota_exceeded'; error: string } | null {
   if (role === 'admin') return null;
   if (!plan?.active) return { code: 'plan_expired', error: MSG.planEnded };
-  if (plan.minutes_left <= 0) return { code: 'quota_exceeded', error: MSG.minutesUsed };
+  if (minutes && plan.minutes_left <= 0) return { code: 'quota_exceeded', error: MSG.minutesUsed };
   return null;
 }
 
@@ -65,15 +72,15 @@ export async function planStatus(userId: string): Promise<{ role: UserRole; plan
 }
 
 /**
- * Throws 402 when the user has no active plan or no voice minutes left. Called before anything that
- * costs AI money (scanning a form, transcribing speech). Admins skip the lookup.
+ * Throws 402 when the user has no active plan or (unless `minutes: false`) no voice minutes left.
+ * Called before anything that costs AI money (scanning a form, transcribing speech). Admins skip the lookup.
  */
-export async function assertCanUse(userId: string, role?: UserRole): Promise<void> {
+export async function assertCanUse(userId: string, role?: UserRole, opts: { minutes?: boolean } = {}): Promise<void> {
   if (role === 'admin') return;
   const all = await planStatuses(userId);
   if (!all) return;
   const s = all.get(userId);
-  const block = planBlock(s?.role ?? 'user', s?.plan ?? null);
+  const block = planBlock(s?.role ?? 'user', s?.plan ?? null, opts);
   if (block) throw fail(402, block.error, { code: block.code });
 }
 

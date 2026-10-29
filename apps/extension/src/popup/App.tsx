@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { AlertTriangle, Check, Clock, Loader2, Smartphone } from 'lucide-react';
+import { AlertTriangle, Check, Clock, Loader2, Pencil, Smartphone } from 'lucide-react';
 import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, type AccountResponse, type FieldFile, type SessionField } from '@vff/shared';
-import { NOT_ON_PAGE, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
+import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
 import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { groupFields, type FieldGroup, type FieldItem } from './groups';
 import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, Input, Menu, Pill, Progress, Screen } from './ui';
@@ -61,6 +61,21 @@ const hostOf = (url: string | null | undefined) => {
 };
 /** The header's second line: the parts that are set, joined with " · ". */
 const join = (...parts: (string | null | undefined | false)[]) => parts.filter(Boolean).join(' · ');
+
+/** Voice on for this form (false: typing only). The snapshot has the latest; before it loads, the scan's choice. */
+const voiceOn = (s: ActiveSession) => (s.snapshot?.session.voice_enabled ?? s.voice_enabled) !== false;
+/** No voice minutes left on an active plan (typing-only forms still work). */
+const noMinutes = (a: AccountResponse | null) => !!a && !a.unlimited && !!a.plan?.plan_id && a.plan.minutes_left <= 0;
+
+/** "✎ Typing only" in the header of a typing-only form. */
+const TypingChip = () => (
+  <HeaderChip title="The customer types every answer. No mic on the phone.">
+    <Pencil size={11} /> Typing only
+  </HeaderChip>
+);
+
+/** The operator's last choice, kept for the next scan. */
+const TYPING_KEY = 'vf-typing-only';
 
 export function App() {
   const { state, send, site } = useExtState();
@@ -177,11 +192,14 @@ function SignIn({ send }: { send: Send }) {
   );
 }
 
-const STEPS = ['Scan the form', 'Pair your phone', 'Speak the answers', 'Click Fill form'];
-
 function StartCard({ state, send, site, others }: { state: ExtState; send: Send; site: string | null; others: string | null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typingOnly, setTypingOnly] = useState(false);
+  useEffect(() => {
+    chrome.storage.local.get(TYPING_KEY).then((r) => setTypingOnly(r[TYPING_KEY] === true), () => null);
+  }, []);
+  const steps = ['Scan the form', 'Pair your phone', typingOnly ? 'Customer types answers' : 'Speak the answers', 'Click Fill form'];
   return (
     <Screen
       header={
@@ -208,16 +226,33 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
         loading={busy}
         onClick={async () => {
           setBusy(true);
-          setError(await send({ type: 'START_SESSION' }));
+          setError(await send({ type: 'START_SESSION', voice: !typingOnly }));
           setBusy(false);
         }}
       >
         Scan form on this page
       </Button>
+      <label
+        className={`flex cursor-pointer items-start gap-2.5 rounded-lg border bg-card p-2.5 ${typingOnly ? 'border-brand ring-1 ring-brand' : 'border-line'}`}
+      >
+        <input
+          type="checkbox"
+          className="mt-0.5 size-[18px] shrink-0 accent-brand"
+          checked={typingOnly}
+          onChange={(e) => {
+            setTypingOnly(e.target.checked);
+            void chrome.storage.local.set({ [TYPING_KEY]: e.target.checked });
+          }}
+        />
+        <span className="grid gap-0.5">
+          <span className="text-[13.5px] font-semibold">Typing only (no voice)</span>
+          <span className="text-xs text-muted">The customer types every answer. No mic on the phone, no voice minutes used.</span>
+        </span>
+      </label>
       {/* A plan refusal is already explained by the plan note. */}
       {error && !planBlocked(state.account) && <p className="text-xs text-danger-ink">{error}</p>}
       <ol className="grid grid-cols-2 gap-1.5">
-        {STEPS.map((step, i) => (
+        {steps.map((step, i) => (
           <li key={step} className="flex items-center gap-1.5 text-[12.5px] text-muted">
             <span className="grid size-[18px] shrink-0 place-items-center rounded-full bg-accent-bg text-[11px] font-semibold text-accent-ink">
               {i + 1}
@@ -377,6 +412,7 @@ function QrCard({ state, send, others }: { state: ExtState; send: Send; others: 
     <Screen
       header={
         <Header sub={join(name, hostOf(s.page_site), others)}>
+          {!voiceOn(s) && <TypingChip />}
           <HeaderChip>{s.field_count} fields</HeaderChip>
         </Header>
       }
@@ -399,7 +435,8 @@ function QrCard({ state, send, others }: { state: ExtState; send: Send; others: 
               loading={busy}
               onClick={async () => {
                 setBusy(true);
-                setError(await send({ type: 'START_SESSION' }));
+                // A new QR for the same form, with the same voice choice.
+                setError(await send({ type: 'START_SESSION', voice: voiceOn(s) }));
                 setBusy(false);
               }}
             >
@@ -450,6 +487,7 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
   const processing = snap.utterances.filter((u) => u.status === 'processing').length;
   const hasValues = snap.values.some((v) => v.value) || (snap.files ?? []).some((f) => f.status === 'uploaded');
   const fresh = state.unfilledChanges ?? 0;
+  const voice = voiceOn(s);
 
   async function act(type: 'FILL' | 'UNDO' | 'RECONNECT') {
     setBusy(type === 'FILL' ? 'fill' : type === 'UNDO' ? 'undo' : 'reconnect');
@@ -514,6 +552,7 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
     <Screen
       header={
         <Header sub={join(snap.session.form_name, hostOf(s.page_site), others)}>
+          {!voice && <TypingChip />}
           {processing > 0 && (
             <HeaderChip title="Recordings being read">
               <Loader2 size={11} className="animate-spin" /> {processing}
@@ -542,6 +581,16 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
                 confirm: { text: 'End this form? The phone stops sending.', action: 'End form' },
                 onSelect: () => send({ type: 'END_SESSION' }),
               },
+              voice
+                ? { label: 'Turn voice off', onSelect: () => send({ type: 'SET_VOICE', voice: false }) }
+                : {
+                    label: 'Turn voice on',
+                    // Without minutes the phone's recordings would be refused anyway.
+                    ...(noMinutes(state.account) && {
+                      confirm: { text: 'No voice minutes left: recordings will be refused until you renew. Turn voice on anyway?', action: 'Turn on' },
+                    }),
+                    onSelect: () => send({ type: 'SET_VOICE', voice: true }),
+                  },
               // The phone page was closed (back button, tab closed): same form, answers kept.
               ...(waiting ? [] : [{ label: 'Connect phone again', onSelect: () => act('RECONNECT') }]),
               { label: 'Sign out', last: true, onSelect: () => send({ type: 'LOGOUT' }) },

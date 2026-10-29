@@ -635,6 +635,11 @@ export type SessionInfo = {
    * values are kept: the phone lists them under "Not on the form now", and they fill if they come back.
    */
   hidden_fields?: string[];
+  /**
+   * false: a typing-only form (the operator turned voice off when scanning; migration 0021). The phone
+   * shows no mic and the server refuses recordings. Missing on older servers: voice is on.
+   */
+  voice_enabled?: boolean;
 };
 
 /** "Connect phone again": the same QR code works once more until `expires_at` (answers are kept). */
@@ -752,8 +757,10 @@ export const DesktopUpdateRequest = z
       .optional(),
     /** Fields of the step on the page that a choice hides now (see SessionInfo.hidden_fields). */
     hidden: z.array(z.string().max(500)).max(2000).optional(),
+    /** Voice on or off for this form (typing only); see SessionInfo.voice_enabled. */
+    voice: z.boolean().optional(),
   })
-  .refine((b) => b.state || b.report || b.hidden, 'Nothing to update');
+  .refine((b) => b.state || b.report || b.hidden || b.voice !== undefined, 'Nothing to update');
 export type DesktopUpdateRequest = z.infer<typeof DesktopUpdateRequest>;
 
 /** Extension → server: pick the option the speaker meant from the options loaded on the page. */

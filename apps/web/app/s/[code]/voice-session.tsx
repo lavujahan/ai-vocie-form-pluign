@@ -241,6 +241,16 @@ function SessionScreen({ code }: { code: string }) {
   const steps = useMemo(() => stepStarts(shown), [shown]);
 
   const desktop = s.session?.desktop_state ?? 'open';
+  /** false: a typing-only form (the operator turned voice off). No mic anywhere; every field is typed. */
+  const voice = s.session?.voice_enabled !== false;
+  // Turned off from the computer mid-recording: stop (the server refuses it, and the row says so).
+  useEffect(() => {
+    if (!voice && recording) {
+      recorder.stop();
+      setRecordingTarget(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice]);
   const sent = s.session?.status === 'filled';
   const resetSeq = s.session?.reset_seq ?? 0;
   const values = [...s.valueByKey.values()];
@@ -311,6 +321,7 @@ function SessionScreen({ code }: { code: string }) {
 
   /** Big mic: speech for any fields. A second tap (or any mic while recording) stops. */
   async function toggleMic() {
+    if (!voice && !recording) return;
     if (recording) {
       recorder.stop();
       setRecordingTarget(null);
@@ -324,6 +335,7 @@ function SessionScreen({ code }: { code: string }) {
 
   /** A row's mic: speech for that one field. */
   async function micFor(fieldKey: string) {
+    if (!voice && !recording) return;
     if (recording) {
       recorder.stop();
       setRecordingTarget(null);
@@ -421,6 +433,11 @@ function SessionScreen({ code }: { code: string }) {
   const top = (
     <>
       <DesktopBanner state={desktop} />
+      {!voice && (
+        <p className="flex items-center gap-2 rounded-lg border border-accent-ink/20 bg-accent-bg px-3 py-2 text-sm text-accent-ink">
+          <Pencil size={16} className="shrink-0" /> {t('typingOnlyHint')}
+        </p>
+      )}
       {s.planBlocked && (
         <p className="flex items-center gap-2 rounded-lg bg-danger-bg px-3 py-2 text-sm text-danger-ink">
           <AlertCircle size={16} className="shrink-0" /> {srv(s.planBlocked)}
@@ -474,9 +491,11 @@ function SessionScreen({ code }: { code: string }) {
         field={f}
         status={st}
         // A row whose own recording is running, processing or failed keeps its mic (to stop or retry).
+        // A typing-only form shows none.
         showMic={
-          rowMic || st.kind === 'recording' || st.kind === 'processing' || st.kind === 'error'
+          voice && (rowMic || st.kind === 'recording' || st.kind === 'processing' || st.kind === 'error')
         }
+        tapToType={!voice}
         elapsed={recorder.elapsed}
         editing={editing === f.field_key}
         onMic={() => micFor(f.field_key)}
@@ -531,7 +550,8 @@ function SessionScreen({ code }: { code: string }) {
         </div>
       </div>
       <BottomBar
-        heard={recording && !recordingTarget ? t('listenAll') : (latestTranscript ?? null)}
+        voice={voice}
+        heard={!voice ? null : recording && !recordingTarget ? t('listenAll') : (latestTranscript ?? null)}
         filled={filledCount}
         total={shown.length}
         processing={processing}
@@ -750,6 +770,7 @@ function FieldItem({
   field,
   status,
   showMic,
+  tapToType,
   elapsed,
   editing,
   onMic,
@@ -762,6 +783,8 @@ function FieldItem({
   field: SessionField;
   status: FieldStatus;
   showMic: boolean;
+  /** Typing-only form: tapping the label or value opens the editor too (for customers who miss ✎). */
+  tapToType?: boolean;
   elapsed: number;
   editing: boolean;
   onMic: () => void;
@@ -790,7 +813,10 @@ function FieldItem({
       )}
     >
       <div className="flex items-center gap-2 py-2.5">
-        <div className="min-w-0 flex-1">
+        <div
+          className={cx('min-w-0 flex-1', tapToType && !file && 'cursor-pointer')}
+          onClick={tapToType && !file && !editing ? onPen : undefined}
+        >
           <p className="flex items-center gap-1 text-[13px] leading-snug text-muted">
             {file && <Paperclip size={13} className="shrink-0" />}
             <span>
@@ -943,7 +969,10 @@ function BottomBar({
   notice,
   onMic,
   send,
+  voice,
 }: {
+  /** false: a typing-only form, no mic (Send takes the whole row). */
+  voice: boolean;
   heard: string | null;
   filled: number;
   total: number;
@@ -1037,28 +1066,30 @@ function BottomBar({
         </div>
       )}
       <div className="flex items-center gap-3">
-        <div className="flex flex-col items-center gap-0.5">
-          <button
-            onClick={onMic}
-            disabled={micDisabled}
-            aria-label={t(recording ? 'stopRec' : 'startRec')}
-            className={cx(
-              'relative grid size-[72px] place-items-center rounded-full bg-danger text-white shadow-[0_6px_18px_rgba(212,67,61,0.35)] transition-transform active:scale-95 disabled:opacity-40',
-              recording && 'ring-8 ring-danger/20',
-            )}
-          >
-            <span className="relative flex flex-col items-center gap-0.5">
-              {recording ? <Square size={22} fill="currentColor" /> : <Mic size={26} />}
-              <span className="text-[10px] font-semibold leading-none">{t(recording ? 'micStop' : 'micStart')}</span>
+        {voice && (
+          <div className="flex flex-col items-center gap-0.5">
+            <button
+              onClick={onMic}
+              disabled={micDisabled}
+              aria-label={t(recording ? 'stopRec' : 'startRec')}
+              className={cx(
+                'relative grid size-[72px] place-items-center rounded-full bg-danger text-white shadow-[0_6px_18px_rgba(212,67,61,0.35)] transition-transform active:scale-95 disabled:opacity-40',
+                recording && 'ring-8 ring-danger/20',
+              )}
+            >
+              <span className="relative flex flex-col items-center gap-0.5">
+                {recording ? <Square size={22} fill="currentColor" /> : <Mic size={26} />}
+                <span className="text-[10px] font-semibold leading-none">{t(recording ? 'micStop' : 'micStart')}</span>
+              </span>
+              {recording && (
+                <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />
+              )}
+            </button>
+            <span className="text-[11.5px] text-muted tabular-nums">
+              {recording ? fmtTime(elapsed) : waitStep || send.sending ? t('waitPlease') : t('tapToSpeak')}
             </span>
-            {recording && (
-              <span className="absolute inset-0 animate-ping rounded-full bg-danger/25" />
-            )}
-          </button>
-          <span className="text-[11.5px] text-muted tabular-nums">
-            {recording ? fmtTime(elapsed) : waitStep || send.sending ? t('waitPlease') : t('tapToSpeak')}
-          </span>
-        </div>
+          </div>
+        )}
         {/* While speech is still being turned into answers, Send waits (else they'd miss this Send). */}
         <SendButton send={send} waiting={recording || processing > 0} />
       </div>

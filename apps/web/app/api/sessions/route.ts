@@ -6,7 +6,7 @@ import { purgeExpiredFiles } from '@/lib/files/storage';
 import { requireUser } from '@/lib/auth';
 import { assertCanUse } from '@/lib/billing/plans';
 import { env } from '@/lib/env';
-import { must, route } from '@/lib/http';
+import { fail, must, route } from '@/lib/http';
 import { fieldRows, insertFieldRows } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
@@ -25,8 +25,10 @@ function dedupeKeys<T extends { field_key: string }>(fields: T[]): T[] {
 
 export const POST = route(async (req) => {
   const user = await requireUser(req);
-  // No active plan or no minutes left: refuse before the Form Analyzer spends anything.
-  await assertCanUse(user.id, user.role);
+  // `?voice=0`: a typing-only form (no mic on the phone, recordings refused), which uses no voice minutes.
+  const voice = new URL(req.url).searchParams.get('voice') !== '0';
+  // No active plan, or no minutes left for a voice form: refuse before the Form Analyzer spends anything.
+  await assertCanUse(user.id, user.role, { minutes: voice });
   const schema = FormSchema.parse(await req.json());
   schema.fields = dedupeKeys(schema.fields);
 
@@ -35,21 +37,26 @@ export const POST = route(async (req) => {
   const expiresAt = new Date(Date.now() + PAIR_CODE_TTL_MIN * 60_000).toISOString();
   const formName = (schema.form_title || schema.page_title || url.hostname).slice(0, 120);
 
-  const session = must(
-    await db()
-      .from('form_sessions')
-      .insert({
-        user_id: user.id,
-        session_code: sessionCode,
-        form_name: formName,
-        page_url: schema.page_url,
-        page_origin: url.origin,
-        page_title: schema.page_title,
-        expires_at: expiresAt,
-      })
-      .select('id')
-      .single(),
-  ) as { id: string };
+  const inserted = await db()
+    .from('form_sessions')
+    .insert({
+      user_id: user.id,
+      session_code: sessionCode,
+      form_name: formName,
+      page_url: schema.page_url,
+      page_origin: url.origin,
+      page_title: schema.page_title,
+      expires_at: expiresAt,
+      // Only sent for typing-only forms, so scanning works before migration 0021 is applied.
+      ...(voice ? {} : { voice_enabled: false }),
+    })
+    .select('id')
+    .single();
+  // Without the column a typing-only form would quietly get voice: say so instead.
+  if (!voice && (inserted.error?.code === 'PGRST204' || inserted.error?.code === '42703')) {
+    throw fail(503, 'Typing-only forms need a server update (migration 0021). Untick "Typing only" to scan with voice.');
+  }
+  const session = must(inserted) as { id: string };
 
   // A form read before (by anyone) gets its saved field list, not this scan's: options that loaded or a
   // ticked checkbox don't change it, so the mapper's prompt starts with the same text every time.

@@ -15,6 +15,7 @@ export const MSG = {
   phoneReplaced: 'This phone was disconnected because the QR code was shown again on the computer. Scan it to continue.',
   planEnded: 'Your plan has ended. Renew it to keep filling forms by voice.',
   minutesUsed: 'You have used all the voice minutes in your plan. Renew it or add minutes to continue.',
+  voiceOff: 'Voice is off for this form. Tap Type on a field to fill it.',
 } as const;
 
 type SessionState = { status: SessionStatus; desktop_state: DesktopState; reset_seq: number };
@@ -24,6 +25,11 @@ export function phoneWriteBlock(s: SessionState, seq?: number): string | null {
   if (s.desktop_state === 'closed') return MSG.tabClosed;
   if (seq !== undefined && seq <= s.reset_seq) return MSG.cleared;
   return null;
+}
+
+/** A typing-only form (the operator turned voice off): recordings are refused before any AI is spent. */
+export function voiceBlock(s: { voice_enabled?: boolean }): string | null {
+  return s.voice_enabled === false ? MSG.voiceOff : null;
 }
 
 /** Why "Send to desktop" isn't possible right now (null = allowed). */

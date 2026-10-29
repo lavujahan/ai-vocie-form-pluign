@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql`, `0018_form_template.sql`, `0019_hidden_fields.sql` and `0020_translate_usage.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql`, `0018_form_template.sql`, `0019_hidden_fields.sql`, `0020_translate_usage.sql` and `0021_typing_only.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -199,6 +199,14 @@ The **தமிழ் / English** switch at the top of the phone page changes ev
 - The choice is remembered on the phone; the default follows the phone's language.
 - Field labels show both languages, like "தந்தை பெயர் · Father's name". The Form Analyzer writes `label_ta` (migration `0006`), and the English label stays so it matches the computer screen.
 - Values filled into the form stay in English.
+
+## Typing-only forms (migration `0021`)
+
+For a waiting customer who fills the form on their own phone: the operator ticks **Typing only (no voice)** under the popup's Scan button (remembered for the next scan). The form is created with `POST /api/sessions?voice=0` (`form_sessions.voice_enabled = false`).
+- **The phone shows no mic**: no Speak button on any row, no big red mic, and Send takes the whole bottom bar. A banner says "Tap a field to type its answer"; tapping a row's label or value opens its box, as ✎ Type does. The Tamil helper stays.
+- **The server refuses recordings** for the form (`/api/utterances` → 403 `voice_off`) before any speech-to-text or AI call, so nothing is spent.
+- **No voice minutes**: a typing-only form can be scanned while the plan is active, even with 0 minutes left (`assertCanUse(…, { minutes: false })`). Voice forms are still refused at 0 minutes.
+- **Switch later**: the popup's ⋯ menu has **Turn voice on / off** (`PATCH /api/sessions/[code]/desktop` with `voice`); the phone shows or hides its mics within a second (Realtime). The popup header shows **✎ Typing only** while voice is off.
 
 ## Tamil helper on the phone (migration `0020`)
 

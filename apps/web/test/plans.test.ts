@@ -52,6 +52,13 @@ describe('planBlock', () => {
     expect(planBlock('admin', { ...active, active: false })).toBeNull();
   });
 
+  it('lets typing-only forms through at 0 minutes, but not on an ended plan', () => {
+    const used = toPlanStatus(raw({ used_ms: 999_999_999 }), NOW);
+    expect(planBlock('user', used)?.code).toBe('quota_exceeded');
+    expect(planBlock('user', used, { minutes: false })).toBeNull();
+    expect(planBlock('user', null, { minutes: false })?.code).toBe('plan_expired');
+  });
+
   it('blocks a user without a plan or with an ended one', () => {
     expect(planBlock('user', null)).toEqual({ code: 'plan_expired', error: MSG.planEnded });
     expect(planBlock('user', toPlanStatus(raw({ ends_at: '2026-10-01T00:00:00Z' }), NOW))?.code).toBe('plan_expired');

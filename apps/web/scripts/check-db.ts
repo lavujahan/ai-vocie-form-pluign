@@ -83,6 +83,10 @@ try {
   const { data: v4 } = await admin.from('field_values').select('value').eq('field_id', field.id).single();
   check('latest-wins: newer #4 overwrites', v4?.value === 'from #4');
 
+  // ---- Typing-only forms (migration 0021) ----
+  const voiceRes = await admin.from('form_sessions').update({ voice_enabled: false }).eq('id', session.id).select('voice_enabled').single();
+  check('Typing only: form_sessions.voice_enabled exists (apply migration 0021)', !voiceRes.error && voiceRes.data?.voice_enabled === false, voiceRes.error?.message);
+
   // ---- Fields a choice hides (migration 0019) ----
   const hiddenRes = await admin.from('form_sessions').update({ hidden_fields: ['f_hidden'] }).eq('id', session.id).select('hidden_fields').single();
   check('Hidden fields: form_sessions.hidden_fields exists (apply migration 0019)', !hiddenRes.error && hiddenRes.data?.hidden_fields?.[0] === 'f_hidden', hiddenRes.error?.message);

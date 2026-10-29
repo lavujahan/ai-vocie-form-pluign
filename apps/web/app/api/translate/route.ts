@@ -33,7 +33,8 @@ export const POST = route(async (req) => {
   const session = await getSessionById(claims.session_id);
   assertPhoneOf(claims, session);
   const { text } = TranslateRequest.parse(await req.json());
-  await assertCanUse(session.user_id);
+  // Translating uses no voice minutes: only an ended plan stops it.
+  await assertCanUse(session.user_id, undefined, { minutes: false });
   assertNotTooMany(session.id);
 
   const usage: UsageEvent[] = [];

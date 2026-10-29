@@ -8,6 +8,7 @@ import { assertCanUse } from '@/lib/billing/plans';
 import { fail, must, route } from '@/lib/http';
 import { assertPhoneCanWrite, assertPhoneOf, getFieldRows, getSessionById, getValues, recentSpeech, upsertValue } from '@/lib/sessions';
 import { recordingTranscript } from '@/lib/recordings';
+import { voiceBlock } from '@/lib/session-rules';
 import { db } from '@/lib/supabase-admin';
 import { openaiEvent, sttEvent, type UsageEvent } from '@/lib/usage/events';
 import { recordUsage } from '@/lib/usage/record';
@@ -68,6 +69,9 @@ export const POST = route(async (req) => {
     : null;
   // Desktop tab closed (nothing would be filled), or spoken before a Start over: don't spend AI on it.
   assertPhoneCanWrite(session, seq);
+  // A typing-only form: no speech-to-text, no mapping, nothing recorded.
+  const voiceOff = voiceBlock(session);
+  if (voiceOff) throw fail(403, voiceOff, { code: 'voice_off' });
   // The owner's plan ended or its minutes are used up. Checked on a recording's first piece only, so a
   // recording that started is never cut off halfway (it can go slightly over the minutes).
   if (part === 0) await assertCanUse(session.user_id);

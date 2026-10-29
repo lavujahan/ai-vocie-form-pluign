@@ -273,6 +273,7 @@ export function useVoiceSession(code: string) {
                 desktop_state: row.desktop_state ?? s.desktop_state,
                 desktop_report: row.desktop_report ?? s.desktop_report,
                 hidden_fields: row.hidden_fields ?? s.hidden_fields,
+                voice_enabled: row.voice_enabled ?? s.voice_enabled,
               }
             : s,
         );

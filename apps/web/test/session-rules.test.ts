@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MSG, pairFailure, phoneTokenCurrent, phoneWriteBlock, sendBlock } from '@/lib/session-rules';
+import { MSG, pairFailure, phoneTokenCurrent, phoneWriteBlock, sendBlock, voiceBlock } from '@/lib/session-rules';
 import { newFieldsPlacement, nextSeq } from '@/lib/sessions';
 
 const session = (over: Partial<Parameters<typeof phoneWriteBlock>[0]> = {}) => ({
@@ -54,6 +54,15 @@ describe('fields that appear later (a wizard step, a revealed field)', () => {
     const r = newFieldsPlacement(existing, [field('org_name')], false);
     expect(r.startPosition).toBe(2);
     expect(r.stepIndex).toBe(0);
+  });
+});
+
+describe('typing-only forms', () => {
+  it('refuses recordings only when the operator turned voice off', () => {
+    expect(voiceBlock({ voice_enabled: false })).toBe(MSG.voiceOff);
+    expect(voiceBlock({ voice_enabled: true })).toBeNull();
+    // Older servers / rows without the column: voice is on.
+    expect(voiceBlock({})).toBeNull();
   });
 });
 

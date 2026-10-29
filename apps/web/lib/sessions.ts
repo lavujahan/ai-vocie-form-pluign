@@ -64,23 +64,40 @@ export type FieldRow = {
 
 const BASE_COLUMNS =
   'id, user_id, session_code, status, form_name, page_url, page_origin, page_title, analysis_status, expires_at, paired_at, created_at';
-const SESSION_COLUMNS = `${BASE_COLUMNS}, reset_seq, reset_scope, desktop_state, desktop_report`;
-/** With migration 0019 (fields a choice hides). */
-const ALL_SESSION_COLUMNS = `${SESSION_COLUMNS}, hidden_fields`;
+/**
+ * The session columns, newest migration first: 0021 (voice on or off), 0019 (fields a choice hides),
+ * 0005 (Start over, desktop tab state), then the base. A database without a migration yet is read with
+ * the next set, and the missing columns get their defaults.
+ */
+const COLUMN_SETS = (() => {
+  const v0005 = `${BASE_COLUMNS}, reset_seq, reset_scope, desktop_state, desktop_report`;
+  const v0019 = `${v0005}, hidden_fields`;
+  return [`${v0019}, voice_enabled`, v0019, v0005, BASE_COLUMNS];
+})();
 
-/** Defaults for the migration-0005 / 0019 columns (Start over, desktop tab state, hidden fields) on rows read without them. */
+/** Defaults for the columns later migrations add, on rows read without them. */
 export function withSessionDefaults(row: Record<string, unknown>): SessionRow {
-  return { reset_seq: 0, reset_scope: null, desktop_state: 'open', desktop_report: null, hidden_fields: [] as string[], ...row } as SessionRow;
+  return {
+    reset_seq: 0,
+    reset_scope: null,
+    desktop_state: 'open',
+    desktop_report: null,
+    hidden_fields: [] as string[],
+    voice_enabled: true,
+    ...row,
+  } as SessionRow;
 }
 
-/** Reads one session. Works before migrations 0005 / 0019 are applied too (their columns get their defaults). */
+/** Reads one session, with the newest set of columns the database has. */
 async function selectSession(column: 'id' | 'session_code', value: string): Promise<SessionRow> {
-  let res = await db().from('form_sessions').select(ALL_SESSION_COLUMNS).eq(column, value).maybeSingle();
-  if (res.error?.code === '42703') res = await db().from('form_sessions').select(SESSION_COLUMNS).eq(column, value).maybeSingle();
-  if (res.error?.code === '42703') res = await db().from('form_sessions').select(BASE_COLUMNS).eq(column, value).maybeSingle();
+  let res = await db().from('form_sessions').select(COLUMN_SETS[0]).eq(column, value).maybeSingle();
+  for (const cols of COLUMN_SETS.slice(1)) {
+    if (res.error?.code !== '42703') break;
+    res = await db().from('form_sessions').select(cols).eq(column, value).maybeSingle();
+  }
   const row = must(res);
   if (!row) throw fail(404, 'Session not found');
-  return withSessionDefaults(row as Record<string, unknown>);
+  return withSessionDefaults(row as unknown as Record<string, unknown>);
 }
 
 export const getSessionByCode = (code: string) => selectSession('session_code', code);
@@ -184,6 +201,7 @@ export const toSessionInfo = (s: SessionRow): SessionInfo => ({
   desktop_report: s.desktop_report ?? null,
   paired_at: s.paired_at ?? null,
   hidden_fields: s.hidden_fields ?? [],
+  voice_enabled: s.voice_enabled ?? true,
 });
 
 export async function getValues(sessionId: string): Promise<SessionValue[]> {

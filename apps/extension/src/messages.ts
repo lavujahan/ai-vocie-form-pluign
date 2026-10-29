@@ -78,8 +78,11 @@ export type PopupRequest = (
   | { type: 'GET_ACCOUNT' }
   | { type: 'LOGIN'; phone: string; pin: string }
   | { type: 'LOGOUT' }
-  | { type: 'START_SESSION' }
+  /** `voice: false`: a typing-only form (the customer types on their phone; no mic, no voice minutes). */
+  | { type: 'START_SESSION'; voice?: boolean }
   | { type: 'END_SESSION' }
+  /** Turn voice on or off for this tab's form. */
+  | { type: 'SET_VOICE'; voice: boolean }
   | { type: 'FILL' }
   | { type: 'UNDO' }
   /** Show the QR code again for this tab's form (the phone page was closed); answers are kept. */
@@ -98,6 +101,8 @@ export type ActiveSession = CreateSessionResponse & {
   reconnect?: boolean;
   /** The user allowed this site: the form's later pages (next step, reload) load the detector too. */
   site_access?: boolean;
+  /** false: a typing-only form (set when scanning; the snapshot's session has the current value). */
+  voice_enabled?: boolean;
 };
 
 /** The popup's view: the session of its own tab. */
