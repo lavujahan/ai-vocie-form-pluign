@@ -212,6 +212,7 @@ For a waiting customer who fills the form on their own phone: the operator ticks
 
 A gold **த** bubble floats at the edge of the phone page (`app/s/[code]/tamil-helper.tsx`). Tapping it opens a bottom sheet: type or paste English (a field label, a help line) and the Tamil appears after a short pause, with **Copy** and a **Recent** list. It translates the meaning ("Date of birth" → பிறந்த தேதி) and writes names and places by their sound ("Ramesh Kumar, Gandhi Street" → ரமேஷ் குமார், காந்தி தெரு). Nothing is put into the form by itself.
 - The bubble can be dragged up and down and snaps to the nearer side (remembered on the phone). It hides while recording.
+- `POST /api/dictate` (user token, multipart `audio`, `duration_ms`, `part`) is Tamil typing in the popup: Sarvam only, in Tamil script (`dictationConfig`), no form. It keeps no audio or text. Each piece adds one `usage_events` row (`kind` `stt`, no `session_id`), so its seconds count in the plan's voice minutes. It follows the same 402 rule as `/api/utterances`, and a failed call counts nothing.
 - `POST /api/translate` (phone token, up to 500 characters) runs the OpenAI Tamil Translator agent (`lib/agents/translator.ts`, model `TRANSLATOR_MODEL`, 1,500 tokens / 15 s). It needs an active plan, like speaking, but uses no voice minutes. Calls are billed as usage kind `translate` (Admin → Usage).
 - Each phone may ask about 60 times in 5 minutes. A text already translated is answered from memory (on the phone, and on the server instance) at no cost.
 

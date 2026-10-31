@@ -44,6 +44,28 @@ html:root {
   --color-live-dot: var(--vf-live-dot);
 }
 
+/* Tamil typing: the bars beside the mic while it listens. */
+.vf-level {
+  width: 3px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--vf-danger);
+  animation: vf-level 0.8s ease-in-out infinite alternate;
+}
+@keyframes vf-level {
+  from {
+    height: 5px;
+  }
+  to {
+    height: 19px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vf-level {
+    animation: none;
+  }
+}
+
 /* Opened as a window (for an app window): the space beside the 360px popup matches it. */
 html {
   background: var(--vf-page);

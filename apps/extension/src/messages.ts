@@ -87,9 +87,19 @@ export type PopupRequest = (
   | { type: 'UNDO' }
   /** Show the QR code again for this tab's form (the phone page was closed); answers are kept. */
   | { type: 'RECONNECT' }
+  /** Tamil typing: one piece of speech into text, in `PopupResponse.text` (base64: messages can't carry Blobs). */
+  | { type: 'DICTATE'; base64: string; mime: string; duration_ms: number; part: number }
+  /** Tamil typing in a window of its own: it stays open when the page is clicked, and Chrome can ask for the mic there. */
+  | { type: 'OPEN_TAMIL_WINDOW' }
 ) & { tab_id?: number };
 
-export type PopupResponse = { ok: true; state: ExtState } | { ok: false; error: string; state: ExtState };
+export type PopupResponse =
+  | { ok: true; state: ExtState; text?: string }
+  /** `code`: why the server refused, e.g. quota_exceeded. */
+  | { ok: false; error: string; code?: string; state: ExtState };
+
+/** chrome.storage.session key of the Tamil typing text: kept in this browser only, until sign out or Chrome closes. */
+export const TAMIL_TEXT_KEY = 'vf-tamil-text';
 
 export type ActiveSession = CreateSessionResponse & {
   tab_id: number;

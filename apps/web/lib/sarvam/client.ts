@@ -12,6 +12,22 @@ export class SarvamError extends Error {
   }
 }
 
+/** Sarvam or OpenAI rate-limited or briefly down (HTTP 429 / 5xx): worth one more try. */
+export function isTransient(e: unknown): boolean {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && (status === 429 || status >= 500);
+}
+
+export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isTransient(e)) throw e;
+    await new Promise((r) => setTimeout(r, 1000));
+    return fn();
+  }
+}
+
 function apiKey(): string {
   const key = process.env.SARVAM_API_KEY;
   if (!key) throw new Error('Missing environment variable SARVAM_API_KEY');

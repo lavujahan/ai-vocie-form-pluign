@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { silenceGate } from '@/app/s/[code]/silence';
+import { silenceGate } from '@vff/shared/ui/silence';
 
 const QUIET = 0.003;
 const SPEECH = 0.08;

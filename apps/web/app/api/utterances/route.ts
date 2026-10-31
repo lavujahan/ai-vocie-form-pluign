@@ -2,6 +2,7 @@ import { after, NextResponse } from 'next/server';
 import type { UtteranceResponse } from '@vff/shared';
 import { fieldsHash, mapTranscript } from '@/lib/agents/fieldMapper';
 import { isEmptyTranscript } from '@/lib/agents/guardrails';
+import { isTransient, withRetry } from '@/lib/sarvam/client';
 import { STT_MAX_SECONDS, sttConfig, transcribe } from '@/lib/sarvam/stt';
 import { requirePhone } from '@/lib/auth';
 import { assertCanUse } from '@/lib/billing/plans';
@@ -19,22 +20,6 @@ export const maxDuration = 120;
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUSY = 'Speech service is busy. Tap to retry in a minute.';
-
-/** Sarvam or OpenAI rate-limited or briefly down (HTTP 429 / 5xx): worth one more try. */
-function isTransient(e: unknown): boolean {
-  const status = (e as { status?: unknown } | null)?.status;
-  return typeof status === 'number' && (status === 429 || status >= 500);
-}
-
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (e) {
-    if (!isTransient(e)) throw e;
-    await new Promise((r) => setTimeout(r, 1000));
-    return fn();
-  }
-}
 
 /**
  * One utterance = one tap-to-stop recording. Utterances are processed independently and in parallel;

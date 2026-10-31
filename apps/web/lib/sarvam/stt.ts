@@ -22,6 +22,30 @@ export function sttConfig(): SttConfig {
   };
 }
 
+/**
+ * Tamil typing in the popup: Tamil script throughout, not the forms' mix of Tamil and English letters.
+ * A model without modes (SARVAM_STT_MODE empty) stays without one.
+ */
+export function dictationConfig(cfg: SttConfig = sttConfig()): SttConfig {
+  return { ...cfg, mode: cfg.mode ? 'transcribe' : '', language: 'ta-IN' };
+}
+
+const TAMIL_DIGITS: Record<string, string> = {
+  பூஜ்ஜியம்: '0', பூஜ்யம்: '0', சைபர்: '0', ஜீரோ: '0',
+  ஒன்று: '1', ஒண்ணு: '1', இரண்டு: '2', ரெண்டு: '2', மூன்று: '3', மூணு: '3', நான்கு: '4', நாலு: '4',
+  ஐந்து: '5', அஞ்சு: '5', ஆறு: '6', ஏழு: '7', எட்டு: '8', ஒன்பது: '9',
+};
+const DIGIT_WORD = Object.keys(TAMIL_DIGITS).join('|');
+const DIGIT_RUN = new RegExp(`(?<![\\p{L}\\p{M}])(?:${DIGIT_WORD})(?:\\s+(?:${DIGIT_WORD})){2,}(?![\\p{L}\\p{M}])`, 'gu');
+
+/**
+ * Tamil script spells a spoken phone number out ("ஒன்பது எட்டு ஏழு…"): 3 or more number words in a row
+ * become digits. Fewer are left alone: "ஒன்று இரண்டு" is usually "one or two", and ஆறு is also a river.
+ */
+export function tamilDigits(text: string): string {
+  return text.replace(DIGIT_RUN, (run) => run.split(/\s+/).map((w) => TAMIL_DIGITS[w]).join(''));
+}
+
 const MAX_KEYTERMS = 50;
 const MAX_KEYTERM_CHARS = 64;
 
@@ -73,10 +97,10 @@ export function buildSttForm(audio: Blob, fields: AgentField[], cfg: SttConfig =
 }
 
 /** Sarvam Saaras speech-to-text. The audio is only held in memory for this request. */
-export async function transcribe(audio: Blob, fields: AgentField[]): Promise<string> {
+export async function transcribe(audio: Blob, fields: AgentField[], cfg: SttConfig = sttConfig()): Promise<string> {
   const res = await sarvamPost<{ transcript: string; language_code: string | null }>(
     '/speech-to-text',
-    buildSttForm(audio, fields),
+    buildSttForm(audio, fields, cfg),
   );
   return (res.transcript ?? '').trim();
 }

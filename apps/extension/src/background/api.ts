@@ -10,16 +10,17 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init: { method?: string; body?: unknown; token?: string } = {}): Promise<T> {
+/** `form`: a multipart body (audio) in place of the JSON `body`. */
+export async function api<T>(path: string, init: { method?: string; body?: unknown; form?: FormData; token?: string } = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      method: init.method ?? (init.body ? 'POST' : 'GET'),
+      method: init.method ?? (init.body || init.form ? 'POST' : 'GET'),
       headers: {
         ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...(init.token ? { authorization: `Bearer ${init.token}` } : {}),
       },
-      body: init.body ? JSON.stringify(init.body) : undefined,
+      body: init.form ?? (init.body ? JSON.stringify(init.body) : undefined),
     });
   } catch {
     throw new ApiError(0, { error: `Can't reach the server at ${API_BASE}` });

@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./ui/tokens.css": "./ui/tokens.css",
-    "./ui/voice-tips": "./ui/voice-tips.tsx"
+    "./ui/voice-tips": "./ui/voice-tips.tsx",
+    "./ui/use-recorder": "./ui/use-recorder.ts",
+    "./ui/silence": "./ui/silence.ts"
   },
   "scripts": {
     "test": "vitest run",

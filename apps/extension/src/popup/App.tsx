@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { AlertTriangle, Check, Clock, Loader2, Pencil, Smartphone } from 'lucide-react';
 import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, type AccountResponse, type FieldFile, type SessionField } from '@vff/shared';
 import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
 import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { groupFields, type FieldGroup, type FieldItem } from './groups';
-import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, Input, Menu, Pill, Progress, Screen } from './ui';
+import { TamilTyping } from './tamil-typing';
+import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, Input, Menu, OpenTamilTyping, Pill, Progress, Screen } from './ui';
 
 /**
  * Opened in a window of its own (right-click menu or shortcut, for a site installed as an app, whose
  * window has no toolbar): the tab it is for. Undefined in the toolbar popup.
  */
 const WINDOW_TAB = Number(new URLSearchParams(location.search).get('tab')) || undefined;
+/** Tamil typing in a window of its own (it has no form, so no tab). */
+const TAMIL_WINDOW = new URLSearchParams(location.search).has('tamil');
 
 /** State of the form session in the tab this popup was opened on (each tab has its own). */
 function useExtState() {
@@ -51,16 +54,20 @@ function useExtState() {
    * Sends a request; resolves to an error message or null. Scanning first asks Chrome for this one site
    * (once; already-allowed sites don't ask), so the form's next pages fill too. Saying No still scans this page.
    */
-  const send = async (req: PopupRequest): Promise<string | null> => {
+  const request = useCallback(async (req: PopupRequest): Promise<PopupResponse> => {
     if (req.type === 'START_SESSION' && site.current) {
       await chrome.permissions.request({ origins: [`${site.current}/*`] }).catch(() => false);
     }
     const res = (await chrome.runtime.sendMessage({ ...req, tab_id: tabId.current })) as PopupResponse;
     setState(res.state);
+    return res;
+  }, []);
+  const send = async (req: PopupRequest): Promise<string | null> => {
+    const res = await request(req);
     return res.ok ? null : res.error;
   };
   // Read at render: the first STATE arrives after the tab (and so the site) is known.
-  return { state, send, site: site.current };
+  return { state, send, request, site: site.current };
 }
 
 /** "forms.example.in" from an origin or URL (as it is, if it isn't one). */
@@ -91,7 +98,10 @@ const TypingChip = () => (
 const TYPING_KEY = 'vf-typing-only';
 
 export function App() {
-  const { state, send, site } = useExtState();
+  const { state, send, request, site } = useExtState();
+  /** Tamil typing lives here, above the screens: a form moving on behind it doesn't end a recording. */
+  const [tamil, setTamil] = useState<'closed' | 'open' | 'hidden'>(TAMIL_WINDOW ? 'open' : 'closed');
+  const openTamil = useCallback(() => setTamil('open'), []);
 
   const polling = !!state?.session && !state.live;
   useEffect(() => {
@@ -135,7 +145,22 @@ export function App() {
   } else {
     body = <PairedCard state={state} send={send} others={others} />;
   }
-  return <main className="bg-page text-ink">{body}</main>;
+  const tamilOn = !!state?.auth && tamil !== 'closed';
+  return (
+    <main className={`relative bg-page text-ink ${TAMIL_WINDOW && state?.auth ? 'h-screen overflow-hidden' : tamil === 'open' && state?.auth ? 'min-h-[560px]' : ''}`}>
+      <OpenTamilTyping.Provider value={state?.auth ? openTamil : null}>{TAMIL_WINDOW && state?.auth ? null : body}</OpenTamilTyping.Provider>
+      {tamilOn && (
+        <TamilTyping
+          hidden={tamil === 'hidden'}
+          own={TAMIL_WINDOW}
+          chip={<MinutesChip account={state.account} />}
+          planNote={planBlocked(state.account) ? <PlanMeter account={state.account!} /> : null}
+          send={request}
+          onClose={() => (TAMIL_WINDOW ? window.close() : setTamil('hidden'))}
+        />
+      )}
+    </main>
+  );
 }
 
 type Send = (req: PopupRequest) => Promise<string | null>;
@@ -196,7 +221,8 @@ function SignIn({ send }: { send: Send }) {
       {/* Chrome Web Store: data use must be disclosed in the product, before collection, and agreed to by an action. */}
       <p className="border-t border-line pt-3 text-xs text-muted">
         When you scan a form, its page address and fields are sent to Voice2Fill. Your spoken answers are turned
-        into text by Sarvam AI and OpenAI and deleted within about an hour. By signing in you agree to this.{' '}
+        into text by Sarvam AI and OpenAI and deleted within about an hour. With Tamil typing, your voice goes to
+        Sarvam AI from this computer's mic and is not stored. By signing in you agree to this.{' '}
         <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="text-accent-ink underline underline-offset-2">
           Privacy policy
         </a>

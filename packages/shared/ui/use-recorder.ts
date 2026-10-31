@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AUTO_STOP_SECONDS } from '@vff/shared';
+import { AUTO_STOP_SECONDS } from '../src/voice-tips';
 import { silenceGate } from './silence';
 
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/aac', 'audio/ogg'];
@@ -57,8 +57,13 @@ function levelMeter(stream: MediaStream): { level: () => number; close: () => vo
  * the next tap starts instantly (and mobile browsers don't re-prompt).
  * Each piece of a long recording is delivered through `onRecorded` with its own tag; `last` marks the
  * piece that ended the recording (Stop, screen lock, call, app switch), not a 28 s cut.
+ * `releaseMic` closes the mic after each recording instead (a page that stays open on a computer
+ * shouldn't look like it is listening).
  */
-export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown; durationMs: number; last: boolean }) => void) {
+export function useRecorder(
+  onRecorded: (blob: Blob, meta: { tag: unknown; durationMs: number; last: boolean }) => void,
+  { releaseMic = false }: { releaseMic?: boolean } = {},
+) {
   const [state, setState] = useState<RecorderState>('idle');
   const [elapsed, setElapsed] = useState(0);
   const [notice, setNotice] = useState<RecorderNotice>(null);
@@ -176,9 +181,15 @@ export function useRecorder(onRecorded: (blob: Blob, meta: { tag: unknown; durat
     const wasRecording = recRef.current?.state === 'recording';
     if (wasRecording) recRef.current!.stop();
     recRef.current = null;
+    if (releaseMic) {
+      meterRef.current?.close();
+      meterRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     setState((s) => (s === 'recording' ? 'idle' : s));
     if (reason && wasRecording) setNotice(reason);
-  }, []);
+  }, [releaseMic]);
   const stopRef = useRef(stop);
   stopRef.current = stop;
 

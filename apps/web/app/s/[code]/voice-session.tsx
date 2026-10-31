@@ -35,7 +35,7 @@ import { FileSheet, FileStatusMarker } from './file-upload';
 import { LangCtx, useI18n, type T } from './lang';
 import { sendWatermark, unsentChanges } from './send-state';
 import { TamilHelper } from './tamil-helper';
-import { useRecorder, type RecorderNotice } from './use-recorder';
+import { useRecorder, type RecorderNotice } from '@vff/shared/ui/use-recorder';
 import { useVoiceSession, type LocalUtterance } from './use-voice-session';
 
 /** What the bottom bar says after a recording ended by itself. */

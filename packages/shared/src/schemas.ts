@@ -812,6 +812,9 @@ export const TranslateRequest = z.object({ text: z.string().trim().min(1).max(TR
 export type TranslateRequest = z.infer<typeof TranslateRequest>;
 export type TranslateResponse = { tamil: string };
 
+/** Popup → server: one piece of Tamil typing. The text is only returned, never saved. */
+export type DictateResponse = { text: string };
+
 // ---------- Extension messaging ----------
 
 /** field_key → value to put into the page. */

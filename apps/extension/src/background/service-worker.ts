@@ -3,6 +3,7 @@ import type {
   AccountResponse,
   AddFieldsResponse,
   CreateSessionResponse,
+  DictateResponse,
   FieldFile,
   DesktopUpdateRequest,
   LoginResponse,
@@ -21,6 +22,7 @@ import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
 import {
   MOVED_REASON,
   siteOf,
+  TAMIL_TEXT_KEY,
   type ActiveSession,
   type ContentRequest,
   type ExtState,
@@ -142,6 +144,7 @@ async function logout() {
   await Promise.all(Object.values(state.tabs).map((t) => reportDesktop(t.session, { state: 'closed' })));
   stopRealtime();
   account = null;
+  await chrome.storage.session.remove(TAMIL_TEXT_KEY);
   await save({ auth: null, tabs: {} });
 }
 
@@ -669,7 +672,8 @@ function stopRealtime() {
 
 // ---------- popup requests ----------
 
-async function handle(req: PopupRequest, tabId: number | undefined): Promise<void> {
+/** Resolves to the text of a DICTATE; other requests answer through the state. */
+async function handle(req: PopupRequest, tabId: number | undefined): Promise<string | void> {
   switch (req.type) {
     case 'GET_STATE':
       await ensureRealtime();
@@ -765,6 +769,24 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
       await save({ tabs: reopenQr(state.tabs, tabId, res.expires_at) });
       return;
     }
+
+    case 'DICTATE': {
+      if (!state.auth) throw new Error('Please sign in');
+      const form = new FormData();
+      const bytes = Uint8Array.from(atob(req.base64), (c) => c.charCodeAt(0));
+      form.append('audio', new Blob([bytes], { type: req.mime }), 'speech');
+      form.append('duration_ms', String(req.duration_ms));
+      form.append('part', String(req.part));
+      const { text } = await api<DictateResponse>('/api/dictate', { form, token: state.auth.token });
+      await refreshAccount();
+      return text;
+    }
+
+    case 'OPEN_TAMIL_WINDOW': {
+      const tab = tabId === undefined ? undefined : await chrome.tabs.get(tabId).catch(() => undefined);
+      await openWindow(chrome.runtime.getURL('src/popup/index.html?tamil=1'), tab?.windowId);
+      return;
+    }
   }
 }
 
@@ -803,8 +825,8 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage |
     await ready;
     const tabId = req.tab_id ?? (await activeTabId());
     try {
-      await handle(req, tabId);
-      return { ok: true, state: publicState(tabId) } satisfies PopupResponse;
+      const text = await handle(req, tabId);
+      return { ok: true, state: publicState(tabId), ...(typeof text === 'string' ? { text } : {}) } satisfies PopupResponse;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401 && req.type !== 'LOGIN') await logout();
       // Plan ended or minutes used up: the popup shows it from the refreshed plan.
@@ -813,7 +835,7 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage |
         e instanceof ApiError && e.body.attempts_left !== undefined
           ? `${e.message}. ${e.body.attempts_left} ${e.body.attempts_left === 1 ? 'try' : 'tries'} left.`
           : (e as Error).message;
-      return { ok: false, error, state: publicState(tabId) } satisfies PopupResponse;
+      return { ok: false, error, code: e instanceof ApiError ? e.body.code : undefined, state: publicState(tabId) } satisfies PopupResponse;
     }
   })().then(sendResponse);
   return true;
@@ -873,15 +895,19 @@ chrome.runtime.onInstalled.addListener(() => {
 
 async function openPopupWindow(tab: chrome.tabs.Tab | undefined) {
   if (tab?.id === undefined || tab.id < 0) return;
-  const url = chrome.runtime.getURL(`src/popup/index.html?tab=${tab.id}`);
-  // Already open for this tab: bring it to the front.
+  await openWindow(chrome.runtime.getURL(`src/popup/index.html?tab=${tab.id}`), tab.windowId);
+}
+
+/** The popup page in a small window of its own, beside `besideWindow`. */
+async function openWindow(url: string, besideWindow: number | undefined) {
+  // Already open: bring it to the front.
   const [open] = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB], documentUrls: [url] }).catch(() => []);
   if (open && open.windowId >= 0) {
     await chrome.windows.update(open.windowId, { focused: true });
     return;
   }
   // At the top right of the form's window, where the toolbar popup would be.
-  const near = await chrome.windows.get(tab.windowId).catch(() => null);
+  const near = besideWindow === undefined ? null : await chrome.windows.get(besideWindow).catch(() => null);
   const width = 392;
   const height = 680;
   const at = near?.left !== undefined && near.width ? { left: Math.max(0, near.left + near.width - width - 12), top: (near.top ?? 0) + 40 } : {};
