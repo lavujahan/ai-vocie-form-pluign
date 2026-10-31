@@ -36,3 +36,13 @@ export const sentAt = (holdUntil: string) => new Date(Date.parse(holdUntil) - SE
 
 /** When the computer last filled the form: a fill that put nothing in doesn't count. */
 export const filledAt = (report: DesktopReport | null | undefined) => (report && report.filled > 0 ? report.at : null);
+
+/**
+ * The waiting list: oldest first, so the first customers of a queue stay in view (a limit would drop them
+ * from a newest-first list). Forms the computer has filled go last: they are only kept for a repeat.
+ */
+export function waitingOrder<T extends { hold_until: string; desktop_report: DesktopReport | null }>(rows: T[]): T[] {
+  return [...rows].sort(
+    (a, b) => Number(!!filledAt(a.desktop_report)) - Number(!!filledAt(b.desktop_report)) || Date.parse(a.hold_until) - Date.parse(b.hold_until),
+  );
+}

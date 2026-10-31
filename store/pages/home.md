@@ -16,7 +16,7 @@ Open a form on your computer, scan the QR code, and say the answers in Tamil, En
 
 ## How it works
 
-1. **Scan.** Open the form in Chrome, click Voice Form Filler, then click **Scan form on this page**. A QR code appears.
+1. **Scan.** Open the form in Chrome, click Voice Form Filler, then click **QR for this page**. A QR code appears.
 2. **Speak.** Scan it with your phone camera. Tap the mic and say the answers: *"My name is Ramesh Kumar, phone 98765 43210, district Salem."*
 3. **Fill.** Press **Fill form** once. New answers then fill in automatically. Check the form and submit it yourself. **Undo** puts the page back the way it was.
 

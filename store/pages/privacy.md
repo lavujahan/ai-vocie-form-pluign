@@ -31,8 +31,8 @@ This policy explains what data the service handles, why, who it is shared with, 
 | --- | --- | --- |
 | **Account details**: name, phone number, a hashed PIN | When your administrator creates your account | To sign you in |
 | **Sign-in attempts**: phone number, IP address, success or failure | Each time you sign in | To block repeated wrong PINs and protect accounts |
-| **Form page details**: the page's address (URL), title and form name | When you click "Scan form on this page" | To show the phone which form it is filling, and to avoid filling the wrong page |
-| **Form structure**: field labels, field types, dropdown options, upload rules (for example "JPG, max 50 KB") | When you scan, and when new fields appear on a later step | To understand the form so your answers go into the right fields |
+| **Form page details**: the page's address (URL), title and form name | When you click "QR for this page" | To show the phone which form it is filling, and to avoid filling the wrong page |
+| **Form structure**: field labels, field types, dropdown options, upload rules (for example "JPG, max 50 KB") | When you scan, and when new fields appear on a later step | To understand the form so your answers go into the right fields. A form you scanned can be reused for your next customers, without anyone's answers. |
 | **Voice recordings** | When you tap the mic on the phone, or the mic in the extension's Tamil typing (this uses your computer's microphone, only after you allow it in Chrome) | To turn your speech into text. Not stored. |
 | **What you said, as text, and the field values made from it** | After each recording on a form | To fill the form and let you check and correct the answers |
 | **Tamil typing text** | After each Tamil typing recording | To show you the text to copy. It is sent back to the extension and not stored on our servers. It stays in your browser until you clear it, sign out or close Chrome. |
@@ -40,7 +40,7 @@ This policy explains what data the service handles, why, who it is shared with, 
 | **Usage records**: time of each request, minutes of audio, number of AI tokens, cost | Each time speech is transcribed or the AI reads a form | To count the voice minutes in your plan and keep track of costs. These records contain no audio, text or answers. |
 | **Plan and payment records**: your plan, its dates and minutes, and each payment's amount, date, method and reference (for example a UPI transaction id) | When you get or renew a plan, or buy extra minutes | To know which plan you paid for, and for our accounts. We never receive or store card numbers, UPI PINs or bank passwords. |
 
-We don't collect your browsing history. The extension runs on no website by default. When you click "Scan form on this page", Chrome asks you to allow that one site; the extension then reads that site's form pages only while a form session is open, so a form's next step also fills. You can remove that access in Chrome at any time.
+We don't collect your browsing history. The extension runs on no website by default. When you click "QR for this page", Chrome asks you to allow that one site; the extension then reads that site's form pages only while a form session is open, so a form's next step also fills. You can remove that access in Chrome at any time.
 
 ## 3. Who we share it with
 

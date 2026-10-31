@@ -11,7 +11,7 @@ supabase           SQL migrations (schema, RLS, latest-wins upsert, purge cron)
 
 ## How it works
 
-1. **Extension popup → Scan form.** Nothing runs on websites until this tap: Chrome asks to allow that one site (`optional_host_permissions`), and the worker then registers the content script for that site only, so the form's next pages and reloads load it too (saying No still scans the page once through `activeTab`). The content script detects fields, including same-origin iframes and open shadow roots. `POST /api/sessions` stores them and returns a single-use QR code that expires after 10 minutes. The **Form Analyzer Agent** then runs in the background and adds clean labels, semantic types and validation rules.
+1. **Extension popup → QR for this page.** Nothing runs on websites until this tap: Chrome asks to allow that one site (`optional_host_permissions`), and the worker then registers the content script for that site only, so the form's next pages and reloads load it too (saying No still scans the page once through `activeTab`). The content script detects fields, including same-origin iframes and open shadow roots. `POST /api/sessions` stores them and returns a single-use QR code that expires after 10 minutes. The **Form Analyzer Agent** then runs in the background and adds clean labels, semantic types and validation rules.
 2. **Phone scans the QR code.** It opens `/s/<code>`, which pairs the phone and gives it a 30-minute session JWT.
 3. **Tap the mic to start and tap again to stop.** Each recording is one *utterance*, sent with a `seq` number, and several can be processed at once. The server transcribes it with Sarvam **Saaras** (`saaras:v3`, `codemix` mode: English words in English letters, Tamil in Tamil script, numbers as digits), runs the **Field Mapping Agent** (OpenAI Agents SDK, `gpt-5.4-mini`), and calls `upsert_field_value`. A recording longer than 28 s is sent in pieces as you speak: each piece is transcribed right away, and the whole recording is mapped **once, after Stop** (the phone marks the last piece; while the answers come it shows changing messages: please wait, thinking, planning, matching, filling, don't close this page, loading). A value is only overwritten by a newer `seq`, so newer speech wins even if it finishes processing first. The first pass is spoken with the big mic; each field's own mic appears once 70% of the voice fields are filled, for corrections (filling field by field measured about 1.8× the cost and 5× the wait of one recording).
 4. **Values stream to the phone and the extension over Supabase Realtime.** Press **Fill form** once; after that, new values fill the page automatically and the changed field is highlighted. **Undo** restores the page's original values.
@@ -67,7 +67,7 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 
 1. Sign in at `/admin/login` and add a user (phone number and 6-digit PIN; **Generate** makes a random one, shown once after Save so you can pass it on).
 2. Open `http://localhost:5174/vanilla.html` (or the React or Vue fixture), click the extension and sign in as that user.
-3. Click **Scan form on this page** and scan the QR code with your phone.
+3. Click **QR for this page** and scan the QR code with your phone.
 4. Say *"My name is Ramesh Kumar, email ramesh at gmail dot com, phone nine eight seven six five four three two one zero"*, or in Tanglish, *"en peru Ramesh, ooru Chennai, naan aan"*.
 5. Watch the values appear in the popup, then press **Fill form**.
 

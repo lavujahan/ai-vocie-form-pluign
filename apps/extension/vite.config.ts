@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
     },
     // The service worker calls the API and Supabase Realtime directly (no CORS from the worker).
     host_permissions: [`${new URL(apiBase).origin}/*`, supabase],
-    // Nothing runs on websites by default. When the user taps "Scan form", the popup asks Chrome for that
+    // Nothing runs on websites by default. When the user taps "QR for this page", the popup asks Chrome for that
     // one site, and the worker registers the form detector for it (later pages of the form load it too).
     optional_host_permissions: ['http://*/*', 'https://*/*'],
     // The e2e build drives the detector on the local test pages directly (no permission prompt in tests).

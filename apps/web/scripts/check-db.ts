@@ -87,6 +87,12 @@ try {
   const voiceRes = await admin.from('form_sessions').update({ voice_enabled: false }).eq('id', session.id).select('voice_enabled').single();
   check('Typing only: form_sessions.voice_enabled exists (apply migration 0021)', !voiceRes.error && voiceRes.data?.voice_enabled === false, voiceRes.error?.message);
 
+  // ---- Queue QR (migration 0023) ----
+  const queuedRes = await admin.from('form_sessions').update({ queued: true }).eq('id', session.id).select('queued').single();
+  check('Queue QR: form_sessions.queued exists (apply migration 0023)', !queuedRes.error && queuedRes.data?.queued === true, queuedRes.error?.message);
+  const scanned = await admin.rpc('user_scanned_forms', { p_user: a.id });
+  check('Queue QR: user_scanned_forms runs (apply migration 0023)', !scanned.error && Array.isArray(scanned.data), scanned.error?.message);
+
   // ---- Fields a choice hides (migration 0019) ----
   const hiddenRes = await admin.from('form_sessions').update({ hidden_fields: ['f_hidden'] }).eq('id', session.id).select('hidden_fields').single();
   check('Hidden fields: form_sessions.hidden_fields exists (apply migration 0019)', !hiddenRes.error && hiddenRes.data?.hidden_fields?.[0] === 'f_hidden', hiddenRes.error?.message);

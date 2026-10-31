@@ -6,6 +6,7 @@ import type {
   FillReport,
   FormSchemaInput,
   HeldForm,
+  LatestForm,
   PublicUser,
   SessionSnapshot,
 } from '@vff/shared';
@@ -96,10 +97,14 @@ export type PopupRequest = (
   | { type: 'DICTATE'; base64: string; mime: string; duration_ms: number; part: number }
   /** Tamil typing in a window of its own: it stays open when the page is clicked, and Chrome can ask for the mic there. */
   | { type: 'OPEN_TAMIL_WINDOW' }
+  /** QR for other: a new QR code for one customer, for a form under Latest forms, in `PopupResponse.qr`. */
+  | { type: 'QUEUE_QR'; source_id: string; voice: boolean }
+  /** The status of a queue QR's session, in `PopupResponse.text` ('waiting': not scanned yet). */
+  | { type: 'QUEUE_STATUS'; session_code: string }
 ) & { tab_id?: number };
 
 export type PopupResponse =
-  | { ok: true; state: ExtState; text?: string }
+  | { ok: true; state: ExtState; text?: string; qr?: CreateSessionResponse }
   /** `code`: why the server refused, e.g. quota_exceeded. */
   | { ok: false; error: string; code?: string; state: ExtState };
 
@@ -128,8 +133,10 @@ export type ExtState = {
   /** The signed-in user's plan and voice minutes left; null until loaded. */
   account: AccountResponse | null;
   session: ActiveSession | null;
-  /** The last forms customers sent that still wait, newest first. */
+  /** Forms customers sent that still wait, oldest first, with those already filled last. */
   held: HeldForm[];
+  /** Forms this operator scanned lately: each can get a QR code with no page open. */
+  latest: LatestForm[];
   /**
    * Answers / uploads from the phone that came after the last "Fill form" (not on the page yet);
    * null before the first one. The page is only ever filled on "Fill form".

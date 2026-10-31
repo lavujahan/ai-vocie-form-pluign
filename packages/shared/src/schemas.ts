@@ -667,6 +667,11 @@ export type SessionInfo = {
    * shows no mic and the server refuses recordings. Missing on older servers: voice is on.
    */
   voice_enabled?: boolean;
+  /**
+   * Started from Latest forms (migration 0023): the customer fills it while waiting in a queue, with no
+   * form open on the computer yet. The phone talks about the operator instead of the computer.
+   */
+  queued?: boolean;
 };
 
 /** "Connect phone again": the same QR code works once more until `expires_at` (answers are kept). */
@@ -689,6 +694,26 @@ export type HeldForm = {
 };
 
 export type HeldFormsResponse = { forms: HeldForm[] };
+
+/** A form the operator scanned before: a new QR code for it needs no page and no AI reading. */
+export type LatestForm = {
+  /** The past session the QR code's fields are copied from. */
+  source_id: string;
+  form_name: string;
+  page_origin: string;
+  field_count: number;
+  last_used_at: string;
+};
+
+export type LatestFormsResponse = { forms: LatestForm[] };
+
+/** Extension → server: a new QR code for a form under Latest forms. */
+export const QueueSessionRequest = z.object({
+  source_id: z.string().uuid(),
+  /** false: a typing-only form, which uses no voice minutes. */
+  voice: z.boolean().default(true),
+});
+export type QueueSessionRequest = z.infer<typeof QueueSessionRequest>;
 
 export type PairResponse = {
   token: string;

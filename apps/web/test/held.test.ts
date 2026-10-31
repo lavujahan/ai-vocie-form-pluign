@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SENT_HOLD_MIN, type FieldType, type SemanticType } from '@vff/shared';
-import { customerLabel, filledAt, sentAt } from '@/lib/held';
+import { customerLabel, filledAt, sentAt, waitingOrder } from '@/lib/held';
 import { isHeld } from '@/lib/session-rules';
 
 const field = (id: string, semantic_type: SemanticType | null, field_type: FieldType = 'text') => ({ id, semantic_type, field_type });
@@ -64,5 +64,21 @@ describe('waiting forms', () => {
     expect(filledAt({ filled: 12, skipped: 1, total: 13, at })).toBe(at);
     expect(filledAt({ filled: 0, skipped: 13, total: 13, at })).toBeNull();
     expect(filledAt(null)).toBeNull();
+  });
+
+  it('lists the oldest first, and forms already filled last', () => {
+    const at = '2026-10-31T11:31:00Z';
+    const row = (id: string, hold_until: string, filled = 0) => ({ id, hold_until, desktop_report: filled ? { filled, skipped: 0, total: filled, at } : null });
+    const rows = [row('third', '2026-10-31T14:30:00Z'), row('done', '2026-10-31T13:00:00Z', 12), row('first', '2026-10-31T14:00:00Z'), row('second', '2026-10-31T14:10:00Z')];
+    expect(waitingOrder(rows).map((r) => r.id)).toEqual(['first', 'second', 'third', 'done']);
+  });
+
+  it('keeps a fill that put nothing in with the forms still waiting', () => {
+    const report = { filled: 0, skipped: 12, total: 12, at: '2026-10-31T11:31:00Z' };
+    const rows = [
+      { id: 'later', hold_until: '2026-10-31T14:30:00Z', desktop_report: null },
+      { id: 'tried', hold_until: '2026-10-31T14:00:00Z', desktop_report: report },
+    ];
+    expect(waitingOrder(rows).map((r) => r.id)).toEqual(['tried', 'later']);
   });
 });

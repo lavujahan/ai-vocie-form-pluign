@@ -20,7 +20,7 @@ Status key: ☐ to do · ◐ in progress · ☑ done. Steps marked **blocker** w
 | # | Decision | Options | Affects |
 | --- | --- | --- | --- |
 | D1 | Store title | ☑ **"Voice Form Filler: Fill web forms by speaking on your phone"** | Step 1.4, all images |
-| D2 | Content script | ☑ Done: no content script on any site. Access is asked per site when the user taps Scan form (`optional_host_permissions`), and the detector is registered for that site only | Step 1.3 |
+| D2 | Content script | ☑ Done: no content script on any site. Access is asked per site when the user taps QR for this page (`optional_host_permissions`), and the detector is registered for that site only | Step 1.3 |
 | D3 | Public pages | ☑ Homepage, privacy and support pages go on your other existing site. ☐ Still needed: that site's address and the support email/phone, to fill the `{{…}}` placeholders. | Steps 1.2, 2.x, 4.2 |
 | D4 | Regions | ☐ Open: all regions, or India only | Step 4.2 |
 
@@ -235,7 +235,7 @@ A centre should not depend on one person's typing speed. With Voice2Fill, anyone
 
 HOW IT WORKS
 
-1. Open the web form and click the extension → "Scan form on this page".
+1. Open the web form and click the extension → "QR for this page".
 2. The applicant scans the QR code with their phone. No app to install; it opens in the phone's browser.
 3. They tap the mic and speak: "My name is Ramesh Kumar, phone 98765 43210, district Salem."
 4. Press "Fill form" once. New answers then fill the page automatically, and each changed field is highlighted.
@@ -262,7 +262,7 @@ PRIVACY
 • Spoken answers and their text are deleted automatically within about an hour, or about 2 hours after the customer sends them.
 • Uploaded photos and PDFs are stored privately and deleted as soon as the computer receives them, or when the tab closes.
 • QR codes work once and expire after 10 minutes. A phone link lasts 30 minutes.
-• The extension reads nothing on a website until you tap "Scan form on this page".
+• The extension reads nothing on a website until you tap "QR for this page".
 • Nothing is sold or used for advertising.
 
 
@@ -301,11 +301,11 @@ Fill web forms on the current page from answers the user speaks or photographs o
 | Permission | Justification to paste |
 | --- | --- |
 | `storage` | Keeps the user signed in and remembers the active form session for each tab. |
-| `activeTab` | Reads the form fields on the tab where the user clicked "Scan form on this page". |
+| `activeTab` | Reads the form fields on the tab where the user clicked "QR for this page". |
 | `scripting` | Injects the form detector and filler into the tab the user chose to fill, and registers it for a site the user allowed, so the form's next pages fill too. |
 | Host permission: API server | Sends the detected form fields and receives the values the user spoke on their phone. |
 | Host permission: Supabase | Receives new values in real time while the user speaks, so the form updates without reloading. |
-| Optional host permissions (`http://*/*`, `https://*/*`) | Not granted at install. When the user taps "Scan form on this page", Chrome asks for that one site. Once allowed, the form detector loads on that site's pages (a form's next step or a reload); it never runs on other sites. The user can remove the access in Chrome at any time. |
+| Optional host permissions (`http://*/*`, `https://*/*`) | Not granted at install. When the user taps "QR for this page", Chrome asks for that one site. Once allowed, the form detector loads on that site's pages (a form's next step or a reload); it never runs on other sites. The user can remove the access in Chrome at any time. |
 
 ## Data usage disclosures (tick these)
 
@@ -335,12 +335,12 @@ The User Data FAQ requires a **clear notice inside the extension, and a user act
 - **Currently:** the sign-in and Scan cards have no notice, so this has to be fixed before you submit.
 - **Fix:** add a short notice to the sign-in card (`SignIn` in `apps/extension/src/popup/App.tsx`), linked to the privacy policy. Signing in then counts as agreeing. Example wording:
   > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about an hour, or about 2 hours after your customer sends them. With Tamil typing, your voice goes to Sarvam AI from this computer's mic and is not stored. [Privacy policy]
-- Clicking "Scan form on this page" afterwards is the action that starts collection, so the notice must appear before the first scan.
+- Clicking "QR for this page" afterwards is the action that starts collection, so the notice must appear before the first scan.
 
 ## Minimum permissions (reviewers check this)
 
 The privacy page says that asking for more permissions than you need can get the extension rejected.
-- **Done:** the manifest has no `content_scripts`. Nothing runs on any website until the user taps Scan form.
+- **Done:** the manifest has no `content_scripts`. Nothing runs on any website until the user taps QR for this page.
 - **How:** on Scan, the popup asks Chrome for that one site (`chrome.permissions.request`). Once allowed, the worker registers the detector for that site only (`chrome.scripting.registerContentScripts`), so a wizard's next page and reloads keep working (watcher and tab-moved checks unchanged). If the user says No, the page is still scanned once through `activeTab`.
 - **Removing access** in Chrome unregisters the detector for that site.
 - **Microphone:** Tamil typing uses the computer's mic through the standard browser prompt, in a small window the first time. The manifest needs no extra permission for it, and the mic is closed after each recording.

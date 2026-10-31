@@ -8,6 +8,8 @@ import type {
   DesktopUpdateRequest,
   HeldForm,
   HeldFormsResponse,
+  LatestForm,
+  LatestFormsResponse,
   LoginResponse,
   PublicUser,
   ReconnectResponse,
@@ -71,6 +73,8 @@ let state: Persisted = { auth: null, tabs: {} };
 let account: AccountResponse | null = null;
 /** Forms customers sent that still wait; fetched when a popup opens on a tab without a form. */
 let heldForms: HeldForm[] = [];
+/** Forms this operator scanned lately; fetched with `heldForms`. */
+let latestForms: LatestForm[] = [];
 /** Open popups, and the tab each one was opened on. */
 const ports = new Map<chrome.runtime.Port, number | undefined>();
 
@@ -97,6 +101,7 @@ function publicState(tabId: number | undefined): ExtState {
     account: state.auth ? account : null,
     session: t?.session ?? null,
     held: state.auth ? heldForms : [],
+    latest: state.auth ? latestForms : [],
     unfilledChanges: t ? changesSince(t.session.snapshot, t.filledUpTo) : null,
     live: !!t && !!channels.get(t.session.session_id)?.live,
     lastFill: t?.lastFill ?? null,
@@ -152,6 +157,7 @@ async function logout() {
   stopRealtime();
   account = null;
   heldForms = [];
+  latestForms = [];
   await chrome.storage.session.remove(TAMIL_TEXT_KEY);
   await save({ auth: null, tabs: {} });
 }
@@ -178,6 +184,20 @@ async function refreshHeld() {
     const { forms } = await api<HeldFormsResponse>('/api/sessions/held', { token: auth.token });
     if (state.auth?.token !== auth.token) return; // signed out meanwhile
     heldForms = forms;
+    broadcast();
+  } catch {
+    // offline, or an older server without the list
+  }
+}
+
+/** Reloads Latest forms. Errors keep the last list. */
+async function refreshLatest() {
+  const auth = state.auth;
+  if (!auth) return;
+  try {
+    const { forms } = await api<LatestFormsResponse>('/api/forms/latest', { token: auth.token });
+    if (state.auth?.token !== auth.token) return; // signed out meanwhile
+    latestForms = forms;
     broadcast();
   } catch {
     // offline, or an older server without the list
@@ -762,8 +782,8 @@ async function discardHeld(code: string) {
   await refreshHeld();
 }
 
-/** Resolves to the text of a DICTATE; other requests answer through the state. */
-async function handle(req: PopupRequest, tabId: number | undefined): Promise<string | void> {
+/** Resolves to the text of a DICTATE or a QUEUE_STATUS and the QR of a QUEUE_QR; other requests answer through the state. */
+async function handle(req: PopupRequest, tabId: number | undefined): Promise<string | CreateSessionResponse | void> {
   switch (req.type) {
     case 'GET_STATE':
       await ensureRealtime();
@@ -780,7 +800,7 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       account = null;
       await save({ auth: { token: r.token, expires_at: r.expires_at, user: r.user } });
       await ensureRealtime();
-      await Promise.all([refreshAccount(), refreshHeld()]);
+      await Promise.all([refreshAccount(), refreshHeld(), refreshLatest()]);
       return;
     }
 
@@ -885,6 +905,17 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       await openWindow(chrome.runtime.getURL('src/popup/index.html?tamil=1'), tab?.windowId);
       return;
     }
+
+    // These forms have no tab, so they are not in `state.tabs` and don't count against MAX_TABS.
+    case 'QUEUE_QR':
+      if (!state.auth) throw new Error('Please sign in');
+      return api<CreateSessionResponse>('/api/sessions/queue', { body: { source_id: req.source_id, voice: req.voice }, token: state.auth.token });
+
+    case 'QUEUE_STATUS': {
+      if (!state.auth) throw new Error('Please sign in');
+      const snap = await api<SessionSnapshot>(`/api/sessions/${req.session_code}`, { token: state.auth.token });
+      return snap.session.status;
+    }
   }
 }
 
@@ -923,8 +954,9 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage |
     await ready;
     const tabId = req.tab_id ?? (await activeTabId());
     try {
-      const text = await handle(req, tabId);
-      return { ok: true, state: publicState(tabId), ...(typeof text === 'string' ? { text } : {}) } satisfies PopupResponse;
+      const result = await handle(req, tabId);
+      const extra = typeof result === 'string' ? { text: result } : result ? { qr: result } : {};
+      return { ok: true, state: publicState(tabId), ...extra } satisfies PopupResponse;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401 && req.type !== 'LOGIN') await logout();
       // Plan ended or minutes used up: the popup shows it from the refreshed plan.
@@ -950,8 +982,11 @@ chrome.runtime.onConnect.addListener((port) => {
     await ensureRealtime();
     port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
     void refreshAccount();
-    // No form in this tab: the popup lists the forms that wait, before anything is scanned.
-    if (!tabOf(tabId)) void refreshHeld();
+    // No form in this tab: the popup lists the forms that wait and Latest forms, before anything is scanned.
+    if (!tabOf(tabId)) {
+      void refreshHeld();
+      void refreshLatest();
+    }
     // Opening the popup always shows the latest values, even if a live event was missed.
     if (tabId !== undefined) await refreshSnapshot(tabId);
   });

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import QRCode from 'qrcode';
-import { AlertTriangle, Check, Clock, Copy, Loader2, Pencil, Smartphone, X } from 'lucide-react';
-import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, SENT_HOLD_MIN, type AccountResponse, type FieldFile, type HeldForm, type SessionField } from '@vff/shared';
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, Pencil, Smartphone, X } from 'lucide-react';
+import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, SENT_HOLD_MIN, type AccountResponse, type FieldFile, type HeldForm, type LatestForm, type SessionField } from '@vff/shared';
 import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
 import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { groupFields, type FieldGroup, type FieldItem } from './groups';
+import { QrBlock } from './qr';
+import { QueueScreen } from './queue-screen';
 import { TamilTyping } from './tamil-typing';
 import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, Input, Menu, OpenTamilTyping, Pill, Progress, Screen } from './ui';
 
@@ -143,7 +144,7 @@ export function App() {
   } else if (!state.auth) {
     body = <SignIn send={send} />;
   } else if (!state.session) {
-    body = <StartCard state={state} send={send} site={site} others={others} />;
+    body = <StartCard state={state} send={send} request={request} site={site} others={others} />;
   } else if (!state.session.snapshot || (state.session.snapshot.session.status === 'waiting' && !state.session.reconnect)) {
     body = <QrCard state={state} send={send} others={others} />;
   } else {
@@ -236,11 +237,33 @@ function SignIn({ send }: { send: Send }) {
   );
 }
 
-function StartCard({ state, send, site, others }: { state: ExtState; send: Send; site: string | null; others: string | null }) {
+function StartCard({
+  state,
+  send,
+  request,
+  site,
+  others,
+}: {
+  state: ExtState;
+  send: Send;
+  request: (req: PopupRequest) => Promise<PopupResponse>;
+  site: string | null;
+  others: string | null;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [typingOnly, setTypingOnly] = useState(false);
   const [holdNotice, setHoldNotice] = useState(false);
+  /** QR for other is open: Latest forms shows, and stays open for the next customer's QR. */
+  const [showForms, setShowForms] = useState(false);
+  /** The form whose QR code is on screen. */
+  const [qrFor, setQrFor] = useState<LatestForm | null>(null);
+  /** The last QR code was scanned: home says so. */
+  const [scanned, setScanned] = useState(false);
+  const qrScanned = useCallback(() => {
+    setQrFor(null);
+    setScanned(true);
+  }, []);
   useEffect(() => {
     chrome.storage.local.get([TYPING_KEY, HOLD_NOTICE_KEY]).then((r) => {
       setTypingOnly(r[TYPING_KEY] === true);
@@ -248,7 +271,20 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
     }, () => null);
   }, []);
   const waiting = state.held.length > 0;
-  const steps = ['Scan the form', 'Pair your phone', typingOnly ? 'Customer types answers' : 'Speak the answers', 'Click Fill form'];
+  const steps = ['QR for this page', 'Pair your phone', typingOnly ? 'Customer types answers' : 'Speak the answers', 'Click Fill form'];
+  if (qrFor) {
+    return (
+      <QueueScreen
+        form={qrFor}
+        voice={!typingOnly}
+        request={request}
+        chip={<MinutesChip account={state.account} />}
+        planNote={planBlocked(state.account) ? <PlanMeter account={state.account!} /> : null}
+        onBack={() => setQrFor(null)}
+        onScanned={qrScanned}
+      />
+    );
+  }
   return (
     <Screen
       tips={!typingOnly}
@@ -287,19 +323,45 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
           </button>
         </Banner>
       )}
+      {scanned && (
+        <Banner tone="live" icon={<Check size={16} />}>
+          QR scanned. The answers appear here once the customer presses Send.
+        </Banner>
+      )}
       {waiting && <WaitingCard forms={state.held} site={site} send={send} />}
-      <Button
-        variant="primary"
-        className="w-full"
-        loading={busy}
-        onClick={async () => {
-          setBusy(true);
-          setError(await send({ type: 'START_SESSION', voice: !typingOnly }));
-          setBusy(false);
-        }}
-      >
-        Scan form on this page
-      </Button>
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          variant="primary"
+          className="w-full px-2 whitespace-nowrap"
+          loading={busy}
+          onClick={async () => {
+            setBusy(true);
+            setError(await send({ type: 'START_SESSION', voice: !typingOnly }));
+            setBusy(false);
+          }}
+        >
+          QR for this page
+        </Button>
+        <Button
+          className={`w-full px-2 whitespace-nowrap ${showForms ? 'border-brand text-accent-ink ring-1 ring-brand' : ''}`}
+          aria-expanded={showForms}
+          onClick={() => setShowForms(!showForms)}
+        >
+          QR for other {showForms ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+        </Button>
+      </div>
+      {showForms &&
+        (state.latest.length > 0 ? (
+          <LatestCard
+            forms={state.latest}
+            onPick={(f) => {
+              setScanned(false);
+              setQrFor(f);
+            }}
+          />
+        ) : (
+          <Banner tone="accent">No forms yet. Open a form and press QR for this page once. It then appears here.</Banner>
+        ))}
       <label
         className={`flex cursor-pointer items-start gap-2.5 rounded-lg border bg-card p-2.5 ${typingOnly ? 'border-brand ring-1 ring-brand' : 'border-line'}`}
       >
@@ -333,6 +395,41 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
       )}
       {planBlocked(state.account) && <PlanMeter account={state.account!} />}
     </Screen>
+  );
+}
+
+/** "Used today", "Used yesterday", "Used 6 days ago", by calendar day. */
+function usedAgo(iso: string) {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(new Date()) - midnight(new Date(iso))) / DAY_MS);
+  return days <= 0 ? 'Used today' : days === 1 ? 'Used yesterday' : `Used ${days} days ago`;
+}
+
+/**
+ * Forms this operator scanned lately. QR shows a unique QR code for one customer, from any tab: no portal
+ * login is needed until the customer's turn. The answers then wait under Customer answers waiting.
+ */
+function LatestCard({ forms, onPick }: { forms: LatestForm[]; onPick: (form: LatestForm) => void }) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-header-line bg-card">
+      <h2 className="flex items-center justify-between gap-2 bg-subtle px-2.5 py-1.5 text-[13px] font-bold">
+        Latest forms
+        <span className="text-xs font-medium text-muted">One QR per customer</span>
+      </h2>
+      {forms.map((f) => (
+        <div key={f.source_id} className="flex items-center gap-2 border-t border-row-line px-2.5 py-[7px]">
+          <div className="min-w-0 flex-1">
+            <p className="text-[13.5px] font-semibold break-words">{f.form_name}</p>
+            <p className="text-xs text-muted tabular-nums">
+              {hostOf(f.page_origin)} · {f.field_count} fields · {usedAgo(f.last_used_at)}
+            </p>
+          </div>
+          <Button className="min-h-8 shrink-0 px-3 text-[13px]" onClick={() => onPick(f)}>
+            QR
+          </Button>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -524,67 +621,6 @@ function PlanMeter({ account, inFooter = false }: { account: AccountResponse; in
   );
 }
 
-
-function useCountdown(until: string) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
-  const left = Math.max(0, Math.floor((new Date(until).getTime() - now) / 1000));
-  return { left, text: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` };
-}
-
-/** The same link as the QR code, for a customer who can't scan it (not at the counter any more). */
-function CopyLink({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="grid justify-items-center gap-1 pt-1">
-      <Button
-        className="min-h-8 px-3 text-[13px]"
-        onClick={async () => {
-          await navigator.clipboard.writeText(url);
-          setCopied(true);
-        }}
-      >
-        {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy link'}
-      </Button>
-      <p className="text-center text-xs text-muted">Send this only to this customer. It works once, for 10 minutes.</p>
-    </div>
-  );
-}
-
-/** The QR code with its countdown; `expired` is shown in its place once it runs out. */
-function QrBlock({
-  url,
-  expiresAt,
-  hint,
-  expired,
-  copyLink = false,
-}: {
-  url: string;
-  expiresAt: string;
-  hint: string;
-  expired: React.ReactNode;
-  copyLink?: boolean;
-}) {
-  const [qr, setQr] = useState<string | null>(null);
-  const { left, text } = useCountdown(expiresAt);
-  useEffect(() => {
-    QRCode.toDataURL(url, { margin: 1, width: 360, errorCorrectionLevel: 'M' }).then(setQr);
-  }, [url]);
-  if (left <= 0) return <>{expired}</>;
-  return (
-    <div className="grid justify-items-center gap-1.5 py-1">
-      {qr ? <img src={qr} alt="QR code to open on your phone" className="size-44 rounded-lg bg-white p-1.5" /> : <div className="size-44" />}
-      <p className="text-center text-[13.5px] text-ink">{hint}</p>
-      <p className="flex items-center gap-1 text-xs text-muted tabular-nums">
-        <Clock size={12} /> Expires in {text}
-      </p>
-      {copyLink && <CopyLink url={url} />}
-    </div>
-  );
-}
 
 function QrCard({ state, send, others }: { state: ExtState; send: Send; others: string | null }) {
   const s = state.session!;

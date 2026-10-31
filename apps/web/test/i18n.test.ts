@@ -45,6 +45,16 @@ describe('PDF converter messages', () => {
   });
 });
 
+describe('a customer filling a form in a queue', () => {
+  it('reads every queue message in Tamil', () => {
+    const keys = ['sendToOperator', 'queueSentBody', 'queueOtpNote', 'queueChange', 'queueFilledTitle', 'queueFilledBody', 'queueAckWaiting', 'queueBackToLeave'] as const;
+    for (const key of keys) {
+      expect(translate('ta', key)).not.toBe(translate('en', key));
+      expect(translate('ta', key)).toMatch(/[஀-௿]/);
+    }
+  });
+});
+
 describe('Connect phone again', () => {
   it('the replaced-phone message from the server is shown in Tamil', () => {
     const ta = serverText('ta', MSG.phoneReplaced);

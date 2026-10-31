@@ -30,6 +30,8 @@ export type SessionRow = SessionInfo & {
   created_at: string;
   /** Migration 0022: sent answers wait for the operator until this time. */
   hold_until?: string | null;
+  /** Migration 0023: started from Latest forms, not from a scan. */
+  queued?: boolean;
 };
 
 /** Full field row, including detector extras and analyzer output. */
@@ -67,15 +69,16 @@ export type FieldRow = {
 const BASE_COLUMNS =
   'id, user_id, session_code, status, form_name, page_url, page_origin, page_title, analysis_status, expires_at, paired_at, created_at';
 /**
- * The session columns, newest migration first: 0022 (sent answers on hold), 0021 (voice on or off),
- * 0019 (fields a choice hides), 0005 (Start over, desktop tab state), then the base. A database without
- * a migration yet is read with the next set, and the missing columns get their defaults.
+ * The session columns, newest migration first: 0023 (Queue QR), 0022 (sent answers on hold), 0021 (voice
+ * on or off), 0019 (fields a choice hides), 0005 (Start over, desktop tab state), then the base. A database
+ * without a migration yet is read with the next set, and the missing columns get their defaults.
  */
 const COLUMN_SETS = (() => {
   const v0005 = `${BASE_COLUMNS}, reset_seq, reset_scope, desktop_state, desktop_report`;
   const v0019 = `${v0005}, hidden_fields`;
   const v0021 = `${v0019}, voice_enabled`;
-  return [`${v0021}, hold_until`, v0021, v0019, v0005, BASE_COLUMNS];
+  const v0022 = `${v0021}, hold_until`;
+  return [`${v0022}, queued`, v0022, v0021, v0019, v0005, BASE_COLUMNS];
 })();
 
 /** Defaults for the columns later migrations add, on rows read without them. */
@@ -88,6 +91,7 @@ export function withSessionDefaults(row: Record<string, unknown>): SessionRow {
     hidden_fields: [] as string[],
     voice_enabled: true,
     hold_until: null,
+    queued: false,
     ...row,
   } as SessionRow;
 }
@@ -206,6 +210,7 @@ export const toSessionInfo = (s: SessionRow): SessionInfo => ({
   paired_at: s.paired_at ?? null,
   hidden_fields: s.hidden_fields ?? [],
   voice_enabled: s.voice_enabled ?? true,
+  queued: s.queued ?? false,
 });
 
 export async function getValues(sessionId: string): Promise<SessionValue[]> {

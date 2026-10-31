@@ -259,6 +259,10 @@ function SessionScreen({ code }: { code: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice]);
   const sent = s.session?.status === 'filled';
+  /** A customer in a queue: no form is open on the computer until their turn. */
+  const queued = s.session?.queued === true;
+  /** "Change my answers" was tapped after a Send: the form shows again. */
+  const [changing, setChanging] = useState(false);
   const resetSeq = s.session?.reset_seq ?? 0;
   const values = [...s.valueByKey.values()];
   const files = [...s.files.values()];
@@ -278,7 +282,10 @@ function SessionScreen({ code }: { code: string }) {
       // What this Send covers: anything newer afterwards counts as "not sent yet".
       const mark = sendWatermark(values, files, resetSeq);
       const err = await s.complete();
-      if (!err) setSentUpTo(mark || Date.now());
+      if (!err) {
+        setSentUpTo(mark || Date.now());
+        setChanging(false);
+      }
       return err;
     },
   });
@@ -419,6 +426,30 @@ function SessionScreen({ code }: { code: string }) {
       </Shell>
     );
   }
+  // A customer in a queue who has sent: nothing to do until their turn, then the form is filled. A fill
+  // that put nothing in shows the form again, with its message and Send again.
+  if (queued && sent && !changing && send.ack.kind !== 'nothing') {
+    const filled = send.ack.kind === 'filled';
+    return (
+      <Shell>
+        <Card className="grid justify-items-center gap-2 py-6 text-center">
+          <span className="grid size-13 place-items-center rounded-full bg-live-bg text-live-ink">
+            <Check size={26} />
+          </span>
+          <h1 className="text-[17px] font-semibold">{t(filled ? 'queueFilledTitle' : 'savedTitle')}</h1>
+          <p className="text-sm text-muted">{t(filled ? 'queueFilledBody' : 'queueSentBody')}</p>
+          {!filled && (
+            <p className="w-full rounded-lg bg-warn-bg px-3 py-2 text-sm font-semibold text-warn-ink">{t('queueOtpNote')}</p>
+          )}
+          {!filled && desktop === 'open' && (
+            <Button className="mt-1" onClick={() => setChanging(true)}>
+              {t('queueChange')}
+            </Button>
+          )}
+        </Card>
+      </Shell>
+    );
+  }
   // The form tab on the computer was closed after the customer sent: the answers wait for the operator,
   // and the page opens again if the operator carries the form on in a new tab.
   if (s.session?.desktop_state === 'closed' && s.session.status === 'filled') {
@@ -487,6 +518,8 @@ function SessionScreen({ code }: { code: string }) {
       {resetOpen && (
         <StartOverSheet
           count={filledCount}
+          // Until the operator has used a queue form, it isn't on the computer.
+          phoneOnly={queued && !s.session?.desktop_report}
           onCancel={() => setResetOpen(false)}
           onConfirm={startOver}
         />
@@ -572,6 +605,7 @@ function SessionScreen({ code }: { code: string }) {
       </div>
       <BottomBar
         voice={voice}
+        queued={queued}
         heard={!voice ? null : recording && !recordingTarget ? t('listenAll') : (latestTranscript ?? null)}
         filled={filledCount}
         total={shown.length}
@@ -596,7 +630,7 @@ function SessionScreen({ code }: { code: string }) {
         micDisabled={recorder.state === 'unsupported' || (!recording && (processing > 0 || send.sending))}
         notice={
           leaveWarn
-            ? t('backAgainToLeave')
+            ? t(queued ? 'queueBackToLeave' : 'backAgainToLeave')
             : !recording && recorder.notice
               ? t(RECORDER_NOTICE[recorder.notice])
               : null
@@ -993,9 +1027,12 @@ function BottomBar({
   onMic,
   send,
   voice,
+  queued,
 }: {
   /** false: a typing-only form, no mic (Send takes the whole row). */
   voice: boolean;
+  /** A customer in a queue: the form goes to the operator, not to a form open on the computer. */
+  queued: boolean;
   heard: string | null;
   filled: number;
   total: number;
@@ -1122,12 +1159,12 @@ function BottomBar({
           </div>
         )}
         {/* While speech is still being turned into answers, Send waits (else they'd miss this Send). */}
-        <SendButton send={send} waiting={recording || processing > 0} />
+        <SendButton send={send} waiting={recording || processing > 0} queued={queued} />
       </div>
       {send.error ? (
         <p className="text-xs text-danger-ink">{send.error}</p>
       ) : (
-        <AckLine ack={send.ack} />
+        <AckLine ack={send.ack} queued={queued} />
       )}
     </div>
   );
@@ -1204,7 +1241,7 @@ function useSend({
   };
 }
 
-function SendButton({ send: s, waiting }: { send: SendState; waiting: boolean }) {
+function SendButton({ send: s, waiting, queued }: { send: SendState; waiting: boolean; queued: boolean }) {
   const { t } = useI18n();
   return (
     <button
@@ -1222,7 +1259,7 @@ function SendButton({ send: s, waiting }: { send: SendState; waiting: boolean })
         <>
           <Send size={18} className="shrink-0" />
           {!s.sent
-            ? t('sendToDesktop')
+            ? t(queued ? 'sendToOperator' : 'sendToDesktop')
             : s.unsent === 1
               ? t('sendOneChange')
               : s.unsent > 1
@@ -1269,11 +1306,13 @@ function useDesktopAck(sent: boolean, report: DesktopReport | null, sends: numbe
   return { kind: 'waiting' };
 }
 
-function AckLine({ ack }: { ack: Ack }) {
+function AckLine({ ack, queued }: { ack: Ack; queued: boolean }) {
   const { t } = useI18n();
   switch (ack.kind) {
     case 'waiting':
-      return (
+      return queued ? (
+        <p className="text-xs text-accent-ink">{t('queueAckWaiting')}</p>
+      ) : (
         <p className="text-xs text-accent-ink">
           {t('ackWaitingFill')} {t('captchaNote')}
         </p>
@@ -1299,10 +1338,13 @@ function AckLine({ ack }: { ack: Ack }) {
 /** Start over: the sheet itself is the confirmation (it says it can't be undone). */
 function StartOverSheet({
   count,
+  phoneOnly,
   onCancel,
   onConfirm,
 }: {
   count: number;
+  /** No form on the computer to clear. */
+  phoneOnly: boolean;
   onCancel: () => void;
   onConfirm: (scope: ResetScope) => Promise<string | null>;
 }) {
@@ -1331,14 +1373,16 @@ function StartOverSheet({
         >
           {t('clearPhone')}
         </Button>
-        <Button
-          className="w-full"
-          loading={busy === 'both'}
-          disabled={!!busy}
-          onClick={() => run('both')}
-        >
-          {t('clearBoth')}
-        </Button>
+        {!phoneOnly && (
+          <Button
+            className="w-full"
+            loading={busy === 'both'}
+            disabled={!!busy}
+            onClick={() => run('both')}
+          >
+            {t('clearBoth')}
+          </Button>
+        )}
         <Button variant="ghost" className="w-full" disabled={!!busy} onClick={onCancel}>
           {t('cancel')}
         </Button>
