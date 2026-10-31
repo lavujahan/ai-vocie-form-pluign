@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/auth';
 import { isCompleted, isMissingCompletions } from '@/lib/completions';
 import { fail, must, route } from '@/lib/http';
 import { removeSessionFiles } from '@/lib/files/storage';
+import { isHeld } from '@/lib/session-rules';
 import { getSessionByCode } from '@/lib/sessions';
 import { db } from '@/lib/supabase-admin';
 
@@ -41,8 +42,9 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
     } else must(res);
   }
   if (body.report) await recordCompletion(session, body.report.filled);
-  // The form tab is closed: nothing can use the uploaded files any more.
-  if (body.state === 'closed') {
+  // The form tab is closed: nothing can use the uploaded files any more, unless the customer sent the
+  // form and it waits for the operator (the website logged out, the form carries on in a new tab).
+  if (body.state === 'closed' && !isHeld(session)) {
     await removeSessionFiles(session.id);
     await db().from('field_files').delete().eq('session_id', session.id);
   }

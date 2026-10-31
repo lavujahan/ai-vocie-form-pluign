@@ -98,4 +98,4 @@ Put the document on a dark table, in good light, and fill the frame.
 
 ## Privacy
 
-Voice recordings are never stored. Answers are deleted within about an hour, and files as soon as the computer has them. Read the full [privacy policy]({{SITE}}/privacy).
+Voice recordings are never stored. Answers are deleted within about an hour, or about 2 hours after your customer sends them, and files as soon as the computer has them. Read the full [privacy policy]({{SITE}}/privacy).

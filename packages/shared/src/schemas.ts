@@ -672,6 +672,24 @@ export type SessionInfo = {
 /** "Connect phone again": the same QR code works once more until `expires_at` (answers are kept). */
 export type ReconnectResponse = { expires_at: string };
 
+/** A form a customer has sent, waiting for the operator (migration 0022). */
+export type HeldForm = {
+  session_code: string;
+  form_name: string;
+  page_origin: string;
+  /** The customer's name, to tell copies of a form apart (null if the form has no name answer). */
+  customer: string | null;
+  /** Last 4 digits of the customer's phone number. */
+  phone_last4: string | null;
+  sent_at: string;
+  /** The answers are deleted at this time. */
+  hold_until: string;
+  /** When the computer last filled it (null: not yet). */
+  filled_at: string | null;
+};
+
+export type HeldFormsResponse = { forms: HeldForm[] };
+
 export type PairResponse = {
   token: string;
   token_expires_at: string;

@@ -6,6 +6,8 @@ import type {
   DictateResponse,
   FieldFile,
   DesktopUpdateRequest,
+  HeldForm,
+  HeldFormsResponse,
   LoginResponse,
   PublicUser,
   ReconnectResponse,
@@ -42,10 +44,12 @@ import { api, ApiError } from './api';
 import {
   assertRoom,
   changesSince,
+  dropSession,
   endTab,
   hiddenFields,
   mergeFill,
   migrate,
+  moveTab,
   otherSessions,
   patchTab,
   reopenQr,
@@ -65,6 +69,8 @@ type Persisted = { auth: Auth | null; tabs: Tabs };
 let state: Persisted = { auth: null, tabs: {} };
 /** The signed-in user's plan; fetched when a popup opens, after sign-in and when the server refuses for the plan. */
 let account: AccountResponse | null = null;
+/** Forms customers sent that still wait; fetched when a popup opens on a tab without a form. */
+let heldForms: HeldForm[] = [];
 /** Open popups, and the tab each one was opened on. */
 const ports = new Map<chrome.runtime.Port, number | undefined>();
 
@@ -90,6 +96,7 @@ function publicState(tabId: number | undefined): ExtState {
     auth: state.auth ? { user: state.auth.user, expires_at: state.auth.expires_at } : null,
     account: state.auth ? account : null,
     session: t?.session ?? null,
+    held: state.auth ? heldForms : [],
     unfilledChanges: t ? changesSince(t.session.snapshot, t.filledUpTo) : null,
     live: !!t && !!channels.get(t.session.session_id)?.live,
     lastFill: t?.lastFill ?? null,
@@ -144,6 +151,7 @@ async function logout() {
   await Promise.all(Object.values(state.tabs).map((t) => reportDesktop(t.session, { state: 'closed' })));
   stopRealtime();
   account = null;
+  heldForms = [];
   await chrome.storage.session.remove(TAMIL_TEXT_KEY);
   await save({ auth: null, tabs: {} });
 }
@@ -159,6 +167,20 @@ async function refreshAccount() {
     broadcast();
   } catch {
     // offline, or an older server without /api/account
+  }
+}
+
+/** Reloads the forms customers sent that still wait. Errors keep the last list. */
+async function refreshHeld() {
+  const auth = state.auth;
+  if (!auth) return;
+  try {
+    const { forms } = await api<HeldFormsResponse>('/api/sessions/held', { token: auth.token });
+    if (state.auth?.token !== auth.token) return; // signed out meanwhile
+    heldForms = forms;
+    broadcast();
+  } catch {
+    // offline, or an older server without the list
   }
 }
 
@@ -672,6 +694,74 @@ function stopRealtime() {
 
 // ---------- popup requests ----------
 
+/** A session leaves `tabId`: the page stops watching for it and the icon stops counting its answers. */
+function releaseTab(tabId: number) {
+  void chrome.tabs.sendMessage(tabId, { type: 'WATCH', off: true } satisfies ContentRequest).catch(() => null);
+  void chrome.action.setBadgeText({ tabId, text: '' }).catch(() => null);
+}
+
+/**
+ * "Use" on a waiting form: the same session carries on in this tab, once the page is shown to be this
+ * form. Until then nothing changes, and the form stays in the list.
+ */
+async function resumeSession(tabId: number | undefined, code: string) {
+  if (!state.auth) throw new Error('Please sign in');
+  const tab = tabId === undefined ? null : await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.id || !/^(https?|file):/.test(tab.url ?? '')) throw new Error('Open the form page first');
+  if (!heldForms.some((f) => f.session_code === code)) await refreshHeld(); // the worker restarted
+  const held = heldForms.find((f) => f.session_code === code);
+  if (!held) throw new Error('These answers are no longer available.');
+  const notThisForm = `This page isn't ${held.form_name}. Open that form, then click Use again.`;
+
+  const snap = await api<SessionSnapshot>(`/api/sessions/${code}`, { token: state.auth.token });
+  const site = siteOf(tab.url ?? '');
+  if (site !== siteOf(snap.session.page_url)) throw new Error(notThisForm);
+  const siteAccess = await ensureSiteScript(site).catch(() => false);
+  let scan: ScanResult;
+  try {
+    scan = await sendToTab<ScanResult>(tab.id, { type: 'SCAN' });
+  } catch {
+    throw new Error("Can't read this page. Reload it and try again.");
+  }
+  const keys = snap.fields.map((f) => f.field_key);
+  if (!scan?.schema?.fields?.some((f) => keys.includes(f.field_key))) throw new Error(notThisForm);
+  assertRoom(dropSession(state.tabs, snap.session.id), tab.id);
+
+  const resumed = await api<CreateSessionResponse>(`/api/sessions/${code}/resume`, { method: 'POST', token: state.auth.token });
+  const from = tabOfSession(state.tabs, resumed.session_id);
+  const session: ActiveSession = {
+    ...resumed,
+    tab_id: tab.id,
+    field_count: snap.fields.length,
+    page_site: site,
+    snapshot: snap,
+    reconnect: true,
+    resumed: true,
+    site_access: siteAccess,
+    voice_enabled: snap.session.voice_enabled,
+  };
+  await save({ tabs: moveTab(state.tabs, tab.id, session) });
+  if (from !== null && from !== tab.id) releaseTab(from);
+  await ensureRealtime();
+  await refreshSnapshot(tab.id);
+  await setTab(tab.id, { notice: `${held.customer ?? 'The customer'}'s answers are back. Check this is the right form, then click Fill form.` });
+  void watchTab(tab.id, keys);
+  await refreshHeld();
+}
+
+/** × on a waiting form: its answers are deleted, also from a tab that still holds it. */
+async function discardHeld(code: string) {
+  if (!state.auth) throw new Error('Please sign in');
+  await api(`/api/sessions/${code}/held`, { method: 'DELETE', token: state.auth.token });
+  const hit = Object.entries(state.tabs).find(([, t]) => t.session.session_code === code);
+  if (hit) {
+    await save({ tabs: endTab(state.tabs, Number(hit[0])) });
+    await ensureRealtime();
+    releaseTab(Number(hit[0]));
+  }
+  await refreshHeld();
+}
+
 /** Resolves to the text of a DICTATE; other requests answer through the state. */
 async function handle(req: PopupRequest, tabId: number | undefined): Promise<string | void> {
   switch (req.type) {
@@ -690,7 +780,7 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       account = null;
       await save({ auth: { token: r.token, expires_at: r.expires_at, user: r.user } });
       await ensureRealtime();
-      await refreshAccount();
+      await Promise.all([refreshAccount(), refreshHeld()]);
       return;
     }
 
@@ -769,6 +859,14 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       await save({ tabs: reopenQr(state.tabs, tabId, res.expires_at) });
       return;
     }
+
+    case 'RESUME_SESSION':
+      await resumeSession(tabId, req.session_code);
+      return;
+
+    case 'DISCARD_HELD':
+      await discardHeld(req.session_code);
+      return;
 
     case 'DICTATE': {
       if (!state.auth) throw new Error('Please sign in');
@@ -852,6 +950,8 @@ chrome.runtime.onConnect.addListener((port) => {
     await ensureRealtime();
     port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
     void refreshAccount();
+    // No form in this tab: the popup lists the forms that wait, before anything is scanned.
+    if (!tabOf(tabId)) void refreshHeld();
     // Opening the popup always shows the latest values, even if a live event was missed.
     if (tabId !== undefined) await refreshSnapshot(tabId);
   });

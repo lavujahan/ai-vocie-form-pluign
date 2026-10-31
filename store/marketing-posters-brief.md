@@ -37,7 +37,7 @@ The posters can be a bit bolder than the store screenshots: bigger headlines, a 
 You are designing website marketing posters for a real product called "Voice2Fill" (Chrome extension name: "Voice Form Filler"). The audience is e-Sevai / common service centre operators, browsing-centre owners and data-entry staff in Tamil Nadu, plus the citizens they serve.
 
 WHAT THE PRODUCT DOES (do not invent anything else)
-A Chrome extension reads the form on a desktop web page and shows a QR code. The applicant scans it with their own phone, taps a red mic and speaks the answers in Tamil, English or Tanglish. The answers appear on the computer's form (in English), and each filled field gets a yellow outline. Unclear answers come back to the phone as "Did you mean…?" buttons. Photos and documents are taken on the phone, converted to the site's size rules (e.g. "JPG · max 50 KB") and put into the form. Up to 5 forms can be filled at once, one per browser tab, each with its own QR code and phone. The operator always checks and submits the form; it never submits by itself. Voice is never stored; answers are deleted within about an hour; photos are deleted once the computer receives them.
+A Chrome extension reads the form on a desktop web page and shows a QR code. The applicant scans it with their own phone, taps a red mic and speaks the answers in Tamil, English or Tanglish. The answers appear on the computer's form (in English), and each filled field gets a yellow outline. Unclear answers come back to the phone as "Did you mean…?" buttons. Photos and documents are taken on the phone, converted to the site's size rules (e.g. "JPG · max 50 KB") and put into the form. Up to 5 forms can be filled at once, one per browser tab, each with its own QR code and phone. The operator always checks and submits the form; it never submits by itself. Voice is never stored; answers are deleted within about 2 hours; photos are deleted once the computer receives them.
 
 BRAND
 - Name on posters: "Voice2Fill". Mark: white Lucide "mic" icon (outline, 2px stroke, round caps) on a #1E4E9C rounded square.
@@ -188,7 +188,7 @@ Rows (Tamil line first, English under it in smaller muted text):
    Answer: "Screen படிக்க தெரிஞ்சா யார் வேணாலும் பண்ணலாம்" / "Anyone who can read the screen can run the counter"
 5. icon "message-circle-warning" → "shield-check"
    Worry: "Aadhaar, photo எல்லாம் உங்க WhatsApp-ல" / "Citizens' Aadhaar and photos piling up in your WhatsApp"
-   Answer: "Photo நேரா form-க்கு, அப்புறம் delete" / "Photos go straight to the form, then deleted. Answers deleted within about an hour."
+   Answer: "Photo நேரா form-க்கு, அப்புறம் delete" / "Photos go straight to the form, then deleted. Answers deleted within about 2 hours."
 
 Footer line, muted, centred: "You check. You submit. Voice2Fill never submits for you."
 Voice2Fill mark bottom right.

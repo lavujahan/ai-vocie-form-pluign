@@ -186,7 +186,7 @@ When documents are forwarded through personal chat apps, they stay on staff phon
 With Voice2Fill:
 • Photos and PDFs go straight from the applicant's phone into the form, and are then deleted.
 • Voice recordings are never stored.
-• Spoken answers are deleted automatically within about an hour.
+• Spoken answers are deleted automatically within about an hour, or about 2 hours after the customer sends them.
 
 ஆவணங்கள் நேரடியாக form-க்குச் சென்று, பின்னர் நீக்கப்படுகின்றன. ஊழியர்களின் phone-இல் எதுவும் தங்குவதில்லை.
 
@@ -259,7 +259,7 @@ FEATURES AT A GLANCE
 PRIVACY
 
 • Voice recordings are never stored. They are processed and discarded in the same request.
-• Spoken answers and their text are deleted automatically within about an hour.
+• Spoken answers and their text are deleted automatically within about an hour, or about 2 hours after the customer sends them.
 • Uploaded photos and PDFs are stored privately and deleted as soon as the computer receives them, or when the tab closes.
 • QR codes work once and expire after 10 minutes. A phone link lasts 30 minutes.
 • The extension reads nothing on a website until you tap "Scan form on this page".
@@ -334,7 +334,7 @@ Then tick all three certifications:
 The User Data FAQ requires a **clear notice inside the extension, and a user action to agree, before any data is collected**. A notice that is only in the privacy policy or on the store page doesn't count.
 - **Currently:** the sign-in and Scan cards have no notice, so this has to be fixed before you submit.
 - **Fix:** add a short notice to the sign-in card (`SignIn` in `apps/extension/src/popup/App.tsx`), linked to the privacy policy. Signing in then counts as agreeing. Example wording:
-  > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about an hour. With Tamil typing, your voice goes to Sarvam AI from this computer's mic and is not stored. [Privacy policy]
+  > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about an hour, or about 2 hours after your customer sends them. With Tamil typing, your voice goes to Sarvam AI from this computer's mic and is not stored. [Privacy policy]
 - Clicking "Scan form on this page" afterwards is the action that starts collection, so the notice must appear before the first scan.
 
 ## Minimum permissions (reviewers check this)
@@ -363,7 +363,7 @@ The store will not accept the listing without a privacy policy URL. Host one (fo
 
 It must also say:
 - **What is collected, how it is used and when it is shared:** match the data table above.
-- **How long it is kept:** audio is never stored; transcripts and values are deleted within about an hour; files are deleted when the computer has them; session records are kept 30 days (after step 1.6).
+- **How long it is kept:** audio is never stored; transcripts and values are deleted within about an hour, or about 2 hours after the customer sends them; files are deleted when the computer has them, or with the answers; session records are kept 30 days (after step 1.6).
 - **How it is protected:** HTTPS/WSS for every connection; Supabase encrypts data at rest; QR codes work once and expire.
 - **Limited Use:** "The use of information received from this extension follows the Chrome Web Store User Data Policy, including the Limited Use requirements."
 - **Who to contact** about access or deletion.
@@ -448,7 +448,7 @@ Don't paste this table or name these extensions anywhere in the listing: Google'
 | Tamil / Tanglish | No | No | No | **Yes** |
 | File/photo uploads | No | No | No | **Yes, resized to site rules** |
 | Cascading dropdowns | Delays only | No | No | **Yes** |
-| Stores your personal data | Yes, synced online | Yes, synced | Locally | **Answers auto-deleted within ~1 hour** |
+| Stores your personal data | Yes, synced online | Yes, synced | Locally | **Answers auto-deleted within ~2 hours** |
 | Multi-step forms | Auto-click | — | Click Fill on each step | **New fields appear on phone automatically** |
 
 Competitor descriptions focus on saving data so it can be reused. Our listing leads with what they can't do: filling a form for a new person by voice, in Tamil, including photos, without storing anything.

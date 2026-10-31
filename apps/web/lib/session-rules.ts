@@ -16,6 +16,7 @@ export const MSG = {
   planEnded: 'Your plan has ended. Renew it to keep filling forms by voice.',
   minutesUsed: 'You have used all the voice minutes in your plan. Renew it or add minutes to continue.',
   voiceOff: 'Voice is off for this form. Tap Type on a field to fill it.',
+  heldGone: 'These answers are no longer available. Scan the form again.',
 } as const;
 
 type SessionState = { status: SessionStatus; desktop_state: DesktopState; reset_seq: number };
@@ -30,6 +31,11 @@ export function phoneWriteBlock(s: SessionState, seq?: number): string | null {
 /** A typing-only form (the operator turned voice off): recordings are refused before any AI is spent. */
 export function voiceBlock(s: { voice_enabled?: boolean }): string | null {
   return s.voice_enabled === false ? MSG.voiceOff : null;
+}
+
+/** Sent answers still waiting for the operator (migration 0022): they survive a closed form tab. */
+export function isHeld(s: { status: SessionStatus; hold_until?: string | null }, now = Date.now()): boolean {
+  return s.status !== 'expired' && !!s.hold_until && Date.parse(s.hold_until) > now;
 }
 
 /** Why "Send to desktop" isn't possible right now (null = allowed). */

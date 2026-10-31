@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertRoom, changesSince, endTab, hiddenFields, MAX_TABS, mergeFill, migrate, otherSessions, patchTab, reopenQr, startTab, tabOfSession, watermarkOf, type Tabs } from '../src/background/tabs';
+import { assertRoom, changesSince, dropSession, endTab, hiddenFields, MAX_TABS, mergeFill, migrate, moveTab, otherSessions, patchTab, reopenQr, startTab, tabOfSession, watermarkOf, type Tabs } from '../src/background/tabs';
 import { siteOf, type ActiveSession } from '../src/messages';
 
 const session = (tab_id: number, id = `s${tab_id}`): ActiveSession => ({
@@ -12,6 +12,44 @@ const session = (tab_id: number, id = `s${tab_id}`): ActiveSession => ({
   field_count: 16,
   page_site: 'https://tnedistrict.tn.gov.in',
   snapshot: null,
+});
+
+describe('carrying a form on in another tab', () => {
+  it('leaves the old tab, so the form is never in two tabs', () => {
+    let tabs: Tabs = startTab(startTab({}, 11, session(11)), 22, session(22));
+    tabs = patchTab(tabs, 11, { canUndo: true, notice: 'old' });
+    tabs = moveTab(tabs, 33, { ...session(11), tab_id: 33 });
+    expect(Object.keys(tabs).sort()).toEqual(['22', '33']);
+    expect(tabOfSession(tabs, 's11')).toBe(33);
+    // A fresh start: the new tab's page has nothing filled yet.
+    expect(tabs[33]).toMatchObject({ canUndo: false, filledUpTo: null, lastFill: null });
+  });
+
+  it('works for a form no tab holds any more', () => {
+    const tabs = moveTab({}, 33, session(33, 'gone'));
+    expect(tabOfSession(tabs, 'gone')).toBe(33);
+  });
+
+  it("uses the old tab's place when every place is taken", () => {
+    let tabs: Tabs = {};
+    for (let id = 1; id <= MAX_TABS; id++) tabs = startTab(tabs, id, session(id));
+    expect(() => assertRoom(tabs, 99)).toThrow();
+    expect(() => assertRoom(dropSession(tabs, 's1'), 99)).not.toThrow();
+    const moved = moveTab(tabs, 99, { ...session(1), tab_id: 99 });
+    expect(Object.keys(moved)).toHaveLength(MAX_TABS);
+    expect(tabOfSession(moved, 's1')).toBe(99);
+  });
+
+  it('refuses a form from nowhere when every place is taken', () => {
+    let tabs: Tabs = {};
+    for (let id = 1; id <= MAX_TABS; id++) tabs = startTab(tabs, id, session(id));
+    expect(() => moveTab(tabs, 99, session(99, 'new'))).toThrow();
+  });
+
+  it('dropping a form no tab holds changes nothing', () => {
+    const tabs = startTab({}, 11, session(11));
+    expect(dropSession(tabs, 'nope')).toBe(tabs);
+  });
 });
 
 describe('one form session per tab', () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { AlertTriangle, Check, Clock, Loader2, Pencil, Smartphone } from 'lucide-react';
-import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, type AccountResponse, type FieldFile, type SessionField } from '@vff/shared';
+import { AlertTriangle, Check, Clock, Copy, Loader2, Pencil, Smartphone, X } from 'lucide-react';
+import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, SENT_HOLD_MIN, type AccountResponse, type FieldFile, type HeldForm, type SessionField } from '@vff/shared';
 import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
 import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { groupFields, type FieldGroup, type FieldItem } from './groups';
@@ -55,7 +55,7 @@ function useExtState() {
    * (once; already-allowed sites don't ask), so the form's next pages fill too. Saying No still scans this page.
    */
   const request = useCallback(async (req: PopupRequest): Promise<PopupResponse> => {
-    if (req.type === 'START_SESSION' && site.current) {
+    if ((req.type === 'START_SESSION' || req.type === 'RESUME_SESSION') && site.current) {
       await chrome.permissions.request({ origins: [`${site.current}/*`] }).catch(() => false);
     }
     const res = (await chrome.runtime.sendMessage({ ...req, tab_id: tabId.current })) as PopupResponse;
@@ -96,6 +96,10 @@ const TypingChip = () => (
 
 /** The operator's last choice, kept for the next scan. */
 const TYPING_KEY = 'vf-typing-only';
+/** The notice about the longer hold of sent answers was closed (shown once, privacy policy section 11). */
+const HOLD_NOTICE_KEY = 'vf-hold-notice-seen';
+
+const HOLD_HOURS = SENT_HOLD_MIN / 60;
 
 export function App() {
   const { state, send, request, site } = useExtState();
@@ -221,7 +225,8 @@ function SignIn({ send }: { send: Send }) {
       {/* Chrome Web Store: data use must be disclosed in the product, before collection, and agreed to by an action. */}
       <p className="border-t border-line pt-3 text-xs text-muted">
         When you scan a form, its page address and fields are sent to Voice2Fill. Your spoken answers are turned
-        into text by Sarvam AI and OpenAI and deleted within about an hour. With Tamil typing, your voice goes to
+        into text by Sarvam AI and OpenAI and deleted within about an hour, or about {HOLD_HOURS} hours after your
+        customer sends them. With Tamil typing, your voice goes to
         Sarvam AI from this computer's mic and is not stored. By signing in you agree to this.{' '}
         <a href={PRIVACY_URL} target="_blank" rel="noreferrer" className="text-accent-ink underline underline-offset-2">
           Privacy policy
@@ -235,9 +240,14 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [typingOnly, setTypingOnly] = useState(false);
+  const [holdNotice, setHoldNotice] = useState(false);
   useEffect(() => {
-    chrome.storage.local.get(TYPING_KEY).then((r) => setTypingOnly(r[TYPING_KEY] === true), () => null);
+    chrome.storage.local.get([TYPING_KEY, HOLD_NOTICE_KEY]).then((r) => {
+      setTypingOnly(r[TYPING_KEY] === true);
+      setHoldNotice(r[HOLD_NOTICE_KEY] !== true);
+    }, () => null);
   }, []);
+  const waiting = state.held.length > 0;
   const steps = ['Scan the form', 'Pair your phone', typingOnly ? 'Customer types answers' : 'Speak the answers', 'Click Fill form'];
   return (
     <Screen
@@ -261,6 +271,23 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
           <span className="min-w-0 truncate font-medium">{hostOf(site)}</span>
         </p>
       )}
+      {holdNotice && (
+        <Banner tone="accent">
+          New: answers your customer has sent are now kept for {HOLD_HOURS} hours, so you can finish a form after a website
+          logs you out. Other answers are still deleted within about an hour.{' '}
+          <button
+            type="button"
+            className="font-medium underline underline-offset-2"
+            onClick={() => {
+              setHoldNotice(false);
+              void chrome.storage.local.set({ [HOLD_NOTICE_KEY]: true });
+            }}
+          >
+            OK
+          </button>
+        </Banner>
+      )}
+      {waiting && <WaitingCard forms={state.held} site={site} send={send} />}
       <Button
         variant="primary"
         className="w-full"
@@ -292,18 +319,108 @@ function StartCard({ state, send, site, others }: { state: ExtState; send: Send;
       </label>
       {/* A plan refusal is already explained by the plan note. */}
       {error && !planBlocked(state.account) && <p className="text-xs text-danger-ink">{error}</p>}
-      <ol className="grid grid-cols-2 gap-1.5">
-        {steps.map((step, i) => (
-          <li key={step} className="flex items-center gap-1.5 text-[12.5px] text-muted">
-            <span className="grid size-[18px] shrink-0 place-items-center rounded-full bg-accent-bg text-[11px] font-semibold text-accent-ink">
-              {i + 1}
-            </span>
-            {step}
-          </li>
-        ))}
-      </ol>
+      {!waiting && (
+        <ol className="grid grid-cols-2 gap-1.5">
+          {steps.map((step, i) => (
+            <li key={step} className="flex items-center gap-1.5 text-[12.5px] text-muted">
+              <span className="grid size-[18px] shrink-0 place-items-center rounded-full bg-accent-bg text-[11px] font-semibold text-accent-ink">
+                {i + 1}
+              </span>
+              {step}
+            </li>
+          ))}
+        </ol>
+      )}
       {planBlocked(state.account) && <PlanMeter account={state.account!} />}
     </Screen>
+  );
+}
+
+const clock = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+/** "1 h 42 left", "25 min left". */
+function timeLeft(until: string) {
+  const min = Math.max(1, Math.round((Date.parse(until) - Date.now()) / 60_000));
+  return min < 60 ? `${min} min left` : `${Math.floor(min / 60)} h ${min % 60} left`;
+}
+
+/**
+ * The last forms customers sent, kept for the operator when a website logs out before the form is
+ * filled. Use carries one on in this tab; its site must be the form's. × deletes the answers now.
+ */
+function WaitingCard({ forms, site, send }: { forms: HeldForm[]; site: string | null; send: Send }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [asking, setAsking] = useState<HeldForm | null>(null);
+
+  async function act(type: 'RESUME_SESSION' | 'DISCARD_HELD', code: string) {
+    setBusy(code);
+    setAsking(null);
+    setError(await send({ type, session_code: code }));
+    setBusy(null);
+  }
+
+  return (
+    <section className="overflow-hidden rounded-lg border-2 border-brand bg-card">
+      <h2 className="flex items-center justify-between gap-2 bg-accent-bg px-2.5 py-1.5 text-[13px] font-bold text-accent-ink">
+        Customer answers waiting
+        <span className="min-w-5 rounded-full bg-brand px-1.5 text-center text-xs text-brand-ink tabular-nums">{forms.length}</span>
+      </h2>
+      {forms.map((f) => {
+        const here = !site || f.page_origin === site;
+        const name = f.customer ?? 'Customer';
+        return (
+          <div key={f.session_code} className="flex items-center gap-2 border-t border-row-line px-2.5 py-[7px]">
+            <div className={`min-w-0 flex-1 ${here ? '' : 'opacity-65'}`}>
+              <p className="flex flex-wrap items-baseline gap-x-1.5 text-[13.5px] font-semibold">
+                <span className="min-w-0 break-words">{name}</span>
+                {f.phone_last4 && <span className="text-xs font-normal text-muted tabular-nums">•••• {f.phone_last4}</span>}
+                {f.filled_at && <Pill>Filled {clock(f.filled_at)}</Pill>}
+              </p>
+              <p className="text-xs text-muted tabular-nums">
+                {f.form_name} · {here ? `Sent ${clock(f.sent_at)} · ${timeLeft(f.hold_until)}` : `Open ${hostOf(f.page_origin)} to use this`}
+              </p>
+            </div>
+            <Button
+              variant={here && !f.filled_at ? 'primary' : 'outline'}
+              className="min-h-8 shrink-0 px-3 text-[13px]"
+              disabled={!here || (!!busy && busy !== f.session_code)}
+              loading={busy === f.session_code}
+              onClick={() => act('RESUME_SESSION', f.session_code)}
+            >
+              Use
+            </Button>
+            <button
+              type="button"
+              aria-label={`Delete ${name}'s answers`}
+              title="Delete these answers"
+              className="-ml-1 grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-subtle focus-visible:outline-2 focus-visible:outline-accent-ink"
+              onClick={() => setAsking(f)}
+            >
+              <X size={15} />
+            </button>
+          </div>
+        );
+      })}
+      {(asking || error) && (
+        <div className="grid gap-2 border-t border-row-line p-2">
+          {asking ? (
+            <>
+              <Banner tone="warn">Delete {asking.customer ?? 'this customer'}'s answers now? This can't be undone.</Banner>
+              <div className="flex justify-end gap-1.5">
+                <Button className="min-h-8 px-2.5 text-[13px]" onClick={() => setAsking(null)}>
+                  Keep
+                </Button>
+                <Button variant="danger" className="min-h-8 px-2.5 text-[13px]" onClick={() => act('DISCARD_HELD', asking.session_code)}>
+                  Delete
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Banner tone="danger">{error}</Banner>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -418,8 +535,39 @@ function useCountdown(until: string) {
   return { left, text: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` };
 }
 
+/** The same link as the QR code, for a customer who can't scan it (not at the counter any more). */
+function CopyLink({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="grid justify-items-center gap-1 pt-1">
+      <Button
+        className="min-h-8 px-3 text-[13px]"
+        onClick={async () => {
+          await navigator.clipboard.writeText(url);
+          setCopied(true);
+        }}
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy link'}
+      </Button>
+      <p className="text-center text-xs text-muted">Send this only to this customer. It works once, for 10 minutes.</p>
+    </div>
+  );
+}
+
 /** The QR code with its countdown; `expired` is shown in its place once it runs out. */
-function QrBlock({ url, expiresAt, hint, expired }: { url: string; expiresAt: string; hint: string; expired: React.ReactNode }) {
+function QrBlock({
+  url,
+  expiresAt,
+  hint,
+  expired,
+  copyLink = false,
+}: {
+  url: string;
+  expiresAt: string;
+  hint: string;
+  expired: React.ReactNode;
+  copyLink?: boolean;
+}) {
   const [qr, setQr] = useState<string | null>(null);
   const { left, text } = useCountdown(expiresAt);
   useEffect(() => {
@@ -433,6 +581,7 @@ function QrBlock({ url, expiresAt, hint, expired }: { url: string; expiresAt: st
       <p className="flex items-center gap-1 text-xs text-muted tabular-nums">
         <Clock size={12} /> Expires in {text}
       </p>
+      {copyLink && <CopyLink url={url} />}
     </div>
   );
 }
@@ -642,6 +791,7 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
             url={s.qr_url}
             expiresAt={s.expires_at}
             hint="Scan with your phone. Answers so far are kept."
+            copyLink
             expired={
               <div className="grid justify-items-center gap-2 py-2 text-center">
                 <p className="text-sm text-muted">This QR code has expired.</p>
@@ -656,6 +806,11 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
       {planBlocked(state.account) && <PlanMeter account={state.account!} />}
       <Progress done={groups.filledCount} total={groups.total} label="filled" />
       {banner}
+      {s.resumed && !waiting && (
+        <Button className="w-full" loading={busy === 'reconnect'} onClick={() => act('RECONNECT')}>
+          Customer needs to correct
+        </Button>
+      )}
       {groups.look.length > 0 && (
         <GroupCard title="Needs a look" count={groups.look.length} tone="warn">
           {groups.look.map((it) => row(it, 'look'))}

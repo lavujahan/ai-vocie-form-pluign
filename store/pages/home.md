@@ -53,7 +53,7 @@ No app to install on the phone. It works in the phone's browser.
 ## Your data
 
 - Voice recordings are never stored.
-- Answers and their text are deleted automatically within about an hour.
+- Answers and their text are deleted automatically within about an hour, or about 2 hours after your customer sends them.
 - Uploaded files are deleted as soon as the computer receives them.
 - Nothing is sold or used for advertising.
 

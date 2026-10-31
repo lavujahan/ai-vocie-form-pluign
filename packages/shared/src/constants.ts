@@ -2,6 +2,12 @@
 export const PAIR_CODE_TTL_MIN = 10;
 /** Phone session JWT lifetime, longer than the code so a slow user keeps Realtime. */
 export const SESSION_JWT_TTL_MIN = 30;
+/** Answers a customer has sent wait this long for the operator (a site's logout must not lose them). */
+export const SENT_HOLD_MIN = 120;
+/** Picking up waiting answers leaves at least this long to fill the form. */
+export const RESUME_HOLD_MIN = 30;
+/** Waiting forms listed in the extension. */
+export const MAX_HELD_FORMS = 5;
 /** Extension / admin user JWT lifetime. */
 export const USER_JWT_TTL_HOURS = 12;
 

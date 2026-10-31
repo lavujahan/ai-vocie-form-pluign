@@ -9,7 +9,7 @@ Before publishing:
 
 # Privacy policy: Voice Form Filler
 
-**Effective date:** 23 October 2026
+**Effective date:** 31 October 2026
 
 Voice Form Filler ("the service") is run by {{COMPANY}} ("we", "us"). It has two parts:
 - the **Chrome extension**, which reads a form on your computer and fills it in;
@@ -21,7 +21,7 @@ This policy explains what data the service handles, why, who it is shared with, 
 
 - We use your data only to fill the form you chose. We never sell it, use it for advertising or use it to decide on credit or loans.
 - Voice recordings are never stored. They are turned into text and thrown away.
-- Your spoken answers and their text are deleted automatically, within about an hour of starting a form.
+- Your spoken answers and their text are deleted automatically, within about an hour of starting a form. Answers your customer has sent are kept for about 2 hours after sending, so a form can be finished if a website logs you out.
 - Uploaded photos and documents are deleted as soon as the computer receives them.
 - The extension never submits a form. You check it and submit it yourself.
 
@@ -71,8 +71,8 @@ These providers may process data on servers outside India.
 | Data | Kept for |
 | --- | --- |
 | Voice recordings | Not stored. Only held in memory while it is being converted to text. |
-| What you said (text) and the field values | Deleted automatically about 40 to 60 minutes after the form session starts. "Start over" deletes them straight away. |
-| Photos and documents | Deleted as soon as the computer has the file or the website refuses it. Also deleted on "Start over", when the form tab is closed, or when the session expires. |
+| What you said (text) and the field values | Deleted automatically about 40 to 60 minutes after the form session starts. Once the customer presses Send, about 2 hours after the last Send. "Start over" deletes them straight away, and so does the × beside a waiting form in the extension. |
+| Photos and documents | Deleted as soon as the computer has the file or the website refuses it. Also deleted on "Start over", with the × beside a waiting form, when the session expires, and when the form tab is closed unless the customer has already sent the form. A sent form's files are kept for about 2 hours after sending if the computer has not received them. |
 | Form session records (page address, title, field labels) | 30 days, then deleted |
 | Sign-in attempts | 1 day |
 | Usage records | Kept for billing. When an account is deleted, its usage records are no longer linked to it. |
@@ -82,7 +82,7 @@ These providers may process data on servers outside India.
 ## 6. How we protect it
 
 - Every connection uses encryption (HTTPS and secure WebSockets). Stored data is encrypted by our database provider.
-- QR codes work only once and expire after 10 minutes. A phone link lasts 30 minutes.
+- QR codes work only once and expire after 10 minutes. When a customer needs to correct a form, the operator can send them the same code as a link, with the same limits. A phone link lasts 30 minutes.
 - Each session can only be read by its own computer and phone. Phones and computers can't write to the database directly; every change goes through our server.
 - Uploaded files are stored privately. Download links work for a single file and expire after 60 seconds.
 - PINs are stored only as a hash. An account is locked for a while after too many wrong PINs.
@@ -99,7 +99,7 @@ The use of information received from the Voice Form Filler extension follows the
 
 ## 9. Your choices and rights
 
-- **Stop at any time:** use "Start over" on the phone, close the form tab, or sign out of the extension.
+- **Stop at any time:** use "Start over" on the phone, close the form tab, or sign out of the extension. A form your customer has sent stays until its hold ends: delete it sooner with the × in the extension.
 - **Ask us:** email {{EMAIL}} to see, correct or delete your data, or to have your account deleted. Your administrator can also deactivate your account.
 
 ## 10. Children

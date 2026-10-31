@@ -227,6 +227,33 @@ try {
     check('Retention: could create aged test sessions', false);
   }
 
+  // ---- Sent answers on hold (migration 0022): they outlive the QR code and phone link until the hold ends ----
+  {
+    const later = new Date(Date.now() + 3600_000).toISOString();
+    const { data: held } = await admin
+      .from('form_sessions')
+      .insert({ user_id: a.id, session_code: randomBytes(16).toString('base64url'), page_url: 'https://example.test/held', page_origin: 'https://example.test', status: 'filled', expires_at: ago(2 * 3600_000), hold_until: later })
+      .select('id')
+      .maybeSingle();
+    if (held) {
+      const { data: field } = await admin.from('form_fields').insert({ session_id: held.id, field_key: 'name', label: 'Name', field_type: 'text', position: 0 }).select('id').single();
+      await admin.rpc('upsert_field_value', { p_session: held.id, p_field: field!.id, p_value: 'check-db', p_confidence: 1, p_source_phrase: null, p_seq: 1, p_utterance: null });
+      const answers = async () => (await admin.from('field_values').select('id').eq('session_id', held.id)).data?.length ?? 0;
+      await admin.rpc('purge_expired');
+      check('Hold: a sent form keeps its answers past the phone link', (await answers()) === 1);
+      await admin.rpc('reset_session', { p_session: held.id, p_seq: 2, p_scope: 'phone' });
+      const { data: reset } = await admin.from('form_sessions').select('hold_until').eq('id', held.id).maybeSingle();
+      check('Hold: Start over ends it', reset?.hold_until === null, JSON.stringify(reset));
+      await admin.rpc('upsert_field_value', { p_session: held.id, p_field: field!.id, p_value: 'check-db', p_confidence: 1, p_source_phrase: null, p_seq: 3, p_utterance: null });
+      await admin.from('form_sessions').update({ hold_until: ago(60_000) }).eq('id', held.id);
+      await admin.rpc('purge_expired');
+      check('Hold: answers are deleted once it ends', (await answers()) === 0);
+      await admin.from('form_sessions').delete().eq('id', held.id);
+    } else {
+      check('Hold: could create a held session (apply migration 0022)', false);
+    }
+  }
+
   // ---- Plans: voice minutes are counted inside the current period only (migration 0013) ----
   {
     const status = async () =>

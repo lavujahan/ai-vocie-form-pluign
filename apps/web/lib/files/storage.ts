@@ -77,11 +77,12 @@ export async function removeSessionFiles(sessionId: string) {
  */
 export async function purgeExpiredFiles(limit = 100): Promise<number> {
   const cutoff = new Date(Date.now() - EXPIRE_AFTER_MS).toISOString();
-  const { data, error } = await db()
-    .from('field_files')
-    .select('id, path, form_sessions!inner(expires_at, status)')
-    .or(`expires_at.lt.${cutoff},status.eq.expired`, { referencedTable: 'form_sessions' })
-    .limit(limit);
+  const now = new Date().toISOString();
+  const expired = (filter: string) =>
+    db().from('field_files').select('id, path, form_sessions!inner(expires_at, status)').or(filter, { referencedTable: 'form_sessions' }).limit(limit);
+  // Sent forms on hold keep their files (migration 0022; before it, no such column).
+  let { data, error } = await expired(`status.eq.expired,and(expires_at.lt.${cutoff},or(hold_until.is.null,hold_until.lt.${now}))`);
+  if (error?.code === '42703') ({ data, error } = await expired(`expires_at.lt.${cutoff},status.eq.expired`));
   if (error || !data?.length) return 0;
   const rows = data as unknown as { id: string; path: string }[];
   await removeObjects(rows.map((r) => r.path));

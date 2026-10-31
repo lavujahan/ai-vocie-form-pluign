@@ -28,6 +28,8 @@ export type SessionRow = SessionInfo & {
   analysis_status: 'pending' | 'done' | 'error';
   paired_at: string | null;
   created_at: string;
+  /** Migration 0022: sent answers wait for the operator until this time. */
+  hold_until?: string | null;
 };
 
 /** Full field row, including detector extras and analyzer output. */
@@ -65,14 +67,15 @@ export type FieldRow = {
 const BASE_COLUMNS =
   'id, user_id, session_code, status, form_name, page_url, page_origin, page_title, analysis_status, expires_at, paired_at, created_at';
 /**
- * The session columns, newest migration first: 0021 (voice on or off), 0019 (fields a choice hides),
- * 0005 (Start over, desktop tab state), then the base. A database without a migration yet is read with
- * the next set, and the missing columns get their defaults.
+ * The session columns, newest migration first: 0022 (sent answers on hold), 0021 (voice on or off),
+ * 0019 (fields a choice hides), 0005 (Start over, desktop tab state), then the base. A database without
+ * a migration yet is read with the next set, and the missing columns get their defaults.
  */
 const COLUMN_SETS = (() => {
   const v0005 = `${BASE_COLUMNS}, reset_seq, reset_scope, desktop_state, desktop_report`;
   const v0019 = `${v0005}, hidden_fields`;
-  return [`${v0019}, voice_enabled`, v0019, v0005, BASE_COLUMNS];
+  const v0021 = `${v0019}, voice_enabled`;
+  return [`${v0021}, hold_until`, v0021, v0019, v0005, BASE_COLUMNS];
 })();
 
 /** Defaults for the columns later migrations add, on rows read without them. */
@@ -84,6 +87,7 @@ export function withSessionDefaults(row: Record<string, unknown>): SessionRow {
     desktop_report: null,
     hidden_fields: [] as string[],
     voice_enabled: true,
+    hold_until: null,
     ...row,
   } as SessionRow;
 }

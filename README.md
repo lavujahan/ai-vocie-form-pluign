@@ -28,7 +28,7 @@ pnpm install
 
 1. Create a project at supabase.com.
 2. Enable the **pg_cron** extension (Database → Extensions).
-3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql`, `0018_form_template.sql`, `0019_hidden_fields.sql`, `0020_translate_usage.sql` and `0021_typing_only.sql`. If you link the Supabase CLI, `supabase db push` does the same.
+3. In the SQL editor, run `supabase/migrations/0001_init.sql`, then `0002_cron.sql`, `0003_recording_parts.sql`, `0004_cascading_fields.sql`, `0005_session_reset.sql`, `0006_corrections_tamil.sql`, `0007_file_uploads.sql`, `0008_usage_billing.sql`, `0009_retention.sql`, `0010_token_prices.sql`, `0011_usage_daily.sql`, `0012_form_cache.sql`, `0013_subscriptions.sql`, `0014_cached_token_price.sql`, `0015_plan_prices.sql`, `0016_form_completions.sql`, `0017_shared_form_reading.sql`, `0018_form_template.sql`, `0019_hidden_fields.sql`, `0020_translate_usage.sql` and `0021_typing_only.sql`, `0022_sent_hold.sql`. If you link the Supabase CLI, `supabase db push` does the same.
 4. Collect these values from Settings → API / JWT Keys:
    - Project URL
    - `anon` (publishable) key
@@ -207,6 +207,15 @@ For a waiting customer who fills the form on their own phone: the operator ticks
 - **The server refuses recordings** for the form (`/api/utterances` → 403 `voice_off`) before any speech-to-text or AI call, so nothing is spent.
 - **No voice minutes**: a typing-only form can be scanned while the plan is active, even with 0 minutes left (`assertCanUse(…, { minutes: false })`). Voice forms are still refused at 0 minutes.
 - **Switch later**: the popup's ⋯ menu has **Turn voice on / off** (`PATCH /api/sessions/[code]/desktop` with `voice`); the phone shows or hides its mics within a second (Realtime). The popup header shows **✎ Typing only** while voice is off.
+
+## Waiting answers (migration `0022`)
+
+A website may log the operator out before a form the customer sent is filled. **Send to desktop** sets `form_sessions.hold_until` (`SENT_HOLD_MIN`, 2 hours, each Send starts it again). Until then the purge leaves the session, its answers and its files alone, also after the form tab is closed.
+- **The list**: on a tab without a form the popup shows **Customer answers waiting**, the last 5 sent forms (`GET /api/sessions/held`) with the customer's name and last 4 phone digits, so copies of one form can be told apart (`lib/held.ts`).
+- **Use** moves the same session to this tab (`POST /api/sessions/[code]/resume`, `moveTab`), after checking the tab's site and that the page has some of the form's fields. Nothing is read by the AI again and no voice minutes are used. The page still changes only on Fill form. Photos a first fill used up are asked from the phone again.
+- **×** deletes the answers and files now (`DELETE /api/sessions/[code]/held`).
+- **Customer needs to correct** shows the QR again, as Connect phone again does, with **Copy link** for a customer who has left. The link has the QR's limits: once, for 10 minutes. The hold stays, and the next Send starts it again.
+- If the form tab is closed before Send, the phone can't send, and the form is not listed.
 
 ## Tamil helper on the phone (migration `0020`)
 

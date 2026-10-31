@@ -5,6 +5,7 @@ import type {
   ResolveOptionResponse,
   FillReport,
   FormSchemaInput,
+  HeldForm,
   PublicUser,
   SessionSnapshot,
 } from '@vff/shared';
@@ -87,6 +88,10 @@ export type PopupRequest = (
   | { type: 'UNDO' }
   /** Show the QR code again for this tab's form (the phone page was closed); answers are kept. */
   | { type: 'RECONNECT' }
+  /** Carry on a form the customer sent in this tab (its own tab logged out or was closed). */
+  | { type: 'RESUME_SESSION'; session_code: string }
+  /** Delete a waiting form's answers now. */
+  | { type: 'DISCARD_HELD'; session_code: string }
   /** Tamil typing: one piece of speech into text, in `PopupResponse.text` (base64: messages can't carry Blobs). */
   | { type: 'DICTATE'; base64: string; mime: string; duration_ms: number; part: number }
   /** Tamil typing in a window of its own: it stays open when the page is clicked, and Chrome can ask for the mic there. */
@@ -109,6 +114,8 @@ export type ActiveSession = CreateSessionResponse & {
   snapshot: SessionSnapshot | null;
   /** The QR code was shown again ("Connect phone again") for a form that already had a phone. */
   reconnect?: boolean;
+  /** Carried on from a waiting form ("Use"): the customer may be far from the screen, or gone. */
+  resumed?: boolean;
   /** The user allowed this site: the form's later pages (next step, reload) load the detector too. */
   site_access?: boolean;
   /** false: a typing-only form (set when scanning; the snapshot's session has the current value). */
@@ -121,6 +128,8 @@ export type ExtState = {
   /** The signed-in user's plan and voice minutes left; null until loaded. */
   account: AccountResponse | null;
   session: ActiveSession | null;
+  /** The last forms customers sent that still wait, newest first. */
+  held: HeldForm[];
   /**
    * Answers / uploads from the phone that came after the last "Fill form" (not on the page yet);
    * null before the first one. The page is only ever filled on "Fill form".

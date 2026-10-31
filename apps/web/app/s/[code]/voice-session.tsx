@@ -419,6 +419,20 @@ function SessionScreen({ code }: { code: string }) {
       </Shell>
     );
   }
+  // The form tab on the computer was closed after the customer sent: the answers wait for the operator,
+  // and the page opens again if the operator carries the form on in a new tab.
+  if (s.session?.desktop_state === 'closed' && s.session.status === 'filled') {
+    return (
+      <Shell>
+        <Card>
+          <h1 className="flex items-center gap-2 text-base font-semibold text-live-ink">
+            <Check size={18} /> {t('savedTitle')}
+          </h1>
+          <p className="mt-2 text-sm text-muted">{t('savedBody')}</p>
+        </Card>
+      </Shell>
+    );
+  }
   // The form tab on the computer was closed: this QR code is finished, nothing can be sent.
   if (s.session?.desktop_state === 'closed') {
     return (

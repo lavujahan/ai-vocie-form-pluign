@@ -61,6 +61,20 @@ export function endTab(tabs: Tabs, tabId: number): Tabs {
   return rest;
 }
 
+/** Takes a session out of the tab that holds it, if any, freeing that tab's place. */
+export function dropSession(tabs: Tabs, sessionId: string): Tabs {
+  const from = tabOfSession(tabs, sessionId);
+  return from === null ? tabs : endTab(tabs, from);
+}
+
+/**
+ * Carries a form on in `tabId`: it leaves its old tab, so it is never in two tabs, and the old tab no
+ * longer reports it closed when it shuts.
+ */
+export function moveTab(tabs: Tabs, tabId: number, session: ActiveSession): Tabs {
+  return startTab(dropSession(tabs, session.session_id), tabId, session);
+}
+
 /** Updates one tab's state; a no-op if that tab's session has ended meanwhile. */
 export function patchTab(tabs: Tabs, tabId: number, patch: Partial<TabState>): Tabs {
   const t = tabs[tabId];
