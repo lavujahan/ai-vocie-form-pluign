@@ -118,8 +118,8 @@ Faded in the background, behind a soft #1E4E9C overlay: a crossed-out browser ta
 ```
 Hook poster H3. Background #1E4E9C.
 
-Headline: "பாட்டி தமிழ்ல சொன்னாங்க… ஃபார்ம் இங்கிலீஷ்ல நிரம்புச்சு!"
-English line: "She spoke Tamil. The form filled in English."
+Headline: "தமிழ்ல சொன்னாங்க… ஃபார்ம் இங்கிலீஷ்ல நிரம்புச்சு!"
+English line: " spoke Tamil. The form filled in English."
 Support line: "Tamil, English or Tanglish — even mixed in one sentence."
 
 Art: a smiling elderly woman in a saree holding a phone with the red mic button. A white speech bubble from her in Tamil script: "என் பேரு லட்சுமி, ஊரு சேலம்".
@@ -133,8 +133,8 @@ An arrow to a white form card with two fields, each outlined in #F2B705:
 ```
 Hook poster H4. Background #1E4E9C.
 
-Headline: "வரிசையில 15 பேர். நீங்க ஒருத்தர் தான்."
-English line: "15 in the queue. Only one of you."
+Headline: "வரிசையில 5 பேர். நீங்க ஒருத்தர் தான்."
+English line: "5 in the queue. Only one of you."
 Support line: "Up to 5 applicants fill 5 forms at once — on their own phones."
 
 Art: a service-centre counter seen from the side. One calm operator at a desktop monitor that shows 5 browser tabs, each tab with a small green dot. In front of the counter, 5 different people (elderly man, young woman, student, mother, middle-aged man) each holding their own phone with the red mic button, speaking. Thin dotted lines from each phone to one tab. Behind them the queue is short and relaxed.

@@ -769,16 +769,19 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<voi
 }
 
 chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage | PageLoadedMessage | FieldsChangedMessage, sender, sendResponse) => {
-  if (sender.tab && req.type === 'PAGE_LOADED') {
-    if (sender.frameId === 0 && sender.tab.id !== undefined) void pageLoaded(sender.tab.id, req.site);
+  // The popup opened as a window (for an app window) is a tab too: only web pages are the content script.
+  const pageTab = sender.url?.startsWith(chrome.runtime.getURL('')) ? undefined : sender.tab;
+  const fromPage = !!pageTab;
+  if (pageTab && req.type === 'PAGE_LOADED') {
+    if (sender.frameId === 0 && pageTab.id !== undefined) void pageLoaded(pageTab.id, req.site);
     return false;
   }
-  if (sender.tab && req.type === 'FIELDS_CHANGED') {
-    if (sender.tab.id !== undefined) void fieldsChanged(sender.tab.id, req);
+  if (pageTab && req.type === 'FIELDS_CHANGED') {
+    if (pageTab.id !== undefined) void fieldsChanged(pageTab.id, req);
     return false;
   }
   // From the content script: which loaded dropdown option did the speaker mean? (AI, server-side)
-  if (sender.tab) {
+  if (fromPage) {
     if (req.type !== 'RESOLVE_OPTION') return false;
     (async () => {
       await ready;
@@ -847,6 +850,50 @@ async function pageLoaded(tabId: number, site: string) {
   await setTab(tabId, where === 'moved' ? { desktop: where, canUndo: false } : { desktop: where });
   await reportDesktop(t.session, { state: where });
 }
+
+// ---------- app windows (sites installed as an app) ----------
+
+/**
+ * An installed site opens in a window with no toolbar, so there is no Voice2Fill icon to click. The
+ * right-click menu and the keyboard shortcut open the popup in a small window of its own, for that tab.
+ * Both give the extension the same one-tab access (activeTab) as clicking the icon.
+ */
+const OPEN_MENU_ID = 'vff-open';
+
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: OPEN_MENU_ID,
+      title: 'Fill this form with Voice2Fill',
+      contexts: ['page', 'frame', 'editable', 'selection', 'link', 'image'],
+      documentUrlPatterns: ['http://*/*', 'https://*/*', 'file:///*'],
+    });
+  });
+});
+
+async function openPopupWindow(tab: chrome.tabs.Tab | undefined) {
+  if (tab?.id === undefined || tab.id < 0) return;
+  const url = chrome.runtime.getURL(`src/popup/index.html?tab=${tab.id}`);
+  // Already open for this tab: bring it to the front.
+  const [open] = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB], documentUrls: [url] }).catch(() => []);
+  if (open && open.windowId >= 0) {
+    await chrome.windows.update(open.windowId, { focused: true });
+    return;
+  }
+  // At the top right of the form's window, where the toolbar popup would be.
+  const near = await chrome.windows.get(tab.windowId).catch(() => null);
+  const width = 392;
+  const height = 680;
+  const at = near?.left !== undefined && near.width ? { left: Math.max(0, near.left + near.width - width - 12), top: (near.top ?? 0) + 40 } : {};
+  await chrome.windows.create({ url, type: 'popup', width, height, focused: true, ...at });
+}
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === OPEN_MENU_ID) void openPopupWindow(tab);
+});
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === 'open-window') void openPopupWindow(tab);
+});
 
 // A form tab closed: its session can't fill anything any more, and its phone shows "Tab closed".
 // Other tabs are unaffected.

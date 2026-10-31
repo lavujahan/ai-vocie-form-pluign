@@ -90,7 +90,7 @@ Search the store before you choose: the title must not look like an existing ext
 ## Summary (max 132 characters)
 
 ```
-Scan a QR code, speak on your phone in Tamil, English or Tanglish, and the form on your computer fills itself. Photos and PDFs too.
+Long queue, one typist? Applicants speak Tamil, English or Tanglish on their own phone, and the form on your computer fills itself.
 ```
 (131 characters)
 
@@ -106,92 +106,162 @@ English. Tamil is supported on the phone screens, so mention it in the descripti
 
 ## Detailed description (max 16,000 characters)
 
+Written problem-first: about 70% is the counter's problems and how each one is solved, about 30% is the feature list, privacy and plans.
+- Each problem has one Tamil line under it. The Tamil is formal written Tamil, with the English words people use at the counter (form, phone, field, PDF), not spoken dialect. Have a Tamil reader check it before you publish.
+- Spoken examples in quotes ("en peru Ramesh…", "pincode la 455 illa 445") stay in Tanglish on purpose: they show what the applicant can say.
+- No "Aadhaar", portal, government or other company names, so the listing doesn't look official or affiliated. "e-Sevai" appears once, only to describe the kind of centre, because operators search for it.
+
 ```
-Stop typing long forms. Just say the answers.
+Long queues. One typist. Applications rejected for one wrong letter. Photos that are never under 50 KB.
 
-Voice form filler reads the form on your computer, shows a QR code, and lets you fill it by speaking on your phone in Tamil, English or Tanglish. The answers appear on the computer's form as you speak.
+Voice Form Filler (Voice2Fill) is built for the counters where these problems happen every day: e-Sevai and common service centres, browsing centres, help desks and offices that fill online forms for other people.
 
-No profiles to set up, no text to paste, nothing to type.
+The applicant scans a QR code and speaks their answers on their own phone, in Tamil, English or Tanglish. The form on your computer fills itself in English. You check it and submit it, as you always do.
+
+நீண்ட வரிசை, ஒரே ஒரு தட்டச்சாளர், ஒரு எழுத்துப் பிழையால் நிராகரிக்கப்படும் விண்ணப்பம் — சேவை மையங்களின் அன்றாடச் சிக்கல்கள் இவை. Voice2Fill மூலம் விண்ணப்பதாரர் தமது phone-இல் தமிழில் பேசினால் போதும்; கணினியில் உள்ள form ஆங்கிலத்தில் தானாக நிரம்பும். நீங்கள் சரிபார்த்துச் சமர்ப்பிக்கலாம்.
+
+
+THE PROBLEMS IT SOLVES
+
+
+1. "The queue is long, and there is only one of me."
+
+One operator, one keyboard, one applicant at a time. On rush days, when a new scheme opens, people wait for hours or walk to the next centre.
+
+With Voice2Fill:
+• Up to 5 forms fill at the same time, one per browser tab, each with its own QR code and its own applicant's phone.
+• People in the queue start giving their details while you finish with the current applicant.
+• "Start over" clears the answers, so the next applicant can use the same QR code.
+• The same staff serve more people, without extra computers.
+
+ஒரே நேரத்தில் 5 விண்ணப்பதாரர்கள் தங்கள் சொந்த phone-இல் விவரங்களைக் கூறலாம். காத்திருப்பு நேரம் குறையும்.
+
+
+2. "One wrong letter, and the application is rejected."
+
+Names, initials, father's names and village names are easy to mistype when they are read out across a busy counter. A rejected application means the citizen has to come back, and your centre takes the blame.
+
+With Voice2Fill:
+• The applicant sees their own answers on their phone and checks them before sending.
+• Names can be spelled letter by letter, including Tamil letter names: "J A G A N" becomes "Jagan".
+• Corrections work the way people talk: "no, not Jahan, Jagan", "the last digit is 5", "pincode la 455 illa 445".
+• Any single field can be corrected with its own mic, or typed.
+• When an answer could match more than one option, the phone asks "Which one did you mean?" with buttons. Nothing is guessed silently.
+• Each filled field is outlined on the computer's form, so you can review it at a glance. Undo puts the page back the way it was.
+
+விண்ணப்பதாரரே தமது விவரங்களை phone-இல் சரிபார்க்கிறார். தெளிவில்லாத பதில்கள் ஊகிக்கப்படுவதில்லை; உறுதிசெய்யக் கேட்கப்படும்.
+
+
+3. "The applicant speaks Tamil. The form is in English."
+
+Many applicants cannot read an English form, so every label has to be explained across the counter, one field at a time.
+
+With Voice2Fill:
+• Applicants speak in Tamil, English or Tanglish, even mixed in one sentence ("en peru Ramesh, ooru Chennai"). The form is filled in English.
+• The whole phone screen switches between தமிழ் and English.
+• Every field shows both languages: "தந்தை பெயர் · Father's name".
+• The Tamil helper (the த bubble on the phone) turns any English label or help line into Tamil, so the applicant understands what is being asked.
+
+தமிழில் பேசினால் போதும்; form ஆங்கிலத்தில் நிரம்பும். ஒவ்வொரு field-உம் தமிழிலும் ஆங்கிலத்திலும் காட்டப்படும்.
+
+
+4. "Photo must be JPG, under 50 KB." "Upload all pages as one PDF."
+
+Every website has its own upload rules. Resizing photos on separate websites, scanning pages one by one and moving files between phones often takes longer than filling the form itself.
+
+With Voice2Fill:
+• The extension reads the website's upload rules ("JPG only, below 50 KB", exact pixel size, page limits).
+• The applicant takes a photo on their phone, then rotates or crops it, or adds more pages.
+• The phone converts it to fit: a compressed JPG, or several pages combined into one A4 PDF.
+• The file goes into the website's own upload field, so the site checks it as usual. If the site rejects it, the phone shows why.
+• Location and camera details are removed from photos.
+
+Photo, PDF ஆகியவற்றை website-இன் விதிகளுக்கு ஏற்ப phone தானாக மாற்றுகிறது. தனியாக resize செய்ய வேண்டியதில்லை.
+
+
+5. "Citizens' ID cards and photos are piling up on our phones."
+
+When documents are forwarded through personal chat apps, they stay on staff phones long after the application is done. That is a risk for the citizen and for your centre.
+
+With Voice2Fill:
+• Photos and PDFs go straight from the applicant's phone into the form, and are then deleted.
+• Voice recordings are never stored.
+• Spoken answers are deleted automatically within about an hour.
+
+ஆவணங்கள் நேரடியாக form-க்குச் சென்று, பின்னர் நீக்கப்படுகின்றன. ஊழியர்களின் phone-இல் எதுவும் தங்குவதில்லை.
+
+
+6. "The counter is noisy." "The applicant would rather type."
+
+Not everyone wants to say their details aloud at a busy counter.
+
+With Voice2Fill:
+• Tick "Typing only" before you scan. The applicant types the answers on their own phone, with no microphone.
+• Typing-only forms use no voice minutes.
+• Voice can be turned on or off at any time from the extension.
+
+பேச விருப்பமில்லையா? "Typing only" முறையில் விண்ணப்பதாரர் தமது phone-இல் தட்டச்சு செய்யலாம். Voice minutes செலவாகாது.
+
+
+7. "Long application forms keep changing as you fill them."
+
+State → District → Taluk → Village dropdowns that load one after another. A second page that appears only after the first. Fields that change when you choose "Individual" or "Organisation".
+
+With Voice2Fill:
+• Cascading dropdowns are filled in order. It waits for each list to load and picks the option that was spoken, even with spelling variants ("Omaloor" or "Omalur").
+• Multi-step forms: fields on the next step, or fields that appear after ticking "Other", are added to the phone right away.
+• Forms with branches: when the applicant switches branch, the fields that left the page are set aside with their answers kept, and come back if the branch is chosen again.
+• An answer given for a field that is not on the page yet waits, and fills as soon as the field appears.
+
+State, District, Taluk, Village போன்ற தொடர் dropdown-களும், பல படிகள் கொண்ட form-களும் வரிசைப்படி நிரப்பப்படும்.
+
+
+8. "Our fastest typist left."
+
+A centre should not depend on one person's typing speed. With Voice2Fill, anyone who can read the screen can run the counter: the applicant speaks, and the operator checks and submits.
+
+தட்டச்சு வேகம் இனி தடையல்ல. திரையைப் படிக்கத் தெரிந்த எவரும் counter-ஐ நடத்தலாம்.
 
 
 HOW IT WORKS
 
-1. Open any web form and click the extension → "Scan form on this page".
-2. Scan the QR code with your phone. No app to install; it opens in the phone's browser.
-3. Tap the mic and speak: "My name is Ramesh Kumar, phone 98765 43210, district Salem."
+1. Open the web form and click the extension → "Scan form on this page".
+2. The applicant scans the QR code with their phone. No app to install; it opens in the phone's browser.
+3. They tap the mic and speak: "My name is Ramesh Kumar, phone 98765 43210, district Salem."
 4. Press "Fill form" once. New answers then fill the page automatically, and each changed field is highlighted.
-5. Check the form and submit it yourself. Undo puts the page back the way it was.
+5. Check the form and submit it yourself. Voice2Fill never submits a form for you.
 
 
-SPEAK THE WAY YOU NORMALLY TALK
+FEATURES AT A GLANCE
 
-• Tamil, English or Tanglish, even mixed in one sentence ("en peru Ramesh, ooru Chennai").
-• Numbers can be said in pieces ("nine eight seven six…" or "98765 – 43210").
-• Spell names letter by letter, including Tamil letter names: "J A G A N" becomes "Jagan".
-• Correct yourself naturally: "no, not Jahan, Jagan", "the last digit is 5", "pincode la 455 illa 445".
-• Voice commands: "start over", "send it", "what is left?"
-• Speak as long as you need. Long answers are cut into pieces and joined again, so nothing is lost.
-• Values are filled in English, even when you speak Tamil.
-
-
-BUILT FOR REAL-WORLD FORMS
-
-Works on registration forms, application portals and modern web apps, including:
-
-• Cascading dropdowns: State → District → Taluk → Village. It waits for each list to load and picks the option you spoke.
-• Spelling variants: "Omaloor" or "Omalur", Tamil script or abbreviations. Unclear matches are sent to your phone as "Did you mean…?" buttons and are never guessed silently.
+• Works on React, Vue, Angular and plain HTML forms. Values are entered the way a person types, so the site's own checks run.
 • Custom dropdowns: react-select, MUI, choices.js, select2 and standard accessible comboboxes.
-• React, Vue, Angular and plain HTML forms. Values are entered the way a person types, so the site's own checks run.
-• Multi-step forms and wizards: fields that appear on step 2, or after ticking "Other", are added to your phone right away.
 • Forms inside frames and shadow DOM on the same site.
-
-
-PHOTOS AND DOCUMENTS FROM YOUR PHONE
-
-Upload fields are filled from the phone's camera, not by voice:
-
-• The extension reads the site's rules ("JPG only, below 50 KB", exact pixel size, page limits).
-• Take a photo or choose a file, then rotate, crop or add more pages.
-• Your phone converts it to the right format and size: a compressed JPG, or several photos combined into one A4 PDF.
-• The file goes into the website's own upload field, so the site checks it normally. If the site rejects it, your phone tells you why.
-• Location and camera details (EXIF/GPS) are removed from photos.
-
-
-ONE COMPUTER, SEVERAL FORMS
-
-• Fill up to 5 forms at once, one per browser tab, each with its own QR code and phone.
-• The popup always shows the form in the tab you opened it on.
-• "Start over" clears the answers for the next applicant using the same QR code. This is useful for service centres and help desks.
-
-
-THE PHONE SCREEN SPEAKS YOUR LANGUAGE
-
-• Switch the whole phone screen between தமிழ் and English.
-• Field labels show both languages: "தந்தை பெயர் · Father's name".
-• Clear messages for blocked microphones, lost connections, expired QR codes and required fields still empty.
-
-
-WHO IT'S FOR
-
-• Common service centres and e-Sevai operators filling applications for many citizens a day
-• Office staff doing repetitive data entry
-• Anyone who finds typing slow, or is more comfortable speaking Tamil than typing English
-• Help desks taking details over the counter
+• Numbers can be said in pieces ("nine eight seven six…" or "98765 – 43210").
+• Speak as long as you need. Long answers are processed in pieces, so nothing is lost.
+• Recording stops by itself after a few seconds of silence, so pauses don't use up minutes.
+• Voice tips, in Tamil and English, show applicants how to speak so answers come out right the first time.
+• The popup shows the form in the tab you opened it on, with fields sorted by what needs you: needs a look, filled, not answered yet.
+• If the phone page is closed, "Connect phone again" shows the QR code again, with every answer kept.
+• The phone page and its messages are in Tamil and English: blocked microphone, lost connection, expired QR code, required fields still empty.
 
 
 PRIVACY
 
-• Your voice recording is never stored. It is processed and discarded within the same request.
-• Your spoken answers and their text are deleted automatically within about an hour.
+• Voice recordings are never stored. They are processed and discarded in the same request.
+• Spoken answers and their text are deleted automatically within about an hour.
 • Uploaded photos and PDFs are stored privately and deleted as soon as the computer receives them, or when the tab closes.
 • QR codes work once and expire after 10 minutes. A phone link lasts 30 minutes.
-• The extension never submits a form for you. You review and submit.
+• The extension reads nothing on a website until you tap "Scan form on this page".
 • Nothing is sold or used for advertising.
 
 
 PLANS
 
-Voice Form Filler needs a Voice2Fill account. Every new account starts with a free 7-day trial with 15 voice minutes. After that, pick a monthly plan with the voice minutes you need. Only the time the microphone is recording counts; scanning and filling forms is free. Contact us to get an account or renew: {{ACCOUNT_CONTACT}}
+Voice Form Filler needs a Voice2Fill account. Every new account starts with a free 7-day trial with 15 voice minutes. After that, choose a monthly plan with the voice minutes you need.
+• Only the time the microphone is recording counts.
+• Scanning forms, filling them, photo uploads, typing-only forms and the Tamil helper use no voice minutes.
+To get an account or renew, contact us: {{ACCOUNT_CONTACT}}
 
 
 WHAT YOU NEED
@@ -204,7 +274,7 @@ WHAT YOU NEED
 NOT SUPPORTED (YET)
 
 • Upload fields inside another website's embedded frame
-• Saving your details to reuse on future forms
+• Saving details to reuse on future forms
 ```
 
 ---

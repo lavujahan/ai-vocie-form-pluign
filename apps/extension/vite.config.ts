@@ -23,7 +23,12 @@ export default defineConfig(({ mode }) => {
     ...(haveIcons ? { icons } : {}),
     action: { default_popup: 'src/popup/index.html', default_title: 'Voice2Fill', ...(haveIcons ? { default_icon: icons } : {}) },
     background: { service_worker: 'src/background/service-worker.ts', type: 'module' },
-    permissions: ['storage', 'activeTab', 'scripting'],
+    permissions: ['storage', 'activeTab', 'scripting', 'contextMenus'],
+    // A site installed as an app opens in a window with no toolbar (no Voice2Fill icon): the right-click
+    // menu and this shortcut open the popup in a window of its own, for that tab.
+    commands: {
+      'open-window': { suggested_key: { default: 'Alt+Shift+V' }, description: 'Open Voice2Fill for this page (works in app windows too)' },
+    },
     // The service worker calls the API and Supabase Realtime directly (no CORS from the worker).
     host_permissions: [`${new URL(apiBase).origin}/*`, supabase],
     // Nothing runs on websites by default. When the user taps "Scan form", the popup asks Chrome for that

@@ -7,6 +7,12 @@ import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { groupFields, type FieldGroup, type FieldItem } from './groups';
 import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, Input, Menu, Pill, Progress, Screen } from './ui';
 
+/**
+ * Opened in a window of its own (right-click menu or shortcut, for a site installed as an app, whose
+ * window has no toolbar): the tab it is for. Undefined in the toolbar popup.
+ */
+const WINDOW_TAB = Number(new URLSearchParams(location.search).get('tab')) || undefined;
+
 /** State of the form session in the tab this popup was opened on (each tab has its own). */
 function useExtState() {
   const [state, setState] = useState<ExtState | null>(null);
@@ -16,7 +22,13 @@ function useExtState() {
   useEffect(() => {
     let port: chrome.runtime.Port | null = null;
     let closed = false;
-    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+    const tabOpenedOn = WINDOW_TAB
+      ? chrome.tabs.get(WINDOW_TAB).catch(() => undefined)
+      : chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => tab);
+    // The form's tab closed: this window has nothing left to fill.
+    const onRemoved = (id: number) => id === WINDOW_TAB && window.close();
+    if (WINDOW_TAB) chrome.tabs.onRemoved.addListener(onRemoved);
+    tabOpenedOn.then((tab) => {
       if (closed) return;
       tabId.current = tab?.id;
       try {
@@ -31,6 +43,7 @@ function useExtState() {
     return () => {
       closed = true;
       port?.disconnect();
+      chrome.tabs.onRemoved.removeListener(onRemoved);
     };
   }, []);
 

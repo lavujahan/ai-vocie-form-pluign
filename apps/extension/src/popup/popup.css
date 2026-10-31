@@ -44,6 +44,11 @@ html:root {
   --color-live-dot: var(--vf-live-dot);
 }
 
+/* Opened as a window (for an app window): the space beside the 360px popup matches it. */
+html {
+  background: var(--vf-page);
+}
+
 body {
   width: 360px;
   margin: 0;
