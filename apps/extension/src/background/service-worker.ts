@@ -75,6 +75,8 @@ let account: AccountResponse | null = null;
 let heldForms: HeldForm[] = [];
 /** Forms this operator scanned lately; fetched with `heldForms`. */
 let latestForms: LatestForm[] = [];
+/** The last read of Latest forms failed: an empty list says nothing about the operator's forms. */
+let latestFailed = false;
 /** Open popups, and the tab each one was opened on. */
 const ports = new Map<chrome.runtime.Port, number | undefined>();
 
@@ -102,6 +104,7 @@ function publicState(tabId: number | undefined): ExtState {
     session: t?.session ?? null,
     held: state.auth ? heldForms : [],
     latest: state.auth ? latestForms : [],
+    latestFailed: !!state.auth && latestFailed,
     unfilledChanges: t ? changesSince(t.session.snapshot, t.filledUpTo) : null,
     live: !!t && !!channels.get(t.session.session_id)?.live,
     lastFill: t?.lastFill ?? null,
@@ -158,6 +161,7 @@ async function logout() {
   account = null;
   heldForms = [];
   latestForms = [];
+  latestFailed = false;
   await chrome.storage.session.remove(TAMIL_TEXT_KEY);
   await save({ auth: null, tabs: {} });
 }
@@ -190,7 +194,7 @@ async function refreshHeld() {
   }
 }
 
-/** Reloads Latest forms. Errors keep the last list. */
+/** Reloads Latest forms. Errors keep the last list, and the popup is told, so it doesn't say there are none. */
 async function refreshLatest() {
   const auth = state.auth;
   if (!auth) return;
@@ -198,10 +202,13 @@ async function refreshLatest() {
     const { forms } = await api<LatestFormsResponse>('/api/forms/latest', { token: auth.token });
     if (state.auth?.token !== auth.token) return; // signed out meanwhile
     latestForms = forms;
-    broadcast();
-  } catch {
+    latestFailed = false;
+  } catch (e) {
     // offline, or an older server without the list
+    console.warn('could not load Latest forms', e);
+    latestFailed = true;
   }
+  broadcast();
 }
 
 /** Tells the phone where the form tab is ('open' / 'moved' / 'closed') and how the last full fill went. */
@@ -795,6 +802,10 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       await refreshAccount();
       return;
 
+    case 'GET_LATEST':
+      await refreshLatest();
+      return;
+
     case 'LOGIN': {
       const r = await api<LoginResponse>('/api/auth/login', { body: { phone: req.phone, pin: req.pin } });
       account = null;
@@ -857,6 +868,8 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
     case 'END_SESSION':
       if (tabId !== undefined) await endTabSession(tabId);
       await ensureRealtime();
+      // The popup is back on its first screen: this form may have been the operator's first.
+      await Promise.all([refreshHeld(), refreshLatest()]);
       return;
 
     case 'FILL':

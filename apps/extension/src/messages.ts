@@ -78,6 +78,8 @@ export type PopupRequest = (
   | { type: 'GET_STATE' }
   /** Re-read the plan and voice minutes (the popup's minutes meter). */
   | { type: 'GET_ACCOUNT' }
+  /** Re-read Latest forms (QR for other was opened). */
+  | { type: 'GET_LATEST' }
   | { type: 'LOGIN'; phone: string; pin: string }
   | { type: 'LOGOUT' }
   /** `voice: false`: a typing-only form (the customer types on their phone; no mic, no voice minutes). */
@@ -137,6 +139,8 @@ export type ExtState = {
   held: HeldForm[];
   /** Forms this operator scanned lately: each can get a QR code with no page open. */
   latest: LatestForm[];
+  /** The last read of `latest` failed, so an empty list doesn't mean there are no forms. */
+  latestFailed: boolean;
   /**
    * Answers / uploads from the phone that came after the last "Fill form" (not on the page yet);
    * null before the first one. The page is only ever filled on "Fill form".

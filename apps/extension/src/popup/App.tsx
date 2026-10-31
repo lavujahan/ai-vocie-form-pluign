@@ -256,6 +256,7 @@ function StartCard({
   const [holdNotice, setHoldNotice] = useState(false);
   /** QR for other is open: Latest forms shows, and stays open for the next customer's QR. */
   const [showForms, setShowForms] = useState(false);
+  const [loadingForms, setLoadingForms] = useState(false);
   /** The form whose QR code is on screen. */
   const [qrFor, setQrFor] = useState<LatestForm | null>(null);
   /** The last QR code was scanned: home says so. */
@@ -345,7 +346,14 @@ function StartCard({
         <Button
           className={`w-full px-2 whitespace-nowrap ${showForms ? 'border-brand text-accent-ink ring-1 ring-brand' : ''}`}
           aria-expanded={showForms}
-          onClick={() => setShowForms(!showForms)}
+          onClick={async () => {
+            setShowForms(!showForms);
+            if (showForms) return;
+            // A form scanned moments ago appears now.
+            setLoadingForms(true);
+            await send({ type: 'GET_LATEST' });
+            setLoadingForms(false);
+          }}
         >
           QR for other {showForms ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </Button>
@@ -359,6 +367,12 @@ function StartCard({
               setQrFor(f);
             }}
           />
+        ) : loadingForms ? (
+          <p className="flex items-center gap-2 text-sm text-muted">
+            <Loader2 size={16} className="animate-spin" /> Loading your forms…
+          </p>
+        ) : state.latestFailed ? (
+          <Banner tone="danger">Couldn't load your forms. Check your connection, then open QR for other again.</Banner>
         ) : (
           <Banner tone="accent">No forms yet. Open a form and press QR for this page once. It then appears here.</Banner>
         ))}
