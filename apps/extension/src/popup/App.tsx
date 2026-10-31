@@ -257,6 +257,8 @@ function StartCard({
   /** QR for other is open: Latest forms shows, and stays open for the next customer's QR. */
   const [showForms, setShowForms] = useState(false);
   const [loadingForms, setLoadingForms] = useState(false);
+  /** QR for this page was pressed: nothing is read until Generate QR. */
+  const [askingPage, setAskingPage] = useState(false);
   /** The form whose QR code is on screen. */
   const [qrFor, setQrFor] = useState<LatestForm | null>(null);
   /** The last QR code was scanned: home says so. */
@@ -292,7 +294,7 @@ function StartCard({
   }
   return (
     <Screen
-      tips={!typingOnly}
+      tips
       header={
         <Header sub={join(`Signed in as ${state.auth?.user.name}`, others)}>
           <MinutesChip account={state.account} />
@@ -337,12 +339,11 @@ function StartCard({
       <div className="grid grid-cols-2 gap-2">
         <Button
           variant="primary"
-          className="w-full px-2 whitespace-nowrap"
-          loading={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(await send({ type: 'START_SESSION', voice: !typingOnly }));
-            setBusy(false);
+          className={`w-full px-2 whitespace-nowrap ${askingPage ? 'ring-2 ring-brand/40' : ''}`}
+          aria-expanded={askingPage}
+          onClick={() => {
+            setAskingPage(!askingPage);
+            setShowForms(false);
           }}
         >
           QR for this page
@@ -352,6 +353,7 @@ function StartCard({
           aria-expanded={showForms}
           onClick={async () => {
             setShowForms(!showForms);
+            setAskingPage(false);
             if (showForms) return;
             // A form scanned moments ago appears now.
             setLoadingForms(true);
@@ -362,6 +364,20 @@ function StartCard({
           QR for other {showForms ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
         </Button>
       </div>
+      {askingPage && (
+        <TypingConfirm
+          className="rounded-lg border border-line bg-card p-2"
+          on={typingOnly}
+          onChange={chooseTyping}
+          busy={busy}
+          onCancel={() => setAskingPage(false)}
+          onGenerate={async () => {
+            setBusy(true);
+            setError(await send({ type: 'START_SESSION', voice: !typingOnly }));
+            setBusy(false);
+          }}
+        />
+      )}
       {showForms &&
         (state.latest.length > 0 ? (
           <LatestCard
@@ -383,7 +399,6 @@ function StartCard({
         ) : (
           <Banner tone="accent">No forms yet. Open a form and press QR for this page once. It then appears here.</Banner>
         ))}
-      <TypingTick on={typingOnly} onChange={chooseTyping} />
       {/* A plan refusal is already explained by the plan note. */}
       {error && !planBlocked(state.account) && <p className="text-xs text-danger-ink">{error}</p>}
       {!waiting && (
@@ -403,16 +418,40 @@ function StartCard({
   );
 }
 
-/** The Typing only choice, kept for the next scan. */
-function TypingTick({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+/** Asked before any QR code is made: Typing only or not (kept for the next QR), then Generate QR. */
+function TypingConfirm({
+  className,
+  on,
+  onChange,
+  busy = false,
+  onCancel,
+  onGenerate,
+}: {
+  className: string;
+  on: boolean;
+  onChange: (on: boolean) => void;
+  busy?: boolean;
+  onCancel: () => void;
+  onGenerate: () => void;
+}) {
   return (
-    <label className={`flex cursor-pointer items-start gap-2.5 rounded-lg border bg-card p-2.5 ${on ? 'border-brand ring-1 ring-brand' : 'border-line'}`}>
-      <input type="checkbox" className="mt-0.5 size-[18px] shrink-0 accent-brand" checked={on} onChange={(e) => onChange(e.target.checked)} />
-      <span className="grid gap-0.5">
-        <span className="text-[13.5px] font-semibold">Typing only (no voice)</span>
-        <span className="text-xs text-muted">The customer types every answer. No mic on the phone, no voice minutes used.</span>
-      </span>
-    </label>
+    <div className={`grid gap-2 ${className}`}>
+      <label className={`flex cursor-pointer items-start gap-2.5 rounded-lg border bg-card p-2.5 ${on ? 'border-brand ring-1 ring-brand' : 'border-line'}`}>
+        <input type="checkbox" className="mt-0.5 size-[18px] shrink-0 accent-brand" checked={on} onChange={(e) => onChange(e.target.checked)} />
+        <span className="grid gap-0.5">
+          <span className="text-[13.5px] font-semibold">Typing only (no voice)</span>
+          <span className="text-xs text-muted">The customer types every answer. No mic on the phone, no voice minutes used.</span>
+        </span>
+      </label>
+      <div className="flex justify-end gap-1.5">
+        <Button className="min-h-8 px-2.5 text-[13px]" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" className="min-h-8 px-2.5 text-[13px]" loading={busy} onClick={onGenerate}>
+          Generate QR
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -492,17 +531,13 @@ function LatestCard({
               )}
             </div>
             {open && (
-              <div className="grid gap-2 border-t border-row-line bg-page p-2">
-                <TypingTick on={typingOnly} onChange={onTyping} />
-                <div className="flex justify-end gap-1.5">
-                  <Button className="min-h-8 px-2.5 text-[13px]" onClick={() => setAsking(null)}>
-                    Cancel
-                  </Button>
-                  <Button variant="primary" className="min-h-8 px-2.5 text-[13px]" onClick={() => onPick(f)}>
-                    Generate QR
-                  </Button>
-                </div>
-              </div>
+              <TypingConfirm
+                className="border-t border-row-line bg-page p-2"
+                on={typingOnly}
+                onChange={onTyping}
+                onCancel={() => setAsking(null)}
+                onGenerate={() => onPick(f)}
+              />
             )}
             {confirming && (
               <div className="grid gap-2 border-t border-row-line bg-page p-2">

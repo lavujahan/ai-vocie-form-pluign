@@ -36,7 +36,7 @@ A browser (Chrome or Safari) and a microphone. No app to install.
 A QR code works once, within 10 minutes. In the extension, press **Regenerate** (or **New form**) and scan again.
 
 **"This link has expired. Scan the QR code again."**
-A phone link lasts 30 minutes. Click **QR for this page** again on the computer.
+A phone link lasts 30 minutes. Click **QR for this page** and **Generate QR** again on the computer.
 
 **The QR code opened in WhatsApp or Google Lens and the mic doesn't work**
 In-app browsers can't record. Tap **Copy link** and open the link in Chrome or Safari.

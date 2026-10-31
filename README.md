@@ -67,7 +67,7 @@ Load the extension in Chrome: `chrome://extensions` → Developer mode → **Loa
 
 1. Sign in at `/admin/login` and add a user (phone number and 6-digit PIN; **Generate** makes a random one, shown once after Save so you can pass it on).
 2. Open `http://localhost:5174/vanilla.html` (or the React or Vue fixture), click the extension and sign in as that user.
-3. Click **QR for this page** and scan the QR code with your phone.
+3. Click **QR for this page**, then **Generate QR**, and scan the QR code with your phone.
 4. Say *"My name is Ramesh Kumar, email ramesh at gmail dot com, phone nine eight seven six five four three two one zero"*, or in Tanglish, *"en peru Ramesh, ooru Chennai, naan aan"*.
 5. Watch the values appear in the popup, then press **Fill form**.
 
