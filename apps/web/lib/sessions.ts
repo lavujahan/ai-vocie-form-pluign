@@ -32,6 +32,8 @@ export type SessionRow = SessionInfo & {
   hold_until?: string | null;
   /** Migration 0023: started from Latest forms, not from a scan. */
   queued?: boolean;
+  /** Migration 0025: the form's row in form memory (form_cache). */
+  form_fingerprint?: string | null;
 };
 
 /** Full field row, including detector extras and analyzer output. */
@@ -69,16 +71,18 @@ export type FieldRow = {
 const BASE_COLUMNS =
   'id, user_id, session_code, status, form_name, page_url, page_origin, page_title, analysis_status, expires_at, paired_at, created_at';
 /**
- * The session columns, newest migration first: 0023 (Queue QR), 0022 (sent answers on hold), 0021 (voice
- * on or off), 0019 (fields a choice hides), 0005 (Start over, desktop tab state), then the base. A database
- * without a migration yet is read with the next set, and the missing columns get their defaults.
+ * The session columns, newest migration first: 0025 (link to form memory), 0023 (Queue QR), 0022 (sent
+ * answers on hold), 0021 (voice on or off), 0019 (fields a choice hides), 0005 (Start over, desktop tab
+ * state), then the base. A database without a migration yet is read with the next set, and the missing
+ * columns get their defaults.
  */
 const COLUMN_SETS = (() => {
   const v0005 = `${BASE_COLUMNS}, reset_seq, reset_scope, desktop_state, desktop_report`;
   const v0019 = `${v0005}, hidden_fields`;
   const v0021 = `${v0019}, voice_enabled`;
   const v0022 = `${v0021}, hold_until`;
-  return [`${v0022}, queued`, v0022, v0021, v0019, v0005, BASE_COLUMNS];
+  const v0023 = `${v0022}, queued`;
+  return [`${v0023}, form_fingerprint`, v0023, v0022, v0021, v0019, v0005, BASE_COLUMNS];
 })();
 
 /** Defaults for the columns later migrations add, on rows read without them. */
@@ -92,6 +96,7 @@ export function withSessionDefaults(row: Record<string, unknown>): SessionRow {
     voice_enabled: true,
     hold_until: null,
     queued: false,
+    form_fingerprint: null,
     ...row,
   } as SessionRow;
 }

@@ -26,6 +26,8 @@ export const POST = route(async (req) => {
   if (source.user_id !== user.id) throw fail(403, 'Not allowed');
   const fields = await getFieldRows(source.id);
   if (!fields.length) throw fail(410, 'This form is no longer available. Scan it again.');
+  const memory = await db().from('form_cache').select('form_name').eq('fingerprint', source.form_fingerprint ?? '').maybeSingle();
+  const formName = (memory.data as { form_name: string } | null)?.form_name ?? source.form_name;
 
   const sessionCode = randomBytes(16).toString('base64url');
   const expiresAt = new Date(Date.now() + PAIR_CODE_TTL_MIN * 60_000).toISOString();
@@ -34,7 +36,9 @@ export const POST = route(async (req) => {
     .insert({
       user_id: user.id,
       session_code: sessionCode,
-      form_name: source.form_name,
+      form_name: formName,
+      // A QR code counts as a use of the form in form memory.
+      form_fingerprint: source.form_fingerprint,
       // Without the query string: it may hold the last applicant's id.
       page_url: pageOf(source.page_url),
       page_origin: source.page_origin,
@@ -47,7 +51,7 @@ export const POST = route(async (req) => {
     .select('id')
     .single();
   if (inserted.error?.code === 'PGRST204' || inserted.error?.code === '42703') {
-    throw fail(503, 'QR codes for saved forms need a server update (migration 0023).');
+    throw fail(503, 'QR codes for saved forms need a server update (migration 0025).');
   }
   const session = must(inserted) as { id: string };
   must(await db().from('form_fields').insert(cloneFieldRows(fields, session.id)));
@@ -58,7 +62,7 @@ export const POST = route(async (req) => {
       session_code: sessionCode,
       qr_url: `${env.publicBaseUrl}/s/${sessionCode}`,
       expires_at: expiresAt,
-      form_name: source.form_name,
+      form_name: formName,
     } satisfies CreateSessionResponse,
     { status: 201 },
   );

@@ -455,16 +455,17 @@ function LatestCard({
       </h2>
       {forms.map((f) => {
         const open = asking === f.source_id;
+        const confirming = removing?.source_id === f.source_id;
         return (
           <Fragment key={f.source_id}>
-            <div className={`flex items-center gap-2 border-t border-row-line px-2.5 py-[7px] ${open ? 'bg-accent-bg' : ''}`}>
+            <div className={`flex items-center gap-2 border-t border-row-line px-2.5 py-[7px] ${open || confirming ? 'bg-accent-bg' : ''}`}>
               <div className="min-w-0 flex-1">
                 <p className="text-[13.5px] font-semibold break-words">{f.form_name}</p>
                 <p className="text-xs text-muted tabular-nums">
                   {hostOf(f.page_origin)} · {f.field_count} fields · {f.uses === 1 ? 'Used once' : `Used ${f.uses} times`}
                 </p>
               </div>
-              {!open && (
+              {!open && !confirming && (
                 <>
                   <Button
                     className="min-h-8 shrink-0 px-3 text-[13px]"
@@ -503,26 +504,25 @@ function LatestCard({
                 </div>
               </div>
             )}
+            {confirming && (
+              <div className="grid gap-2 border-t border-row-line bg-page p-2">
+                <Banner tone="warn">Remove {f.form_name} from your list? Answers already waiting are kept.</Banner>
+                <div className="flex justify-end gap-1.5">
+                  <Button className="min-h-8 px-2.5 text-[13px]" onClick={() => setRemoving(null)}>
+                    Keep
+                  </Button>
+                  <Button variant="danger" className="min-h-8 px-2.5 text-[13px]" loading={busy} onClick={() => remove(f)}>
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            )}
           </Fragment>
         );
       })}
-      {(removing || error) && (
-        <div className="grid gap-2 border-t border-row-line p-2">
-          {removing ? (
-            <>
-              <Banner tone="warn">Remove {removing.form_name} from your list? Answers already waiting are kept.</Banner>
-              <div className="flex justify-end gap-1.5">
-                <Button className="min-h-8 px-2.5 text-[13px]" onClick={() => setRemoving(null)}>
-                  Keep
-                </Button>
-                <Button variant="danger" className="min-h-8 px-2.5 text-[13px]" loading={busy} onClick={() => remove(removing)}>
-                  Delete
-                </Button>
-              </div>
-            </>
-          ) : (
-            <Banner tone="danger">{error}</Banner>
-          )}
+      {error && (
+        <div className="border-t border-row-line p-2">
+          <Banner tone="danger">{error}</Banner>
         </div>
       )}
     </section>

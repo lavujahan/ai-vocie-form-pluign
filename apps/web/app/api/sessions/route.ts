@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { after, NextResponse } from 'next/server';
 import { FormSchema, PAIR_CODE_TTL_MIN, type CreateSessionResponse } from '@vff/shared';
 import { analyzeAndStore, savedReading } from '@/lib/agents/formAnalyzer';
+import { formFingerprint } from '@/lib/agents/formCache';
 import { purgeExpiredFiles } from '@/lib/files/storage';
 import { requireUser } from '@/lib/auth';
 import { assertCanUse } from '@/lib/billing/plans';
@@ -37,21 +38,22 @@ export const POST = route(async (req) => {
   const expiresAt = new Date(Date.now() + PAIR_CODE_TTL_MIN * 60_000).toISOString();
   const formName = (schema.form_title || schema.page_title || url.hostname).slice(0, 120);
 
-  const inserted = await db()
-    .from('form_sessions')
-    .insert({
-      user_id: user.id,
-      session_code: sessionCode,
-      form_name: formName,
-      page_url: schema.page_url,
-      page_origin: url.origin,
-      page_title: schema.page_title,
-      expires_at: expiresAt,
-      // Only sent for typing-only forms, so scanning works before migration 0021 is applied.
-      ...(voice ? {} : { voice_enabled: false }),
-    })
-    .select('id')
-    .single();
+  const row = {
+    user_id: user.id,
+    session_code: sessionCode,
+    form_name: formName,
+    page_url: schema.page_url,
+    page_origin: url.origin,
+    page_title: schema.page_title,
+    expires_at: expiresAt,
+    // Only sent for typing-only forms, so scanning works before migration 0021 is applied.
+    ...(voice ? {} : { voice_enabled: false }),
+  };
+  const insert = (r: Record<string, unknown>) => db().from('form_sessions').insert(r).select('id').single();
+  // The form's row in form memory: this is what puts it in the operator's Latest forms.
+  let inserted = await insert({ ...row, form_fingerprint: formFingerprint(schema) });
+  // Migration 0025 not applied yet: scan as before, not listed.
+  if (inserted.error?.code === 'PGRST204' || inserted.error?.code === '42703') inserted = await insert(row);
   // Without the column a typing-only form would quietly get voice: say so instead.
   if (!voice && (inserted.error?.code === 'PGRST204' || inserted.error?.code === '42703')) {
     throw fail(503, 'Typing-only forms need a server update (migration 0021). Untick "Typing only" to scan with voice.');

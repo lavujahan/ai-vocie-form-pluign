@@ -1,71 +1,60 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_LATEST_FORMS, QueueSessionRequest } from '@vff/shared';
-import { cloneFieldRows, latestForms, type ScannedForm } from '@/lib/queue';
+import { cloneFieldRows, latestForms, type OperatorForm } from '@/lib/queue';
 
-const scan = (id: string, form_name: string, created_at: string, field_count = 10, page_origin = 'https://exams.example.in'): ScannedForm => ({
-  id,
+const form = (form_name: string, last_used_at: string, uses = 1, page_url = 'https://exams.example.in/apply/form'): OperatorForm => ({
+  fingerprint: `fp-${form_name}`,
   form_name,
-  page_origin,
-  created_at,
-  field_count,
+  page_url,
+  uses,
+  last_used_at,
+  source_id: `session-${form_name}`,
+  field_count: 10,
 });
 
 describe('Latest forms', () => {
-  it('lists each form once, most used first', () => {
-    const forms = latestForms([
-      scan('a', 'Exam application', '2026-10-30T10:00:00Z'),
-      scan('b', 'Scholarship', '2026-10-31T10:00:00Z'),
-      scan('c', 'Exam application', '2026-10-31T09:00:00Z'),
-    ]);
+  it('puts the most used form first', () => {
+    const forms = latestForms([form('Scholarship', '2026-10-31T10:00:00Z', 1), form('Exam application', '2026-10-30T10:00:00Z', 7)]);
     expect(forms.map((f) => [f.form_name, f.uses])).toEqual([
-      ['Exam application', 2],
+      ['Exam application', 7],
       ['Scholarship', 1],
     ]);
-    expect(forms[0].last_used_at).toBe('2026-10-31T09:00:00Z');
   });
 
   it('puts the form used last first when forms are used equally', () => {
-    const forms = latestForms([scan('a', 'Older', '2026-10-30T10:00:00Z'), scan('b', 'Newer', '2026-10-31T10:00:00Z')]);
+    const forms = latestForms([form('Older', '2026-10-30T10:00:00Z', 2), form('Newer', '2026-10-31T10:00:00Z', 2)]);
     expect(forms.map((f) => f.form_name)).toEqual(['Newer', 'Older']);
   });
 
+  it('shows each form memory row as it comes, with the session a QR code copies', () => {
+    expect(latestForms([form('Exam application', '2026-10-31T10:00:00Z', 3)])).toEqual([
+      {
+        source_id: 'session-Exam application',
+        form_name: 'Exam application',
+        page_origin: 'https://exams.example.in',
+        field_count: 10,
+        uses: 3,
+        last_used_at: '2026-10-31T10:00:00Z',
+      },
+    ]);
+  });
+
   it('keeps a form scanned just now when the most used forms fill the list', () => {
-    const busy = Array.from({ length: MAX_LATEST_FORMS }, (_, i) => [
-      scan(`a${i}`, `Busy ${i}`, `2026-10-${10 + i}T10:00:00Z`),
-      scan(`b${i}`, `Busy ${i}`, `2026-10-${10 + i}T11:00:00Z`),
-    ]).flat();
-    const forms = latestForms([...busy, scan('new', 'Just scanned', '2026-10-31T10:00:00Z')]);
+    const busy = Array.from({ length: MAX_LATEST_FORMS }, (_, i) => form(`Busy ${i}`, `2026-10-${10 + i}T10:00:00Z`, 5));
+    const forms = latestForms([...busy, form('Just scanned', '2026-10-31T10:00:00Z', 1)]);
     expect(forms).toHaveLength(MAX_LATEST_FORMS);
     expect(forms.at(-1)).toMatchObject({ form_name: 'Just scanned', uses: 1 });
   });
 
-  it('copies from the scan with the most fields, so a wizard keeps its later steps', () => {
-    const [form] = latestForms([
-      scan('first-step-only', 'Exam application', '2026-10-31T10:00:00Z', 8),
-      scan('whole-wizard', 'Exam application', '2026-10-30T10:00:00Z', 23),
-    ]);
-    expect(form).toMatchObject({ source_id: 'whole-wizard', field_count: 23, last_used_at: '2026-10-31T10:00:00Z' });
-  });
-
-  it('takes the newest scan when the field counts are equal', () => {
-    const [form] = latestForms([scan('old', 'Exam application', '2026-10-29T10:00:00Z'), scan('new', 'Exam application', '2026-10-31T10:00:00Z')]);
-    expect(form.source_id).toBe('new');
-  });
-
-  it('keeps forms of the same name on different sites apart', () => {
-    const forms = latestForms([
-      scan('a', 'Application', '2026-10-31T10:00:00Z', 10, 'https://a.example.in'),
-      scan('b', 'Application', '2026-10-31T09:00:00Z', 10, 'https://b.example.in'),
-    ]);
-    expect(forms).toHaveLength(2);
-  });
-
-  it('leaves out a scan with no fields, and stops at the limit', () => {
-    expect(latestForms([scan('a', 'Empty', '2026-10-31T10:00:00Z', 0)])).toEqual([]);
-    const many = Array.from({ length: MAX_LATEST_FORMS + 3 }, (_, i) => scan(`s${i}`, `Form ${i}`, `2026-10-${10 + i}T10:00:00Z`));
+  it('stops at the limit', () => {
+    const many = Array.from({ length: MAX_LATEST_FORMS + 3 }, (_, i) => form(`Form ${i}`, `2026-10-${10 + i}T10:00:00Z`));
     const forms = latestForms(many);
     expect(forms).toHaveLength(MAX_LATEST_FORMS);
     expect(forms[0].form_name).toBe(`Form ${MAX_LATEST_FORMS + 2}`);
+  });
+
+  it('has nothing to show for an operator with no forms', () => {
+    expect(latestForms([])).toEqual([]);
   });
 });
 

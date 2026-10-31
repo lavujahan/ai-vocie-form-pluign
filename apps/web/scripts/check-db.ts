@@ -90,13 +90,13 @@ try {
   // ---- Queue QR (migration 0023) ----
   const queuedRes = await admin.from('form_sessions').update({ queued: true }).eq('id', session.id).select('queued').single();
   check('Queue QR: form_sessions.queued exists (apply migration 0023)', !queuedRes.error && queuedRes.data?.queued === true, queuedRes.error?.message);
-  const scanned = await admin.rpc('user_scanned_forms', { p_user: a.id });
-  check('Queue QR: user_scanned_forms runs (apply migration 0023)', !scanned.error && Array.isArray(scanned.data), scanned.error?.message);
 
   const hideRes = await admin.from('form_sessions').update({ latest_hidden: true }).eq('id', session.id).select('latest_hidden').single();
   check('Latest forms: form_sessions.latest_hidden exists (apply migration 0024)', !hideRes.error && hideRes.data?.latest_hidden === true, hideRes.error?.message);
-  const afterHide = await admin.rpc('user_scanned_forms', { p_user: a.id });
-  check('Latest forms: a hidden form is not listed (apply migration 0024)', !afterHide.error && !(afterHide.data as { id: string }[]).some((r) => r.id === session.id), afterHide.error?.message);
+  const linkRes = await admin.from('form_sessions').update({ form_fingerprint: 'check-db' }).eq('id', session.id).select('form_fingerprint').single();
+  check('Latest forms: form_sessions.form_fingerprint exists (apply migration 0025)', !linkRes.error && linkRes.data?.form_fingerprint === 'check-db', linkRes.error?.message);
+  const operatorForms = await admin.rpc('operator_forms', { p_user: a.id });
+  check('Latest forms: operator_forms runs (apply migration 0025)', !operatorForms.error && Array.isArray(operatorForms.data), operatorForms.error?.message);
 
   // ---- Fields a choice hides (migration 0019) ----
   const hiddenRes = await admin.from('form_sessions').update({ hidden_fields: ['f_hidden'] }).eq('id', session.id).select('hidden_fields').single();
