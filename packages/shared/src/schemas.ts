@@ -702,6 +702,8 @@ export type LatestForm = {
   form_name: string;
   page_origin: string;
   field_count: number;
+  /** Scans and QR codes of this form in the last 30 days: the list shows the most used first. */
+  uses: number;
   last_used_at: string;
 };
 
@@ -714,6 +716,10 @@ export const QueueSessionRequest = z.object({
   voice: z.boolean().default(true),
 });
 export type QueueSessionRequest = z.infer<typeof QueueSessionRequest>;
+
+/** Extension → server: × on a form under Latest forms. */
+export const HideLatestRequest = z.object({ source_id: z.string().uuid() });
+export type HideLatestRequest = z.infer<typeof HideLatestRequest>;
 
 export type PairResponse = {
   token: string;

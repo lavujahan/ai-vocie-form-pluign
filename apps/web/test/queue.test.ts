@@ -11,14 +11,32 @@ const scan = (id: string, form_name: string, created_at: string, field_count = 1
 });
 
 describe('Latest forms', () => {
-  it('lists each form once, last used first', () => {
+  it('lists each form once, most used first', () => {
     const forms = latestForms([
       scan('a', 'Exam application', '2026-10-30T10:00:00Z'),
       scan('b', 'Scholarship', '2026-10-31T10:00:00Z'),
       scan('c', 'Exam application', '2026-10-31T09:00:00Z'),
     ]);
-    expect(forms.map((f) => f.form_name)).toEqual(['Scholarship', 'Exam application']);
-    expect(forms[1].last_used_at).toBe('2026-10-31T09:00:00Z');
+    expect(forms.map((f) => [f.form_name, f.uses])).toEqual([
+      ['Exam application', 2],
+      ['Scholarship', 1],
+    ]);
+    expect(forms[0].last_used_at).toBe('2026-10-31T09:00:00Z');
+  });
+
+  it('puts the form used last first when forms are used equally', () => {
+    const forms = latestForms([scan('a', 'Older', '2026-10-30T10:00:00Z'), scan('b', 'Newer', '2026-10-31T10:00:00Z')]);
+    expect(forms.map((f) => f.form_name)).toEqual(['Newer', 'Older']);
+  });
+
+  it('keeps a form scanned just now when the most used forms fill the list', () => {
+    const busy = Array.from({ length: MAX_LATEST_FORMS }, (_, i) => [
+      scan(`a${i}`, `Busy ${i}`, `2026-10-${10 + i}T10:00:00Z`),
+      scan(`b${i}`, `Busy ${i}`, `2026-10-${10 + i}T11:00:00Z`),
+    ]).flat();
+    const forms = latestForms([...busy, scan('new', 'Just scanned', '2026-10-31T10:00:00Z')]);
+    expect(forms).toHaveLength(MAX_LATEST_FORMS);
+    expect(forms.at(-1)).toMatchObject({ form_name: 'Just scanned', uses: 1 });
   });
 
   it('copies from the scan with the most fields, so a wizard keeps its later steps', () => {

@@ -924,6 +924,12 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       if (!state.auth) throw new Error('Please sign in');
       return api<CreateSessionResponse>('/api/sessions/queue', { body: { source_id: req.source_id, voice: req.voice }, token: state.auth.token });
 
+    case 'HIDE_LATEST':
+      if (!state.auth) throw new Error('Please sign in');
+      await api('/api/forms/latest', { method: 'DELETE', body: { source_id: req.source_id }, token: state.auth.token });
+      await refreshLatest();
+      return;
+
     case 'QUEUE_STATUS': {
       if (!state.auth) throw new Error('Please sign in');
       const snap = await api<SessionSnapshot>(`/api/sessions/${req.session_code}`, { token: state.auth.token });

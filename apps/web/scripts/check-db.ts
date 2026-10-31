@@ -93,6 +93,11 @@ try {
   const scanned = await admin.rpc('user_scanned_forms', { p_user: a.id });
   check('Queue QR: user_scanned_forms runs (apply migration 0023)', !scanned.error && Array.isArray(scanned.data), scanned.error?.message);
 
+  const hideRes = await admin.from('form_sessions').update({ latest_hidden: true }).eq('id', session.id).select('latest_hidden').single();
+  check('Latest forms: form_sessions.latest_hidden exists (apply migration 0024)', !hideRes.error && hideRes.data?.latest_hidden === true, hideRes.error?.message);
+  const afterHide = await admin.rpc('user_scanned_forms', { p_user: a.id });
+  check('Latest forms: a hidden form is not listed (apply migration 0024)', !afterHide.error && !(afterHide.data as { id: string }[]).some((r) => r.id === session.id), afterHide.error?.message);
+
   // ---- Fields a choice hides (migration 0019) ----
   const hiddenRes = await admin.from('form_sessions').update({ hidden_fields: ['f_hidden'] }).eq('id', session.id).select('hidden_fields').single();
   check('Hidden fields: form_sessions.hidden_fields exists (apply migration 0019)', !hiddenRes.error && hiddenRes.data?.hidden_fields?.[0] === 'f_hidden', hiddenRes.error?.message);

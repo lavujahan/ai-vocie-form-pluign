@@ -9,7 +9,7 @@ export const RESUME_HOLD_MIN = 30;
 /** Waiting forms listed in the extension: enough for a queue. */
 export const MAX_HELD_FORMS = 20;
 /** Forms listed under Latest forms in the extension. */
-export const MAX_LATEST_FORMS = 5;
+export const MAX_LATEST_FORMS = 10;
 /** Extension / admin user JWT lifetime. */
 export const USER_JWT_TTL_HOURS = 12;
 

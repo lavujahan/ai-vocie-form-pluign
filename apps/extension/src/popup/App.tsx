@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, Pencil, Smartphone, X } from 'lucide-react';
 import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, SENT_HOLD_MIN, type AccountResponse, type FieldFile, type HeldForm, type LatestForm, type SessionField } from '@vff/shared';
 import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
@@ -265,6 +265,10 @@ function StartCard({
     setQrFor(null);
     setScanned(true);
   }, []);
+  const chooseTyping = (on: boolean) => {
+    setTypingOnly(on);
+    void chrome.storage.local.set({ [TYPING_KEY]: on });
+  };
   useEffect(() => {
     chrome.storage.local.get([TYPING_KEY, HOLD_NOTICE_KEY]).then((r) => {
       setTypingOnly(r[TYPING_KEY] === true);
@@ -362,6 +366,9 @@ function StartCard({
         (state.latest.length > 0 ? (
           <LatestCard
             forms={state.latest}
+            typingOnly={typingOnly}
+            onTyping={chooseTyping}
+            send={send}
             onPick={(f) => {
               setScanned(false);
               setQrFor(f);
@@ -376,23 +383,7 @@ function StartCard({
         ) : (
           <Banner tone="accent">No forms yet. Open a form and press QR for this page once. It then appears here.</Banner>
         ))}
-      <label
-        className={`flex cursor-pointer items-start gap-2.5 rounded-lg border bg-card p-2.5 ${typingOnly ? 'border-brand ring-1 ring-brand' : 'border-line'}`}
-      >
-        <input
-          type="checkbox"
-          className="mt-0.5 size-[18px] shrink-0 accent-brand"
-          checked={typingOnly}
-          onChange={(e) => {
-            setTypingOnly(e.target.checked);
-            void chrome.storage.local.set({ [TYPING_KEY]: e.target.checked });
-          }}
-        />
-        <span className="grid gap-0.5">
-          <span className="text-[13.5px] font-semibold">Typing only (no voice)</span>
-          <span className="text-xs text-muted">The customer types every answer. No mic on the phone, no voice minutes used.</span>
-        </span>
-      </label>
+      <TypingTick on={typingOnly} onChange={chooseTyping} />
       {/* A plan refusal is already explained by the plan note. */}
       {error && !planBlocked(state.account) && <p className="text-xs text-danger-ink">{error}</p>}
       {!waiting && (
@@ -412,37 +403,128 @@ function StartCard({
   );
 }
 
-/** "Used today", "Used yesterday", "Used 6 days ago", by calendar day. */
-function usedAgo(iso: string) {
-  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const days = Math.round((midnight(new Date()) - midnight(new Date(iso))) / DAY_MS);
-  return days <= 0 ? 'Used today' : days === 1 ? 'Used yesterday' : `Used ${days} days ago`;
+/** The Typing only choice, kept for the next scan. */
+function TypingTick({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className={`flex cursor-pointer items-start gap-2.5 rounded-lg border bg-card p-2.5 ${on ? 'border-brand ring-1 ring-brand' : 'border-line'}`}>
+      <input type="checkbox" className="mt-0.5 size-[18px] shrink-0 accent-brand" checked={on} onChange={(e) => onChange(e.target.checked)} />
+      <span className="grid gap-0.5">
+        <span className="text-[13.5px] font-semibold">Typing only (no voice)</span>
+        <span className="text-xs text-muted">The customer types every answer. No mic on the phone, no voice minutes used.</span>
+      </span>
+    </label>
+  );
 }
 
 /**
- * Forms this operator scanned lately. QR shows a unique QR code for one customer, from any tab: no portal
- * login is needed until the customer's turn. The answers then wait under Customer answers waiting.
+ * Forms this operator scanned lately, most used first. QR asks about Typing only, then shows a unique QR
+ * code for one customer, from any tab: no portal login is needed until the customer's turn. The answers
+ * then wait under Customer answers waiting. × takes a form off this operator's list.
  */
-function LatestCard({ forms, onPick }: { forms: LatestForm[]; onPick: (form: LatestForm) => void }) {
+function LatestCard({
+  forms,
+  typingOnly,
+  onTyping,
+  send,
+  onPick,
+}: {
+  forms: LatestForm[];
+  typingOnly: boolean;
+  onTyping: (on: boolean) => void;
+  send: Send;
+  onPick: (form: LatestForm) => void;
+}) {
+  /** The form whose QR was pressed: nothing is made until Generate QR. */
+  const [asking, setAsking] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<LatestForm | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove(form: LatestForm) {
+    setBusy(true);
+    setError(await send({ type: 'HIDE_LATEST', source_id: form.source_id }));
+    setBusy(false);
+    setRemoving(null);
+  }
+
   return (
     <section className="overflow-hidden rounded-lg border border-header-line bg-card">
       <h2 className="flex items-center justify-between gap-2 bg-subtle px-2.5 py-1.5 text-[13px] font-bold">
         Latest forms
         <span className="text-xs font-medium text-muted">One QR per customer</span>
       </h2>
-      {forms.map((f) => (
-        <div key={f.source_id} className="flex items-center gap-2 border-t border-row-line px-2.5 py-[7px]">
-          <div className="min-w-0 flex-1">
-            <p className="text-[13.5px] font-semibold break-words">{f.form_name}</p>
-            <p className="text-xs text-muted tabular-nums">
-              {hostOf(f.page_origin)} · {f.field_count} fields · {usedAgo(f.last_used_at)}
-            </p>
-          </div>
-          <Button className="min-h-8 shrink-0 px-3 text-[13px]" onClick={() => onPick(f)}>
-            QR
-          </Button>
+      {forms.map((f) => {
+        const open = asking === f.source_id;
+        return (
+          <Fragment key={f.source_id}>
+            <div className={`flex items-center gap-2 border-t border-row-line px-2.5 py-[7px] ${open ? 'bg-accent-bg' : ''}`}>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13.5px] font-semibold break-words">{f.form_name}</p>
+                <p className="text-xs text-muted tabular-nums">
+                  {hostOf(f.page_origin)} · {f.field_count} fields · {f.uses === 1 ? 'Used once' : `Used ${f.uses} times`}
+                </p>
+              </div>
+              {!open && (
+                <>
+                  <Button
+                    className="min-h-8 shrink-0 px-3 text-[13px]"
+                    onClick={() => {
+                      setRemoving(null);
+                      setAsking(f.source_id);
+                    }}
+                  >
+                    QR
+                  </Button>
+                  <button
+                    type="button"
+                    aria-label={`Delete ${f.form_name}`}
+                    title="Delete from this list"
+                    className="-ml-1 grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-subtle focus-visible:outline-2 focus-visible:outline-accent-ink"
+                    onClick={() => {
+                      setAsking(null);
+                      setRemoving(f);
+                    }}
+                  >
+                    <X size={15} />
+                  </button>
+                </>
+              )}
+            </div>
+            {open && (
+              <div className="grid gap-2 border-t border-row-line bg-page p-2">
+                <TypingTick on={typingOnly} onChange={onTyping} />
+                <div className="flex justify-end gap-1.5">
+                  <Button className="min-h-8 px-2.5 text-[13px]" onClick={() => setAsking(null)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" className="min-h-8 px-2.5 text-[13px]" onClick={() => onPick(f)}>
+                    Generate QR
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Fragment>
+        );
+      })}
+      {(removing || error) && (
+        <div className="grid gap-2 border-t border-row-line p-2">
+          {removing ? (
+            <>
+              <Banner tone="warn">Remove {removing.form_name} from your list? Answers already waiting are kept.</Banner>
+              <div className="flex justify-end gap-1.5">
+                <Button className="min-h-8 px-2.5 text-[13px]" onClick={() => setRemoving(null)}>
+                  Keep
+                </Button>
+                <Button variant="danger" className="min-h-8 px-2.5 text-[13px]" loading={busy} onClick={() => remove(removing)}>
+                  Delete
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Banner tone="danger">{error}</Banner>
+          )}
         </div>
-      ))}
+      )}
     </section>
   );
 }

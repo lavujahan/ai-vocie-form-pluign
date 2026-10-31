@@ -103,6 +103,8 @@ export type PopupRequest = (
   | { type: 'QUEUE_QR'; source_id: string; voice: boolean }
   /** The status of a queue QR's session, in `PopupResponse.text` ('waiting': not scanned yet). */
   | { type: 'QUEUE_STATUS'; session_code: string }
+  /** × on a form under Latest forms: it leaves this operator's list. */
+  | { type: 'HIDE_LATEST'; source_id: string }
 ) & { tab_id?: number };
 
 export type PopupResponse =
