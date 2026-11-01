@@ -1,5 +1,5 @@
 import 'server-only';
-import { effectiveFileRules, extensionOf, type FileFormat } from '@vff/shared';
+import { effectiveFileRules, uploadFileName, type FileFormat } from '@vff/shared';
 import { fail } from '../http';
 import { getFieldRows, type FieldRow } from '../sessions';
 
@@ -10,16 +10,7 @@ export async function getUploadField(sessionId: string, fieldKey: string) {
   return { field, rules: effectiveFileRules(field) };
 }
 
-/** A clean file name for the website: "<label>.<ext>" in plain letters (sites show or check it). */
+/** A clean file name for the website. A label in Tamil script has no plain letters left: fall back to the phone's name, then the key. */
 export function uploadName(field: Pick<FieldRow, 'label' | 'clean_label' | 'field_key'>, given: string, format: FileFormat): string {
-  const plain = (s: string | null | undefined) =>
-    (s ?? '')
-      .replace(/\.[a-z0-9]{2,4}$/i, '')
-      .replace(/[^\w\s-]+/g, '')
-      .trim()
-      .replace(/\s+/g, '_')
-      .slice(0, 60);
-  // A label in Tamil script has no plain letters left: fall back to the phone's name, then the key.
-  const base = [field.clean_label, field.label, given, field.field_key].map(plain).find(Boolean) || 'upload';
-  return `${base}.${extensionOf(format)}`;
+  return uploadFileName([field.clean_label, field.label, given, field.field_key], format);
 }

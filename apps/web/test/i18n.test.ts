@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { cleanTamilLabel } from '@/lib/agents/formAnalyzer';
 import { fieldLabelFor, serverText, translate } from '@/lib/i18n';
 import { MSG } from '@/lib/session-rules';
-import { PDF_LOCKED, PDF_TOO_LONG } from '@/lib/files/convert';
+import { PDF_LOCKED, PDF_TOO_LONG } from '@vff/shared/ui/files/convert';
 
 describe('phone screens in Tamil', () => {
   it('translates screen text and fills in values', () => {

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Camera, Check, Crop as CropIcon, FileUp, Loader2, Plus, RotateCw, Trash2, X } from 'lucide-react';
 import { describeFileRules, formatSize, photoShape, targetFormat, type FieldFile, type FileRules, type SessionField } from '@vff/shared';
-import { checkPickedPdf, detectQuad, pagePreview, preparePages, rotatedPreview, type Crop, type Page, type Prepared } from '@/lib/files/convert';
-import { fitBox, hasShape, insetQuad, moveBox, moveCorner, resizeBox, rotateQuad, type Box, type Quad } from '@/lib/files/crop';
+import { checkPickedPdf, detectQuad, pagePreview, preparePages, rotatedPreview, type Crop, type Page, type Prepared } from '@vff/shared/ui/files/convert';
+import { fitBox, hasShape, insetQuad, moveBox, moveCorner, resizeBox, rotateQuad, type Box, type Quad } from '@vff/shared/ui/files/crop';
 import { Button, Card, Pill } from '@/components/ui';
 import { useI18n } from './lang';
 

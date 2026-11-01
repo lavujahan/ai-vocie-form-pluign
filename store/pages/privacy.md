@@ -9,7 +9,7 @@ Before publishing:
 
 # Privacy policy: Voice Form Filler
 
-**Effective date:** 31 October 2026
+**Effective date:** 1 November 2026
 
 Voice Form Filler ("the service") is run by {{COMPANY}} ("we", "us"). It has two parts:
 - the **Chrome extension**, which reads a form on your computer and fills it in;
@@ -23,6 +23,7 @@ This policy explains what data the service handles, why, who it is shared with, 
 - Voice recordings are never stored. They are turned into text and thrown away.
 - Your spoken answers and their text are deleted automatically, within about an hour of starting a form. Answers your customer has sent are kept for about 2 hours after sending, so a form can be finished if a website logs you out.
 - Uploaded photos and documents are deleted as soon as the computer receives them.
+- Scans you fetch from your scanner's folder stay on your computer. They are never sent to us.
 - The extension never submits a form. You check it and submit it yourself.
 
 ## 2. What we collect and why
@@ -61,6 +62,11 @@ These providers may process data on servers outside India.
 ## 4. On your devices
 
 - **Extension:** keeps your sign-in and open form sessions in Chrome's temporary session storage. It is cleared when you sign out or close the browser.
+- **Fetch from scan (optional):**
+  - if you connect a scan folder, the extension can read that one folder, and only while its scan window is open. It can't change or delete anything there, and it remembers which folder you chose;
+  - it shows scans from the last hour unless you ask for older ones, so that other customers' papers stay out of view;
+  - a scan you save for a form is kept in this browser, on this computer, and goes only into the website's upload field. Location and camera details are removed when it is converted. It is never sent to us, Sarvam AI or OpenAI;
+  - the file your scanner saved stays in your folder until you delete it. Please clear that folder regularly.
 - **Phone page:**
   - keeps the current session in the browser tab's storage until you close the tab;
   - remembers your language choice (தமிழ் or English);
@@ -73,6 +79,7 @@ These providers may process data on servers outside India.
 | Voice recordings | Not stored. Only held in memory while it is being converted to text. |
 | What you said (text) and the field values | Deleted automatically about 40 to 60 minutes after the form session starts. Once the customer presses Send, about 2 hours after the last Send. "Start over" deletes them straight away, and so does the × beside a waiting form in the extension. |
 | Photos and documents | Deleted as soon as the computer has the file or the website refuses it. Also deleted on "Start over", with the × beside a waiting form, when the session expires, and when the form tab is closed unless the customer has already sent the form. A sent form's files are kept for about 2 hours after sending if the computer has not received them. |
+| Scans saved from your scanner's folder (on your computer only) | Deleted when you end the form, start it over or sign out, when the form session expires, when you close Chrome, and when the form tab is closed unless the customer has already sent the form. Never kept for more than about 2 hours. |
 | Form session records (page address, title, field labels) | 30 days, then deleted |
 | Sign-in attempts | 1 day |
 | Usage records | Kept for billing. When an account is deleted, its usage records are no longer linked to it. |

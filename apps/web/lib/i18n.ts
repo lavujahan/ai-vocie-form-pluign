@@ -198,7 +198,7 @@ const en = {
   srvCouldNotClear: 'Could not clear. Try again.',
   srvAlreadyCleared: 'This form was already cleared. Reload the page.',
   srvCouldNotConnect: 'Could not connect. Check your network and scan again.',
-  // From the phone's PDF converter (lib/files/convert.ts).
+  // From the phone's PDF converter (shared ui/files/convert.ts).
   srvPdfLocked: 'This PDF is locked with a password. Take photos of the pages instead.',
   srvPdfTooLong: 'This PDF has too many pages to make smaller on the phone. Take photos of the pages instead.',
 };

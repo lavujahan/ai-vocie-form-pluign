@@ -12,7 +12,8 @@ export const MAX_SHRINK_PAGES = 30;
 const DPI = 150;
 const MAX_SIDE = 1600;
 
-export type DrawnPages = { images: Blob[]; sizes: { w: number; h: number }[] };
+/** `total`: pages in the PDF, which may be more than were drawn. */
+export type DrawnPages = { images: Blob[]; sizes: { w: number; h: number }[]; total: number };
 
 /** The same PDF, re-saved compactly; null when it can't be re-saved as it is (e.g. it is encrypted). */
 export async function resavePdf(data: Uint8Array): Promise<Blob | null> {
@@ -36,8 +37,12 @@ async function loadPdfjs() {
 const toJpeg = (canvas: HTMLCanvasElement) =>
   new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), 'image/jpeg', 0.92));
 
-/** Every page drawn as a JPEG, with the page's size in PDF points. */
-export async function drawPdfPages(data: Uint8Array, onPage?: (n: number, of: number) => void): Promise<DrawnPages | 'locked' | 'too_many' | 'unreadable'> {
+/** Every page (or the first `limit`, for a thumbnail) drawn as a JPEG, with the page's size in PDF points. */
+export async function drawPdfPages(
+  data: Uint8Array,
+  onPage?: (n: number, of: number) => void,
+  limit = Infinity,
+): Promise<DrawnPages | 'locked' | 'too_many' | 'unreadable'> {
   const pdfjs = await loadPdfjs();
   let doc: Awaited<ReturnType<typeof pdfjs.getDocument>['promise']>;
   try {
@@ -47,9 +52,9 @@ export async function drawPdfPages(data: Uint8Array, onPage?: (n: number, of: nu
     return (e as { name?: string }).name === 'PasswordException' ? 'locked' : 'unreadable';
   }
   try {
-    if (doc.numPages > MAX_SHRINK_PAGES) return 'too_many';
-    const out: DrawnPages = { images: [], sizes: [] };
-    for (let n = 1; n <= doc.numPages; n++) {
+    if (limit === Infinity && doc.numPages > MAX_SHRINK_PAGES) return 'too_many';
+    const out: DrawnPages = { images: [], sizes: [], total: doc.numPages };
+    for (let n = 1; n <= Math.min(limit, doc.numPages); n++) {
       onPage?.(n, doc.numPages);
       const page = await doc.getPage(n);
       const size = page.getViewport({ scale: 1 });

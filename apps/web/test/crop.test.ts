@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fitBox, hasShape, insetQuad, moveBox, moveCorner, resizeBox, rotateQuad } from '@/lib/files/crop';
+import { fitBox, hasShape, insetQuad, moveBox, moveCorner, resizeBox, rotateQuad } from '@vff/shared/ui/files/crop';
 
 const PASSPORT = 3.5 / 4.5; // the page asked for 3.5 × 4.5 cm
 const PHOTO = 4 / 3; // a landscape phone photo

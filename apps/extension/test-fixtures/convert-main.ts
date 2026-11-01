@@ -1,6 +1,6 @@
 // Exposes the phone's converter to Playwright (it needs a real browser: canvas, image decoding).
 import { sanitizeFileRules, type FileRules } from '@vff/shared';
-import { checkPickedPdf, detectQuad, pdfPageCount, preparePages, type Page } from '../../web/lib/files/convert';
+import { checkPickedPdf, detectQuad, pdfPageCount, preparePages, type Page } from '@vff/shared/ui/files/convert';
 
 /** A noisy photo-like image (noise doesn't compress, like a real photo), as a JPEG blob. */
 async function photo(w: number, h: number, seed = 1): Promise<Blob> {

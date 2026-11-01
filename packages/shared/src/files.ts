@@ -102,6 +102,23 @@ export function effectiveFileRules(field: { accept?: string | null; file_rules?:
   return sanitizeFileRules(field.file_rules ?? null, field.accept ?? null);
 }
 
+/** A clean file name for the website: "<label>.<ext>" in plain letters (sites show or check it). */
+export function uploadFileName(names: (string | null | undefined)[], format: FileFormat): string {
+  const plain = (s: string | null | undefined) =>
+    (s ?? '')
+      .replace(/\.[a-z0-9]{2,4}$/i, '')
+      .replace(/[^\w\s-]+/g, '')
+      .trim()
+      .replace(/\s+/g, '_')
+      .slice(0, 60);
+  return `${names.map(plain).find(Boolean) || 'upload'}.${extensionOf(format)}`;
+}
+
+/** The most pages one upload to this field can hold: an image is one page, so several need a PDF. */
+export function maxPagesOf(rules: FileRules): number {
+  return rules.formats.includes('pdf') ? (rules.max_pages ?? Infinity) : 1;
+}
+
 /** The format to produce: a PDF for several pages or PDF-only fields, else an image (JPG preferred). */
 export function targetFormat(rules: FileRules, pages: number): FileFormat {
   const images = rules.formats.filter((f) => f !== 'pdf');

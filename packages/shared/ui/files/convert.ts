@@ -1,8 +1,9 @@
-import { checkFile, mimeOf, photoShape, targetFormat, type FileFormat, type FileRules } from '@vff/shared';
-import { cleanScan, findDocument, straightSize, warp, type Quad } from './docscan';
+import { checkFile, mimeOf, photoShape, targetFormat } from '../../src/files';
+import type { FileFormat, FileRules } from '../../src/schemas';
+import { cleanScan, findDocument, findOnScanner, straightSize, warp, type Quad } from './docscan';
 
 /**
- * Runs on the phone (browser only). Turns camera photos into what the website's upload field takes:
+ * Runs on the phone, and in the extension for scans (browser only). Turns photos into what the website's upload field takes:
  * a JPG / PNG under the size limit, or one PDF made of several photos under the size limit. Re-encoding
  * through a canvas also drops EXIF data (including the GPS location). Document photos can be straightened
  * from the sheet's 4 corners and given a white "scan look". Nothing is sent anywhere here.
@@ -147,6 +148,27 @@ export async function detectQuad(page: Page): Promise<Quad | null> {
   const canvas = render(await decode(page.file), { ...page, crop: null, quad: null, clean: false }, 480);
   const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
   return findDocument(data, canvas.width, canvas.height);
+}
+
+/**
+ * Where the document is in a scan from a scanner: a card or small paper on the white lid, else a sheet
+ * on a darker background (a phone photo saved to the same folder). Null: keep the whole page.
+ */
+export async function detectScan(page: Page, kind: FileRules['kind']): Promise<Quad | null> {
+  const canvas = render(await decode(page.file), { ...page, crop: null, quad: null, clean: false }, 640);
+  const { data } = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height);
+  if (kind === 'signature') return findOnScanner(data, canvas.width, canvas.height, { ink: true });
+  return findOnScanner(data, canvas.width, canvas.height) ?? findDocument(data, canvas.width, canvas.height);
+}
+
+/** Every page of a scanned PDF as an image, ready to crop and turn into what the field takes. */
+export async function pdfToPages(file: Blob, onPage?: (n: number, of: number) => void): Promise<Page[]> {
+  const { drawPdfPages } = await import('./pdf-shrink');
+  const drawn = await drawPdfPages(new Uint8Array(await file.arrayBuffer()), onPage);
+  if (drawn === 'locked') throw new Error('This PDF is locked with a password. Scan the pages again.');
+  if (drawn === 'too_many') throw new Error('This PDF has too many pages.');
+  if (drawn === 'unreadable') throw new Error("This PDF can't be read. Scan the pages again.");
+  return drawn.images.map((image, i): Page => ({ id: String(i), file: image, rotate: 0, crop: null }));
 }
 
 const toBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>

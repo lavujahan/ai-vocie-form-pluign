@@ -10,13 +10,19 @@
     "./ui/tokens.css": "./ui/tokens.css",
     "./ui/voice-tips": "./ui/voice-tips.tsx",
     "./ui/use-recorder": "./ui/use-recorder.ts",
-    "./ui/silence": "./ui/silence.ts"
+    "./ui/silence": "./ui/silence.ts",
+    "./ui/files/convert": "./ui/files/convert.ts",
+    "./ui/files/crop": "./ui/files/crop.ts",
+    "./ui/files/docscan": "./ui/files/docscan.ts",
+    "./ui/files/pdf-shrink": "./ui/files/pdf-shrink.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "4.10.38",
     "zod": "^4.1.0"
   },
   "devDependencies": {

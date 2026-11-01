@@ -76,3 +76,8 @@ body {
   margin: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
+
+/* The scan window fills its own window. */
+html[data-window='scan'] body {
+  width: auto;
+}

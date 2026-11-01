@@ -4,6 +4,7 @@ import { crx, defineManifest } from '@crxjs/vite-plugin';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
+import pkg from './package.json';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
@@ -18,7 +19,7 @@ export default defineConfig(({ mode }) => {
     manifest_version: 3,
     name: 'Voice2Fill: Speak Tamil or English to fill web forms',
     short_name: 'Voice2Fill',
-    version: '1.0.0',
+    version: pkg.version,
     description: 'Fill the form on this page by speaking on your phone in Tamil, English or Tanglish.',
     ...(haveIcons ? { icons } : {}),
     action: { default_popup: 'src/popup/index.html', default_title: 'Voice2Fill', ...(haveIcons ? { default_icon: icons } : {}) },

@@ -143,7 +143,7 @@ function Bubbles({ onTips, onTamil }: { onTips: (() => void) | null; onTamil: ((
 }
 
 /** Honey-gold band: the brand mark (white mic on blue), status chips on the right, a line about the form. */
-export function Header({ sub, children }: { sub?: ReactNode; children?: ReactNode }) {
+export function Header({ title = 'Voice2Fill', sub, children }: { title?: string; sub?: ReactNode; children?: ReactNode }) {
   return (
     <header className="border-b border-header-line bg-header px-3.5 pt-2.5 pb-2 text-header-ink">
       <div className="flex items-center justify-between gap-2">
@@ -151,7 +151,7 @@ export function Header({ sub, children }: { sub?: ReactNode; children?: ReactNod
           <span className="grid size-[22px] place-items-center rounded-md bg-brand text-brand-ink">
             <Mic size={14} strokeWidth={2.4} />
           </span>
-          Voice2Fill
+          {title}
         </span>
         {children && <span className="flex shrink-0 items-center gap-1.5">{children}</span>}
       </div>

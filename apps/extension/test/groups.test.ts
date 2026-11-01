@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FieldFile, SessionField, SessionValue } from '@vff/shared';
-import { NOT_ON_PAGE } from '../src/messages';
+import { NOT_ON_PAGE, type ScanInfo } from '../src/messages';
 import { groupFields } from '../src/popup/groups';
 
 const field = (field_key: string, over: Partial<SessionField> = {}) =>
@@ -56,5 +56,15 @@ describe('popup field groups', () => {
     const g = groupFields(snap({ fields: [field('name'), field('org_name')], values: [value('org_name', 'Acme')], hidden: ['org_name'] }), undefined, []);
     expect(keys(g.hidden)).toEqual(['org_name']);
     expect([g.filledCount, g.total]).toEqual([0, 1]);
+  });
+
+  it('counts a saved scan as the upload field\'s file, ahead of the phone\'s', () => {
+    const scan = (field_key: string, status: ScanInfo['status']) => ({ field_key, status }) as ScanInfo;
+    const fields = [field('photo', { field_type: 'file', required: true }), field('sign', { field_type: 'file', required: true }), field('cert', { field_type: 'file' })];
+    const g = groupFields(snap({ fields, files: [file('sign', 'rejected')], sent: true }), undefined, ['cert'], [scan('photo', 'ready'), scan('sign', 'filled'), scan('cert', 'filled')]);
+    expect(keys(g.filled)).toEqual(['photo', 'sign']);
+    expect(keys(g.look)).toEqual(['cert']); // its page still needs its own Upload button clicked
+    expect(g.filled[0]?.scan?.status).toBe('ready');
+    expect(keys(groupFields(snap({ fields: [fields[0]!], sent: true }), undefined, [], [scan('photo', 'refused')]).look)).toEqual(['photo']);
   });
 });

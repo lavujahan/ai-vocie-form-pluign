@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanScan, findDocument, homography, project, straightSize, warp, type Pt, type Quad } from '@/lib/files/docscan';
+import { cleanScan, findDocument, findOnScanner, homography, project, straightSize, warp, type Pt, type Quad } from '@vff/shared/ui/files/docscan';
 
 /** Inside a convex polygon (corners in order). */
 const inside = (q: Pt[], x: number, y: number) => {
@@ -120,5 +120,85 @@ describe('document scan', () => {
     expect(at(390, 10)).toBeGreaterThanOrEqual(245); // paper in the light
     expect(at(12, 21)).toBeLessThan(90); // writing in the shadow
     expect(at(290, 110)).toBeLessThan(140); // the photo isn't washed out
+  });
+});
+
+describe('findOnScanner', () => {
+  /** A white lid (slight noise) with `draw` on top. */
+  function scan(w: number, h: number, draw: (x: number, y: number) => number | null) {
+    const data = new Uint8ClampedArray(w * h * 4);
+    let seed = 7;
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        const v = draw(x, y) ?? 246 + (seed % 7) - 3;
+        const i = (y * w + x) * 4;
+        data[i] = data[i + 1] = data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+    return data;
+  }
+  /** Inside the card (near-white, as bright as the lid), its outline and printed lines: the only things that show. */
+  const tiltedCard = (w: number, h: number, q: Quad) => {
+    const px = q.map((p) => ({ x: p.x * w, y: p.y * h }));
+    return scan(w, h, (x, y) => {
+      if (!inside(px, x + 0.5, y + 0.5)) return null;
+      const near = [-3, 3].some((d) => !inside(px, x + d, y) || !inside(px, x, y + d));
+      if (near) return 170;
+      return y % 12 < 3 ? 60 : 244;
+    });
+  };
+  const close = (a: Quad, b: Quad, tol: number) => a.forEach((p, i) => (expect(p.x).toBeCloseTo(b[i].x, tol), expect(p.y).toBeCloseTo(b[i].y, tol)));
+
+  it('finds a tilted white card on the white lid, corners in order', () => {
+    const q: Quad = [
+      { x: 0.1, y: 0.16 },
+      { x: 0.7, y: 0.1 },
+      { x: 0.73, y: 0.36 },
+      { x: 0.13, y: 0.42 },
+    ];
+    const found = findOnScanner(tiltedCard(600, 700, q), 600, 700)!;
+    expect(found).not.toBeNull();
+    close(found, q, 1);
+    expect(found[0].x).toBeLessThan(found[1].x);
+    expect(found[0].y).toBeLessThan(found[3].y);
+  });
+
+  it('keeps the card when a speck of dust is elsewhere on the lid', () => {
+    const q: Quad = [
+      { x: 0.2, y: 0.5 },
+      { x: 0.8, y: 0.5 },
+      { x: 0.8, y: 0.75 },
+      { x: 0.2, y: 0.75 },
+    ];
+    const data = tiltedCard(600, 700, q);
+    for (const c of [0, 1, 2]) data[(40 * 600 + 40) * 4 + c] = 0;
+    close(findOnScanner(data, 600, 700)!, q, 1);
+  });
+
+  it('leaves a full page alone: text across the sheet is not a card', () => {
+    const page = scan(600, 840, (x, y) => (x > 50 && x < 550 && y > 60 && y < 780 && y % 16 < 3 ? 40 : null));
+    expect(findOnScanner(page, 600, 840)).toBeNull();
+  });
+
+  it('returns null for a blank scan', () => {
+    expect(findOnScanner(scan(600, 840, () => null), 600, 840)).toBeNull();
+  });
+
+  it('boxes a signature, upright and with a margin, joining its strokes', () => {
+    const sign = scan(600, 840, (x, y) => {
+      const stroke = (x > 200 && x < 300 && Math.abs(y - 400 - (x - 200) / 5) < 2) || (x > 310 && x < 400 && Math.abs(y - 420 + (x - 310) / 6) < 2);
+      return stroke ? 30 : null;
+    });
+    const q = findOnScanner(sign, 600, 840, { ink: true })!;
+    expect(q[0].x).toBeLessThan(200 / 600);
+    expect(q[1].x).toBeGreaterThan(400 / 600);
+    expect(q[0].y).toBe(q[1].y);
+    expect(q[0].x).toBe(q[3].x);
+    expect(q[2].y - q[0].y).toBeLessThan(0.1);
+  });
+
+  it('returns null for a blank signature page', () => {
+    expect(findOnScanner(scan(400, 300, () => null), 400, 300, { ink: true })).toBeNull();
   });
 });

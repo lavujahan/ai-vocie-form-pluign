@@ -22,9 +22,11 @@ import type {
   SessionValue,
   UtteranceRow,
 } from '@vff/shared';
+import { SENT_HOLD_MIN } from '@vff/shared';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
 import {
   MOVED_REASON,
+  NO_UPLOAD_FIELD,
   siteOf,
   TAMIL_TEXT_KEY,
   type ActiveSession,
@@ -37,11 +39,13 @@ import {
   type PopupRequest,
   type PopupResponse,
   type ResolveOptionMessage,
+  type ScanInfo,
   type ScanResult,
   type StateMessage,
   type UndoResult,
 } from '../messages';
 import contentScript from '../content/index.ts?script';
+import { clearScans, deleteScan, deleteScans, getScan, listScans, scanId, setScanStatus } from '../scans-db';
 import { api, ApiError } from './api';
 import {
   assertRoom,
@@ -77,6 +81,8 @@ let heldForms: HeldForm[] = [];
 let latestForms: LatestForm[] = [];
 /** The last read of Latest forms failed: an empty list says nothing about the operator's forms. */
 let latestFailed = false;
+/** Files saved from "Fetch from scan" (the files themselves stay in IndexedDB, which is the record of them). */
+let scans: ScanInfo[] = [];
 /** Open popups, and the tab each one was opened on. */
 const ports = new Map<chrome.runtime.Port, number | undefined>();
 
@@ -84,17 +90,30 @@ const ready = (async () => {
   state = migrate<Auth>((await chrome.storage.session.get('state')).state);
   if (state.auth && new Date(state.auth.expires_at) <= new Date()) state = { auth: null, tabs: {} };
   // Drop sessions whose tab was closed while the worker was not running.
+  const ended: string[] = [];
   for (const id of Object.keys(state.tabs)) {
     const alive = await chrome.tabs.get(Number(id)).then(
       () => true,
       () => false,
     );
-    if (!alive) state = { ...state, tabs: endTab(state.tabs, Number(id)) };
+    if (alive) continue;
+    if (!isSent(state.tabs[id].session)) ended.push(state.tabs[id].session.session_code);
+    state = { ...state, tabs: endTab(state.tabs, Number(id)) };
   }
+  // Saved scans go with the sign-in (Chrome closing signs out), and never outlive a form's hold.
+  const oldest = Date.now() - SENT_HOLD_MIN * 60_000;
+  await (state.auth ? deleteScans((s) => s.created_at < oldest || ended.includes(s.session_code)) : clearScans()).catch((e) => console.warn('could not clear old scans', e));
+  scans = await listScans().catch(() => []);
   await ensureRealtime();
 })();
 
 const tabOf = (tabId: number | undefined): TabState | undefined => (tabId === undefined ? undefined : state.tabs[tabId]);
+const scansOf = (code: string) => scans.filter((s) => s.session_code === code);
+const readyScans = (code: string) => scansOf(code).filter((s) => s.status === 'ready');
+/** The customer sent this form: it waits on the server, so its scans wait with it when the tab closes. */
+function isSent(s: ActiveSession) {
+  return s.snapshot?.session.status === 'filled';
+}
 
 function publicState(tabId: number | undefined): ExtState {
   const t = tabOf(tabId);
@@ -112,6 +131,7 @@ function publicState(tabId: number | undefined): ExtState {
     otherSessions: otherSessions(state.tabs, t ? tabId : undefined),
     notice: t?.notice ?? null,
     uploadClicks: t?.uploadClicks ?? [],
+    scans: t ? scansOf(t.session.session_code) : [],
   };
 }
 
@@ -130,10 +150,11 @@ async function save(patch: Partial<Persisted> = {}) {
 function pendingCount(t: TabState): number {
   const snap = t.session.snapshot;
   if (!snap) return 0;
+  const saved = readyScans(t.session.session_code).length;
   const since = changesSince(snap, t.filledUpTo);
-  if (since !== null) return since;
-  if (snap.session.status !== 'filled') return 0; // the phone hasn't sent yet
-  return Object.values(valuesForFill(snap)).filter(Boolean).length + (snap.files ?? []).filter((f) => f.status === 'uploaded').length;
+  if (since !== null) return since + saved;
+  if (snap.session.status !== 'filled') return saved; // the phone hasn't sent yet
+  return saved + Object.values(valuesForFill(snap)).filter(Boolean).length + (snap.files ?? []).filter((f) => f.status === 'uploaded').length;
 }
 
 let badgeColorSet = false;
@@ -150,6 +171,14 @@ function updateBadges() {
 
 const setTab = (tabId: number, patch: Partial<TabState>) => save({ tabs: patchTab(state.tabs, tabId, patch) });
 
+/** Deletes a form's saved scans (the form ended, or was started over). */
+async function dropScans(code: string) {
+  if (!scansOf(code).length) return;
+  await deleteScans((s) => s.session_code === code);
+  scans = await listScans();
+  await save();
+}
+
 function broadcast() {
   for (const [port, tabId] of ports) port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
 }
@@ -163,6 +192,8 @@ async function logout() {
   latestForms = [];
   latestFailed = false;
   await chrome.storage.session.remove(TAMIL_TEXT_KEY);
+  await clearScans().catch((e) => console.warn('could not clear scans', e));
+  scans = [];
   await save({ auth: null, tabs: {} });
 }
 
@@ -423,9 +454,17 @@ async function fillFiles(tabId: number, only?: string[]) {
   if (!s?.snapshot || !state.auth) return;
   const keyById = fieldKeyById(s.snapshot);
   const pending = (s.snapshot.files ?? []).filter((f) => f.status === 'uploaded' && (!only || only.includes(f.id)) && !filesInFlight.has(f.id));
+  // The operator's scan is the later choice for a field. Its phone file is done with: the server deletes it.
+  const scanned = new Set(scansOf(s.session_code).filter((x) => x.status !== 'refused').map((x) => x.field_key));
   for (const f of pending) {
     const key = keyById.get(f.field_id);
     if (!key) continue;
+    if (scanned.has(key)) {
+      await api(`/api/sessions/${s.session_code}/files/${f.id}`, { method: 'PATCH', body: { status: 'filled', reason: null }, token: state.auth.token }).catch((e) =>
+        console.warn('could not report the replaced file', e),
+      );
+      continue;
+    }
     filesInFlight.add(f.id);
     let result: FileFillResult;
     try {
@@ -456,23 +495,59 @@ async function fillFiles(tabId: number, only?: string[]) {
     } catch (e) {
       console.warn('could not report the file result', e);
     }
-    const t = tabOf(tabId);
-    if (t) {
-      const clicks = new Set(t.uploadClicks ?? []);
-      if (result.ok && result.needsUploadClick) clicks.add(key);
-      else clicks.delete(key);
-      const lastFill = t.lastFill ?? { filled: [], skipped: [] };
-      await setTab(tabId, {
-        uploadClicks: [...clicks],
-        canUndo: true,
-        lastFill: {
-          ...lastFill,
-          filled: result.ok ? [...new Set([...lastFill.filled, key])] : lastFill.filled.filter((k) => k !== key),
-          skipped: [...lastFill.skipped.filter((x) => x.field_key !== key), ...(result.ok ? [] : [{ field_key: key, reason: result.error }])],
-        },
-      });
-    }
+    await noteFileResult(tabId, key, result);
     filesInFlight.delete(f.id);
+  }
+}
+
+/** How a file went into the page, for the popup's field list. */
+async function noteFileResult(tabId: number, key: string, result: FileFillResult) {
+  const t = tabOf(tabId);
+  if (!t) return;
+  const clicks = new Set(t.uploadClicks ?? []);
+  if (result.ok && result.needsUploadClick) clicks.add(key);
+  else clicks.delete(key);
+  const lastFill = t.lastFill ?? { filled: [], skipped: [] };
+  await setTab(tabId, {
+    uploadClicks: [...clicks],
+    canUndo: true,
+    lastFill: {
+      ...lastFill,
+      filled: result.ok ? [...new Set([...lastFill.filled, key])] : lastFill.filled.filter((k) => k !== key),
+      skipped: [...lastFill.skipped.filter((x) => x.field_key !== key), ...(result.ok ? [] : [{ field_key: key, reason: result.error }])],
+    },
+  });
+}
+
+/**
+ * Puts the files saved from "Fetch from scan" into the page, the same way as the phone's: a real file in
+ * the input, so the site's own checks run. A scan whose field isn't on the page yet (a later step of the
+ * form), or whose tab moved to another site, stays ready for the next Fill form.
+ */
+async function fillScans(tabId: number) {
+  const s = tabOf(tabId)?.session;
+  if (!s) return;
+  for (const { id, field_key } of readyScans(s.session_code)) {
+    const saved = await getScan(id);
+    if (!saved) continue;
+    let result: FileFillResult;
+    try {
+      result = await sendToTab<FileFillResult>(tabId, {
+        type: 'FILL_FILE',
+        field_key,
+        name: saved.name,
+        mime: saved.mime,
+        base64: toBase64(await saved.blob.arrayBuffer()),
+        site: s.page_site,
+      });
+    } catch (e) {
+      console.warn('scan fill failed', e);
+      continue; // tried again on the next fill
+    }
+    if (!result.ok && (result.error === NO_UPLOAD_FIELD || result.error === MOVED_REASON)) continue;
+    await setScanStatus(id, result.ok ? 'filled' : 'refused', result.ok ? null : result.error);
+    scans = await listScans();
+    await noteFileResult(tabId, field_key, result);
   }
 }
 
@@ -497,6 +572,7 @@ async function phoneReset(tabId: number, scope: ResetScope | null, before: Sessi
     notice: scope === 'both' ? 'The phone cleared this form. Ready for the next applicant.' : 'The phone started over. The form here was left as it is.',
   });
   if (scope !== 'both') return;
+  await dropScans(t.session.session_code);
   await setTab(tabId, { uploadClicks: [] });
   await sendToTab(tabId, { type: 'CLEAR_FILES' }).catch(() => null);
   const undone = await sendToTab<UndoResult>(tabId, { type: 'UNDO' }).catch(() => null);
@@ -536,6 +612,7 @@ async function refreshSnapshot(tabId: number) {
     else if (e instanceof ApiError && e.status === 404 && tabOf(tabId)?.session.session_id === s.session_id) {
       await save({ tabs: endTab(state.tabs, tabId) });
       await ensureRealtime();
+      await dropScans(s.session_code);
     }
   }
 }
@@ -555,6 +632,7 @@ async function fillNow(tabId: number) {
   await setTab(tabId, { filledUpTo: watermarkOf(snap) || Date.now(), notice: null });
   await fillIntoPage(tabId);
   await fillFiles(tabId);
+  await fillScans(tabId);
 }
 
 function patchSnapshot(tabId: number, fn: (snap: SessionSnapshot) => SessionSnapshot) {
@@ -656,6 +734,8 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
         depends_on: row.depends_on ?? null,
         dynamic_options: row.dynamic_options ?? false,
         choice_hint: row.choice_hint ?? null,
+        accept: row.accept,
+        file_rules: row.file_rules,
       };
       patchSnapshot(tabId, (snap) => withFields(snap, [field]));
       await save();
@@ -667,7 +747,10 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
       patchSnapshot(tabId, (snap) => ({
         ...snap,
         fields: snap.fields.map((f) =>
-          f.id === row.id ? { ...f, label: row.clean_label || row.label || f.label, required: row.required, semantic_type: row.semantic_type } : f,
+          f.id === row.id
+            ? // The Form Analyzer may finish after the scan: the scan window needs its upload rules.
+              { ...f, label: row.clean_label || row.label || f.label, required: row.required, semantic_type: row.semantic_type, file_rules: row.file_rules ?? f.file_rules }
+            : f,
         ),
       }));
       await save();
@@ -786,6 +869,7 @@ async function discardHeld(code: string) {
     await ensureRealtime();
     releaseTab(Number(hit[0]));
   }
+  await dropScans(code);
   await refreshHeld();
 }
 
@@ -848,7 +932,10 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       };
       await save({ tabs: startTab(state.tabs, tab.id, session) });
       await ensureRealtime();
-      if (previous) void reportDesktop(previous, { state: 'closed' });
+      if (previous) {
+        void reportDesktop(previous, { state: 'closed' });
+        await dropScans(previous.session_code);
+      }
       await refreshSnapshot(tab.id);
       void watchTab(tab.id, scan.schema.fields.map((f) => f.field_key));
       return;
@@ -865,12 +952,15 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       return;
     }
 
-    case 'END_SESSION':
+    case 'END_SESSION': {
+      const code = tabOf(tabId)?.session.session_code;
       if (tabId !== undefined) await endTabSession(tabId);
+      if (code) await dropScans(code);
       await ensureRealtime();
       // The popup is back on its first screen: this form may have been the operator's first.
       await Promise.all([refreshHeld(), refreshLatest()]);
       return;
+    }
 
     case 'FILL':
       if (tabId === undefined || !tabOf(tabId)) return;
@@ -916,6 +1006,27 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
     case 'OPEN_TAMIL_WINDOW': {
       const tab = tabId === undefined ? undefined : await chrome.tabs.get(tabId).catch(() => undefined);
       await openWindow(chrome.runtime.getURL('src/popup/index.html?tamil=1'), tab?.windowId);
+      return;
+    }
+
+    case 'OPEN_SCAN_WINDOW': {
+      if (tabId === undefined || !tabOf(tabId)) throw new Error('Open a form first');
+      const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+      await openWindow(chrome.runtime.getURL(`src/popup/index.html?scan=1&tab=${tabId}`), tab?.windowId, SCAN_WINDOW_SIZE);
+      return;
+    }
+
+    case 'SCAN_SAVED':
+      scans = await listScans();
+      await save();
+      return;
+
+    case 'SCAN_REMOVE': {
+      const s = tabOf(tabId)?.session;
+      if (!s) return;
+      await deleteScan(scanId(s.session_code, req.field_key));
+      scans = await listScans();
+      await save();
       return;
     }
 
@@ -1052,8 +1163,11 @@ async function openPopupWindow(tab: chrome.tabs.Tab | undefined) {
   await openWindow(chrome.runtime.getURL(`src/popup/index.html?tab=${tab.id}`), tab.windowId);
 }
 
+/** Room for the scan thumbnails and the before / after of a scan. */
+const SCAN_WINDOW_SIZE = { width: 680, height: 780 };
+
 /** The popup page in a small window of its own, beside `besideWindow`. */
-async function openWindow(url: string, besideWindow: number | undefined) {
+async function openWindow(url: string, besideWindow: number | undefined, { width, height } = { width: 392, height: 680 }) {
   // Already open: bring it to the front.
   const [open] = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB], documentUrls: [url] }).catch(() => []);
   if (open && open.windowId >= 0) {
@@ -1062,8 +1176,6 @@ async function openWindow(url: string, besideWindow: number | undefined) {
   }
   // At the top right of the form's window, where the toolbar popup would be.
   const near = besideWindow === undefined ? null : await chrome.windows.get(besideWindow).catch(() => null);
-  const width = 392;
-  const height = 680;
   const at = near?.left !== undefined && near.width ? { left: Math.max(0, near.left + near.width - width - 12), top: (near.top ?? 0) + 40 } : {};
   await chrome.windows.create({ url, type: 'popup', width, height, focused: true, ...at });
 }
@@ -1079,5 +1191,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
 // Other tabs are unaffected.
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   await ready;
+  const s = tabOf(tabId)?.session;
   await endTabSession(tabId);
+  if (s && !isSent(s)) await dropScans(s.session_code);
 });

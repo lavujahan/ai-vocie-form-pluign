@@ -1,11 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, Pencil, Smartphone, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, Pencil, Printer, Smartphone, X } from 'lucide-react';
 import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, SENT_HOLD_MIN, type AccountResponse, type FieldFile, type HeldForm, type LatestForm, type SessionField } from '@vff/shared';
-import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type StateMessage } from '../messages';
+import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type ScanInfo, type StateMessage } from '../messages';
 import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { groupFields, type FieldGroup, type FieldItem } from './groups';
 import { QrBlock } from './qr';
 import { QueueScreen } from './queue-screen';
+import { ScanWindow } from './scan/scan-window';
 import { TamilTyping } from './tamil-typing';
 import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, Input, Menu, OpenTamilTyping, Pill, Progress, Screen } from './ui';
 
@@ -16,6 +17,9 @@ import { Banner, Button, FieldRow, FoldedGroup, GroupCard, Header, HeaderChip, I
 const WINDOW_TAB = Number(new URLSearchParams(location.search).get('tab')) || undefined;
 /** Tamil typing in a window of its own (it has no form, so no tab). */
 const TAMIL_WINDOW = new URLSearchParams(location.search).has('tamil');
+/** Fetch from scan: a window of its own that stays open beside the form (a popup closes when the page is clicked). */
+const SCAN_WINDOW = new URLSearchParams(location.search).has('scan');
+if (SCAN_WINDOW) document.documentElement.dataset.window = 'scan';
 
 /** State of the form session in the tab this popup was opened on (each tab has its own). */
 function useExtState() {
@@ -131,6 +135,8 @@ export function App() {
         ? '1 other form open'
         : `${state.otherSessions} other forms open`
       : null;
+
+  if (SCAN_WINDOW) return <ScanWindow state={state} request={request} />;
 
   let body: React.ReactNode;
   if (!state) {
@@ -831,20 +837,29 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
   /** The QR code is shown again ("Connect phone again") and no phone has scanned it yet. */
   const waiting = snap.session.status === 'waiting';
 
-  const groups = useMemo(() => groupFields(snap, state.lastFill?.skipped, state.uploadClicks), [snap, state.lastFill, state.uploadClicks]);
+  const groups = useMemo(() => groupFields(snap, state.lastFill?.skipped, state.uploadClicks, state.scans), [snap, state.lastFill, state.uploadClicks, state.scans]);
   const processingKeys = useMemo(
     () => new Set(snap.utterances.filter((u) => u.status === 'processing' && u.target_field_key).map((u) => u.target_field_key!)),
     [snap.utterances],
   );
   const processing = snap.utterances.filter((u) => u.status === 'processing').length;
-  const hasValues = snap.values.some((v) => v.value) || (snap.files ?? []).some((f) => f.status === 'uploaded');
+  const hasValues = snap.values.some((v) => v.value) || (snap.files ?? []).some((f) => f.status === 'uploaded') || state.scans.length > 0;
   const fresh = state.unfilledChanges ?? 0;
+  const freshScans = state.scans.filter((x) => x.status === 'ready').length;
   const voice = voiceOn(s);
+  const hidden = snap.session.hidden_fields ?? [];
+  const uploads = snap.fields.some((f) => f.field_type === 'file' && !hidden.includes(f.field_key));
 
   async function act(type: 'FILL' | 'UNDO' | 'RECONNECT') {
     setBusy(type === 'FILL' ? 'fill' : type === 'UNDO' ? 'undo' : 'reconnect');
     setError(await send({ type }));
     setBusy(null);
+  }
+
+  async function fetchScan() {
+    const failed = await send({ type: 'OPEN_SCAN_WINDOW' });
+    if (failed) setError(failed);
+    else if (!WINDOW_TAB) window.close(); // the toolbar popup; the window now has the operator's attention
   }
 
   // One status line: the most important thing that happened, and what to do about it.
@@ -858,6 +873,12 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
         <b className="font-semibold">{fresh === 1 ? '1 new answer' : `${fresh} new answers`}</b> from the phone. Click Fill form to add them.
       </Banner>
     );
+  } else if (freshScans) {
+    banner = (
+      <Banner tone="accent" icon={<Printer size={16} />}>
+        <b className="font-semibold">{freshScans === 1 ? '1 scan' : `${freshScans} scans`}</b> saved. Click Fill form to add {freshScans === 1 ? 'it' : 'them'}.
+      </Banner>
+    );
   } else if (snap.session.status === 'filled') {
     banner = (
       <Banner tone="live" icon={<Check size={16} />}>
@@ -866,8 +887,8 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
     );
   }
 
-  const row = ({ field: f, value: v, file, reason, needsClick, low }: FieldItem, group: FieldGroup) => {
-    if (f.field_type === 'file') return <FileRow key={f.id} field={f} file={file} needsClick={needsClick} group={group} />;
+  const row = ({ field: f, value: v, file, scan, reason, needsClick, low }: FieldItem, group: FieldGroup) => {
+    if (f.field_type === 'file') return <FileRow key={f.id} field={f} file={file} scan={scan} needsClick={needsClick} group={group} />;
     let content: React.ReactNode;
     if (processingKeys.has(f.field_key)) content = <Loader2 size={14} className="inline animate-spin text-muted" />;
     else if (v?.value)
@@ -922,7 +943,7 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
         <>
           <Button variant="primary" className="flex-1" loading={busy === 'fill'} disabled={!hasValues} onClick={() => act('FILL')}>
             Fill form
-            {fresh > 0 && <span className="rounded-full bg-page/20 px-1.5 text-xs font-semibold tabular-nums">{fresh} new</span>}
+            {fresh + freshScans > 0 && <span className="rounded-full bg-page/20 px-1.5 text-xs font-semibold tabular-nums">{fresh + freshScans} new</span>}
           </Button>
           <Button loading={busy === 'undo'} disabled={!state.canUndo} onClick={() => act('UNDO')}>
             Undo
@@ -973,6 +994,7 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
       {planBlocked(state.account) && <PlanMeter account={state.account!} />}
       <Progress done={groups.filledCount} total={groups.total} label="filled" />
       {banner}
+      {uploads && <FetchScanButton saved={state.scans.length} onClick={fetchScan} />}
       {s.resumed && !waiting && (
         <Button className="w-full" loading={busy === 'reconnect'} onClick={() => act('RECONNECT')}>
           Customer needs to correct
@@ -1003,15 +1025,58 @@ function PairedCard({ state, send, others }: { state: ExtState; send: Send; othe
   );
 }
 
-/** An upload field: waiting for the phone, received, in the page (maybe needing the page's Upload button), or refused. */
-function FileRow({ field, file, needsClick, group }: { field: SessionField; file: FieldFile | undefined; needsClick: boolean; group: FieldGroup }) {
+/** Opens the scan window, where the scanner's files are picked for this form's upload fields. */
+function FetchScanButton({ saved, onClick }: { saved: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 rounded-lg border-2 border-brand bg-card px-2.5 py-2 text-left hover:bg-accent-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-ink"
+    >
+      <span className="grid size-8 shrink-0 place-items-center rounded-md bg-brand text-brand-ink">
+        <Printer size={16} />
+      </span>
+      <span className="grid min-w-0 flex-1">
+        <span className="text-sm font-bold">Fetch from scan</span>
+        <span className="text-xs text-muted">Scans for this form stay on this computer</span>
+      </span>
+      {saved > 0 && <Pill tone="accent">{saved} saved</Pill>}
+    </button>
+  );
+}
+
+/** An upload field: a scan, or waiting for the phone, received, in the page (maybe needing the page's Upload button), or refused. */
+function FileRow({
+  field,
+  file,
+  scan,
+  needsClick,
+  group,
+}: {
+  field: SessionField;
+  file: FieldFile | undefined;
+  scan: ScanInfo | undefined;
+  needsClick: boolean;
+  group: FieldGroup;
+}) {
   let content: React.ReactNode;
   let sub: React.ReactNode;
-  if (!file) {
+  if (scan?.status === 'refused') {
+    content = <Pill tone="warn">Refused</Pill>;
+    sub = <span className="text-danger-ink">Refused by the site: {scan.reason ?? 'check its size / type rules'}</span>;
+  } else if (scan) {
+    content = (
+      <span className="inline-flex items-center gap-1.5">
+        {formatSize(scan.bytes)} <Pill tone="accent">Scan</Pill>
+      </span>
+    );
+    if (needsClick) sub = <span className="text-accent-ink">Click “Upload” next to this field on the page</span>;
+    else if (scan.pages > 1) sub = `PDF · ${scan.pages} pages`;
+  } else if (!file) {
     content = field.required ? (
-      <Pill tone={group === 'look' ? 'warn' : 'neutral'}>From phone</Pill>
+      <Pill tone={group === 'look' ? 'warn' : 'neutral'}>Phone or scan</Pill>
     ) : (
-      <span className="font-normal text-muted">Waiting for phone</span>
+      <span className="font-normal text-muted">Waiting</span>
     );
   } else if (file.status === 'rejected') {
     content = <Pill tone="warn">Refused</Pill>;

@@ -1,5 +1,6 @@
 import {
   MOVED_REASON,
+  NO_UPLOAD_FIELD,
   siteOf,
   type ContentRequest,
   type FieldsChangedMessage,
@@ -77,7 +78,7 @@ chrome.runtime.onMessage.addListener((msg: ContentRequest, _sender, sendResponse
           scan();
           entry = registry.get(msg.field_key);
         }
-        if (!entry?.file) return { ok: false, error: "The upload field isn't on the page" } satisfies FileFillResult;
+        if (!entry?.file) return { ok: false, error: NO_UPLOAD_FIELD } satisfies FileFillResult;
         const result = await fillFile(entry, { name: msg.name, mime: msg.mime, base64: msg.base64 });
         if (result.ok) filledFiles.add(msg.field_key);
         return result satisfies FileFillResult;

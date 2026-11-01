@@ -29,6 +29,9 @@ export const MOVED_REASON = 'This tab now shows a different site';
 /** Skip reason for a value whose field isn't on the page (yet): it is filled when the field appears. */
 export const NOT_ON_PAGE = "Waiting: this field isn't on the page yet";
 
+/** An upload field isn't on the page: a saved scan waits for it, for a later step of the form. */
+export const NO_UPLOAD_FIELD = "The upload field isn't on the page";
+
 export type ContentRequest =
   | { type: 'PING' }
   | { type: 'SCAN' }
@@ -105,6 +108,12 @@ export type PopupRequest = (
   | { type: 'QUEUE_STATUS'; session_code: string }
   /** × on a form under Latest forms: it leaves this operator's list. */
   | { type: 'HIDE_LATEST'; source_id: string }
+  /** Fetch from scan: the scan window for this tab's form. */
+  | { type: 'OPEN_SCAN_WINDOW' }
+  /** The scan window saved a file: it is in IndexedDB, the worker reads the list again. */
+  | { type: 'SCAN_SAVED' }
+  /** × beside a saved scan: the field goes back to waiting for a file. */
+  | { type: 'SCAN_REMOVE'; field_key: string }
 ) & { tab_id?: number };
 
 export type PopupResponse =
@@ -129,6 +138,23 @@ export type ActiveSession = CreateSessionResponse & {
   site_access?: boolean;
   /** false: a typing-only form (set when scanning; the snapshot's session has the current value). */
   voice_enabled?: boolean;
+};
+
+/** A file saved for an upload field from "Fetch from scan". Kept on this computer only (`scans-db.ts`). */
+export type ScanInfo = {
+  id: string;
+  session_code: string;
+  field_key: string;
+  /** The name the website gets. */
+  name: string;
+  mime: string;
+  bytes: number;
+  pages: number;
+  /** ready: goes into the page on the next Fill form. */
+  status: 'ready' | 'filled' | 'refused';
+  /** The website's own message, when refused. */
+  reason: string | null;
+  created_at: number;
 };
 
 /** The popup's view: the session of its own tab. */
@@ -157,6 +183,8 @@ export type ExtState = {
   notice: string | null;
   /** Upload fields filled from the phone whose page still needs its own "Upload" button clicked. */
   uploadClicks: string[];
+  /** Files saved for this tab's form from "Fetch from scan". */
+  scans: ScanInfo[];
 };
 
 export type StateMessage = { type: 'STATE'; state: ExtState };

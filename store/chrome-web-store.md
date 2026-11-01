@@ -315,7 +315,7 @@ Google counts data as collected if the extension collects, sends, uses or shares
 | --- | --- | --- |
 | Personally identifiable information | Yes | Names, phone numbers, addresses and ID numbers spoken into forms; the user's own phone number for sign-in |
 | Authentication information | Yes | Phone number and PIN; the session token kept in `chrome.storage` |
-| Website content | Yes | Field labels, dropdown options and upload rules of the form being filled |
+| Website content | Yes | Field labels, dropdown options and upload rules of the form being filled. Fetch from scan also handles documents from a folder the user chooses: they stay in this browser and go only into the website's upload field. |
 | Web history | Yes | The scan sends the form page's URL (`schema.page_url`), and the phone shows its site name. Google counts URLs as web browsing activity. |
 | Personal communications | Yes, to be safe | Voice recordings are sent for transcription. They are captured on the phone web page, not by the extension, but the store's reviewers may count them. |
 | Health, financial, location, user activity | No | Not collected. A form may ask for health or bank details, but those go into the PII values above, and the extension doesn't look for them. |
