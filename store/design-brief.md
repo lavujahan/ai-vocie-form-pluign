@@ -7,7 +7,9 @@ These are prompts for Claude Design, covering every image and the video in the s
 2. Then paste the asset prompts one at a time, in order: icon first, because every other asset uses it.
 3. Export each asset at the exact size listed, as PNG, and check it against the **checklist** at the end.
 
-Everything in the prompts comes from the app's code: the colours (`packages/shared/ui/tokens.css`), the components (`apps/extension/src/popup`, `apps/web/app/s/[code]`) and the on-screen wording (`apps/web/lib/i18n.ts`). If the app's UI changes, update this file before making new images.
+Everything in the prompts comes from the app's code at commit `7b38bb7`: the colours (`packages/shared/ui/tokens.css`), the components (`apps/extension/src/popup`, `apps/web/app/s/[code]`) and the on-screen wording (`apps/web/lib/i18n.ts`). If the app's UI changes, update this file before making new images.
+
+The Chrome Web Store takes 5 screenshots, so the newest features are in **Website images** (Prompts W1–W5), for the homepage. The 3D promo videos are in [promo-videos-brief.md](promo-videos-brief.md).
 
 ---
 
@@ -17,7 +19,7 @@ Everything in the prompts comes from the app's code: the colours (`packages/shar
 You are designing Chrome Web Store assets for a real Chrome extension called "Voice Form Filler". Every screen you draw must look like the real app described below. Do not invent features, buttons, badges, ratings or text that are not listed here.
 
 WHAT THE PRODUCT DOES
-A Chrome extension reads the form on a desktop web page and shows a QR code. The user scans it with their phone, taps a mic and speaks the answers in Tamil, English or Tanglish. The answers appear on the computer's form. Photos and documents for upload fields are taken on the phone, converted to the site's size rules and put into the form. The user always checks and submits the form themselves.
+A Chrome extension reads the form on a desktop web page and shows a QR code. The user scans it with their phone, taps a mic and speaks the answers in Tamil, English or Tanglish. After they stop, the answers appear on the phone. They tap Send to desktop, and the operator clicks Fill form on the computer: the page changes only on that click. Photos and documents for upload fields are taken on the phone or fetched from the scanner's folder, converted to the site's size rules and put into the form. Customers in a queue can fill a form on their own phones before their turn; the answers wait for the operator. The user always checks and submits the form themselves. There are no spoken commands: Send and Start over are buttons.
 
 BRAND
 - Name: Voice Form Filler
@@ -54,11 +56,17 @@ APP UI COMPONENTS (draw the app screens with exactly these)
 - Field row: a 16px state icon first (green #1F6B2A check when filled, amber #6B3F00 warning triangle when it needs a look, nothing otherwise), then the label, then the value right-aligned in semibold, 1px divider between rows.
 - Popup header: the honey-gold band. Left: the brand mark (white Lucide "mic" on a 22px #1E4E9C rounded square) + "Voice2Fill" 14px bold. Right: small chips (12px, 6px radius, dark text on a 10% dark tint), e.g. "● Live" (green dot) and "42 min". Second line, 12px: the form name · site.
 - Popup field groups: white cards, each with an 11px bold uppercase muted title and a count ("FILLED 10"); "NEEDS A LOOK" titles are amber.
+- Popup bubbles: at the bottom right of the content, two round 44px bubbles with a 2px white border, side by side: blue #1E4E9C with a white lightbulb (voice tips), and gold #EBC865 with a dark "த" and a small red mic badge (Tamil typing).
 - Icons: Lucide, outline, 2px stroke.
 
 THE TWO APP SCREENS
 1) Extension popup: 360px wide, mild gold page (#FBF3DC). Top to bottom: the honey-gold header, the content (14px side padding, 10px between blocks), and a white footer bar with a 1px top border holding the buttons. It opens under the Chrome toolbar icon.
-2) Phone page: mobile web page in a plain modern phone frame, page colour #FAF9F7, 16px side padding. Top right: a small outline button that switches language ("தமிழ்" when in English, "English" when in Tamil). Below it, cards.
+2) Phone page: mobile web page in a plain modern phone frame, page colour #FAF9F7. There is one scrolling page and no separate review screen.
+   - Top bar: form name 17px semibold; under it "forms.example.in" 12px muted with a small green dot; a "⋯" button on the right (the language switch and Start over are inside it).
+   - Field rows, divided by 1px lines: a 13px muted label ("Father's name *"), then the value 15.5px semibold with a green tick. On the right, a 52px outlined blue "✎ Type" button. Once most fields are filled, a blue "Speak" button appears beside it. In Tamil mode the labels read "தந்தை பெயர் · Father's name" and the buttons are in Tamil too.
+   - Row states: amber pills "Say it", "Check this" and "Pick one"; a 12px muted line "Heard: “…”" under a value.
+   - Fixed white bottom bar: an italic line of what was heard; "6 / 16 filled" in bold, sometimes with an amber chip "2 need you"; then a 72px round red mic button ("Start", with "Tap to speak" under it) and, beside it, a wide dark #1F1E1C rounded button with a Lucide "send" icon, "Send to desktop". While recording, the mic shows a white square and "Stop" with a soft red ring, and the time under it.
+   - Floating at the edge: a blue round lightbulb bubble above a gold round "த" bubble with a small blue "EN" tag. They hide while recording.
 
 SAMPLE DATA (made up; use it consistently)
 Form name: "Applicant registration" · 16 fields · site shown on phone: "forms.example.in"
@@ -67,6 +75,8 @@ Mobile number: 9876543210 · Email: ramesh.kumar@example.com
 State: Tamil Nadu · District: Salem · Taluk: Omalur · Village: (being picked)
 Upload field 1: "Applicant photo", rules "JPG · max 50 KB", result 38 KB
 Upload field 2: "Address proof", rules "JPG / PDF · max 500 KB · up to 3 pages", result a 2-page PDF of 412 KB
+Second form, for lists: "Scholarship application" · 22 fields
+Customers in the waiting list: Ramesh Kumar •••• 3210 · Lakshmi •••• 7788
 
 THE DESKTOP WEB PAGE (background of screenshots)
 A generic, plain registration form in a Chrome window: title "Applicant registration", two-column grey-bordered inputs, labels above inputs. No logo, emblem, seal, flag or name of any real government, department, bank or portal. URL bar: "forms.example.in/register".
@@ -110,13 +120,14 @@ Layout: left 40% is a solid #1E4E9C panel with text; right 60% is a soft #FAF9F7
 Left panel (white text, left-aligned, vertically centred, 64 px left margin):
 - Small icon (from Prompt 1) and the name "Voice Form Filler" in 20 px semibold.
 - Headline, 44 px semibold, 2 lines max: "Scan once, then just talk"
-- One line, 20 px, 80% white: "Click Scan, then scan the QR code with your phone."
+- One line, 20 px, 80% white: "Click QR for this page, then scan it with your phone."
 
 Right side: a Chrome window (light theme) cropped at the right edge, showing the generic "Applicant registration" form from the brief. The extension popup is open, attached under the toolbar icon at the top right of the window, drawn at about 1.3x so it is easy to read. Popup content, top to bottom:
   - Header band: brand mark + "Voice2Fill", on the right a chip "16 fields"; second line "Applicant registration · forms.example.in".
   - A QR code, 176×176 px at 1x, on white with 6 px padding and 8 px radius, centred. Use a real-looking QR pattern.
   - "Scan with your phone camera" (14 px, centred).
   - Lucide "clock" icon (12 px) + "Expires in 9:42" (12 px muted, centred).
+  - The two bubbles from the brief at the bottom right of the content (lightbulb and "த").
   - Footer bar: "Waiting for your phone…" (12px muted) on the left, an outline "Cancel" button on the right.
 Nothing else in the popup.
 ```
@@ -128,29 +139,25 @@ Screenshot 2 of 5. Canvas 1280×800 px, full bleed. Same split layout as screens
 
 Left panel text:
 - Headline: "Speak Tamil, English or Tanglish"
-- Line: "The form fills as you speak."
+- Line: "Say the answers. Then click Fill form."
 
 Right side, two things side by side:
 
-A) A phone (front, upright, plain modern frame) showing the phone page:
-  - Top right: small outline button "தமிழ்".
-  - Card 1:
-      Title "Applicant registration" (16px semibold), under it "forms.example.in" (12px muted).
-      Two tabs: "Full form" (selected: #DCE8FB background, #1E4E9C text) and "Field by field" (outline).
-      A big round red (#D4433D) button, 96 px, with a white square "stop" icon, a soft red ring around it (recording state).
-      Under it in red medium text: "Listening… 0:07".
-      A quote box (#F4F3F0, 8px radius, 14px text): “என் பேரு Ramesh Kumar, அப்பா பேரு Murugan, mobile number 9876543210”
-      (Tamil words appear in Tamil script and English words in English letters: this is how the real speech-to-text writes Tanglish.)
-  - Under the card: an outline button, full width: "Check before sending · 6/16 ›".
+A) A phone (front, upright, plain modern frame) showing the phone page, recording the next answers:
+  - Top bar from the brief.
+  - Field rows: Name — ✓ Ramesh Kumar · Father's name — ✓ Murugan · Mobile number — ✓ 9876543210 · Date of birth * — amber pill "Say it".
+  - Bottom bar, recording: italic "Listening… say any fields. They fill when you tap Stop."; bold "3 / 16 filled"; the 72 px red mic showing a white square and "Stop", with a soft red ring and "0:07" under it; the dark "Send to desktop" button, dimmed.
+  - No floating bubbles (they hide while recording).
+  - Beside the phone, outside its frame, a simple white speech bubble: “பிறந்த தேதி 12 மார்ச் 1988”
+    (Tamil words appear in Tamil script and numbers as digits: this is how the real speech-to-text writes Tanglish.)
 
 B) Behind/left of the phone, the Chrome window with the form. The "Mobile number" input shows "9876543210" with a 2px #F2B705 outline 2px outside the input (the real "just filled" highlight). Name and Father's name are already filled.
   The extension popup is open on the window:
     - Header band: brand mark + "Voice2Fill"; chips "● Live" and "42 min"; second line "Applicant registration · forms.example.in".
     - "3 of 16 filled" (12px muted, the number in semibold ink) with 19% on the right, and a 7px progress bar under it.
-    - Accent banner with a Lucide "smartphone" icon: "1 new answer from the phone. Click Fill form to add them." ("1 new answer" in semibold)
     - Card "FILLED 3": ✓ Name — Ramesh Kumar · ✓ Father's name — Murugan · ✓ Mobile number — 9876543210.
     - Card "NOT ANSWERED YET 13": Email — "—" (muted) · Date of birth — neutral pill "Required".
-    - Footer bar: primary "Fill form" with a small "1 new" badge (wide), an outline "Undo", and an outline square "⋯" button.
+    - Footer bar: primary "Fill form" (wide), an outline "Undo", and an outline square "⋯" button.
 ```
 
 ## Prompt 4: screenshot 3 – "Dependent dropdowns, filled in order"
@@ -166,12 +173,10 @@ Right side:
 
 A) Chrome window with the form scrolled to an "Address" section: four dropdowns in a row or a 2×2 grid, with small arrows between them showing the order: State "Tamil Nadu" → District "Salem" → Taluk "Omalur" → Village (empty, showing "Select village").
 
-B) A phone showing the review screen:
-  - Card header: Lucide "arrow-left" icon button + "Check before sending" (16px semibold).
-  - Field rows (with dividers): State — ✓ Tamil Nadu · District — ✓ Salem · Taluk — ✓ Omalur · Village — warn pill "Pick one", with a small muted sub-line under the value: You said “Kanniyampatti”.
-  - The Village row is expanded underneath: a pale amber box (#F9E2B0 at 60%) with amber text "You said “Kanniyampatti”. Which one did you mean?" and two white outline option buttons: "Kanniyampatti" and "Kanniyampatti Pudur".
-  - Under the rows, small muted text: "Tap any value to edit or re-speak it."
-  - At the bottom of the card, a full-width outline button with a Lucide "send" icon: "Send to desktop".
+B) A phone showing the phone page from the brief, scrolled to these rows:
+  - Field rows: State — ✓ Tamil Nadu · District — ✓ Salem · Taluk — ✓ Omalur · Village * — amber pill "Pick one", with a small muted line under it: You said “Kanniyampatti”.
+  - The Village row is open underneath: a pale amber box (#F9E2B0 at 60%) with amber text "You said “Kanniyampatti”. Which one did you mean?" and two white outline option buttons: "Kanniyampatti" and "Kanniyampatti Pudur". Under the box, a dropdown, a dark "Save" button and a text "Cancel" button.
+  - Bottom bar: bold "9 / 16 filled", an amber chip "1 need you", the red mic and the dark "Send to desktop" button.
 ```
 
 ## Prompt 5: screenshot 4 – "Photos sized to the site's rules"
@@ -202,7 +207,7 @@ Screenshot 5 of 5. Canvas 1280×800 px, full bleed. Same split layout.
 
 Left panel text:
 - Headline: "Paper documents to one PDF"
-- Line: "Photograph each page. The phone makes one PDF within the site's limit."
+- Line: "Photograph each page. The phone straightens it and makes one PDF."
 
 Right side, two things side by side:
 
@@ -213,7 +218,7 @@ A) A phone showing the document sheet: a card with a light blue border (#1E4E9C 
   - A row of two buttons: outline button with a Lucide "camera" icon, "Add page"; ghost (text-only, muted) button with a Lucide "file-up" icon, "Choose file".
   - Green text (#1F6B2A, 14px): "Ready: PDF (2 pages) · 412 KB".
   - Full-width primary dark button: "Send to computer".
-  Above the card, partly visible, the phone's "Photos and documents" card (small uppercase muted heading) with two rows: Applicant photo — green text "On the computer ✓" · Address proof — warn pill "Add".
+  Below the card, partly visible, the small uppercase muted heading "Photos and documents" with two field rows: Applicant photo — green text "On the computer ✓" · Address proof * — amber pill "Needed", with a blue "Add" camera button on the right.
 
 B) The Chrome window with the form's "Documents" section: an "Address proof" file input showing "address-proof.pdf", and next to it the site's own "Upload" button, outlined with a 3px #F2B705 highlight (the extension highlights the site's own Upload button when the page has one).
   The popup open beside it, with rows:
@@ -252,24 +257,25 @@ Same look as the small promo tile, with more space:
 
 ---
 
-## Prompt 9: promo video (optional)
+## Prompt 9: store video (optional)
 
-Google says screenshots and video should show the real product. The most honest video is a **screen recording of the real app**, using the storyboard below with the same sample data. Use the Claude Design prompt only if you can't record the real app yet.
+Google says screenshots and video should show the real product. The most honest video is a **screen recording of the real app**, using the storyboard below with the same sample data. Use the Claude Design prompt only if you can't record the real app yet. This is the short, plain video for the store; the longer 3D videos are in [promo-videos-brief.md](promo-videos-brief.md).
 
-**Storyboard (about 40 seconds, 1920×1080, no voice-over needed, captions on screen)**
+**Storyboard (about 45 seconds, 1920×1080, no voice-over needed, captions on screen)**
 
 | Time | On screen | Caption |
 | --- | --- | --- |
 | 0–4 s | Icon + name on #1E4E9C | Voice Form Filler |
-| 4–10 s | Chrome with the form → click the toolbar icon → "Scan form on this page" → QR card appears | Scan the form |
+| 4–10 s | Chrome with the form → click the toolbar icon → "QR for this page" → "Generate QR" → QR card appears | Scan the form |
 | 10–14 s | Phone camera scans the QR; the phone page opens | Open it on your phone |
-| 14–24 s | Tap the red mic, "Listening… 0:07", transcript appears; on the computer, fields fill one by one with the yellow outline | Speak in Tamil, English or Tanglish |
-| 24–30 s | Village "Pick one" on the phone → tap "Kanniyampatti" → the village dropdown on the computer fills | Pick when it's unclear |
-| 30–36 s | Photo sheet → "Ready: JPG · 38 KB" → "Send to computer" → the upload field shows photo.jpg | Photos sized to fit |
-| 36–40 s | The full form on the computer, the cursor near the site's own Submit button (not clicked) → end card with icon and name | You check. You submit. |
+| 14–22 s | Tap the red mic, "Listening… 0:07", tap Stop; "Matching your answers to the fields…"; the rows fill on the phone | Speak in Tamil, English or Tanglish |
+| 22–28 s | Tap "Send to desktop"; on the computer click "Fill form"; fields fill one by one with the yellow outline | Click Fill form |
+| 28–33 s | Village "Pick one" on the phone → tap "Kanniyampatti" → the village dropdown on the computer fills | Pick when it's unclear |
+| 33–39 s | Photo sheet → "Ready: JPG · 38 KB" → "Send to computer" → the upload field shows photo.jpg | Photos sized to fit |
+| 39–45 s | The full form on the computer, the cursor near the site's own Submit button (not clicked) → end card with icon and name | You check. You submit. |
 
 ```
-Create an animated storyboard video, 1920×1080, about 40 seconds, that plays the scenes in the table below in order with smooth, simple transitions (fade or slide, no 3D, no particles). Use the components, colours, sample data and screen contents from the shared brief and from screenshots 1–4 exactly. Each scene shows its caption in white on a #1E4E9C bar at the bottom left, 40 px semibold. Show the yellow #F2B705 outline briefly on each field as it fills. The video ends on the icon and "Voice Form Filler" on #1E4E9C. No music cues, logos of other companies, ratings or claims.
+Create an animated storyboard video, 1920×1080, about 45 seconds, that plays the scenes in the table below in order with smooth, simple transitions (fade or slide, no 3D, no particles). Use the components, colours, sample data and screen contents from the shared brief and from screenshots 1–4 exactly. Each scene shows its caption in white on a #1E4E9C bar at the bottom left, 40 px semibold. Show the yellow #F2B705 outline briefly on each field as it fills. The video ends on the icon and "Voice Form Filler" on #1E4E9C. No music cues, logos of other companies, ratings or claims.
 
 [paste the storyboard table here]
 ```
@@ -278,15 +284,112 @@ Upload the video to YouTube (public or unlisted) and paste the link in the dashb
 
 ---
 
+## Website images: new features
+
+For the homepage ([pages/home.md](pages/home.md)), one beside each feature. Each is 1280×800 PNG, with the same split layout as the screenshots and the same store rules from Prompt 0.
+
+### Prompt W1: customers fill forms before their turn
+
+```
+Website image W1. Canvas 1280×800 px, full bleed. Same split layout as the screenshots.
+
+Left panel text:
+- Headline: "Customers fill forms before their turn"
+- Line: "One QR per customer. The answers wait for you."
+
+Right side, three things from left to right, joined by a thin dotted arrow:
+
+A) The extension popup, QR for other, with the card "Latest forms" and on its right "One QR per customer" (12px muted):
+  - Row: "Applicant registration" (semibold), under it "forms.example.in · 16 fields · Used 12 times" (12px muted), an outline "QR" button and a small × icon.
+  - Row: "Scholarship application", "forms.example.in · 22 fields · Used 5 times", the same buttons.
+
+B) The popup's large QR screen: a 256 px QR code, "Scan with your phone camera" in semibold, under it in muted Tamil "உங்கள் போன் கேமராவால் ஸ்கேன் செய்யுங்கள்", a clock icon and "Expires in 9:42", and an outline "Copy link" button.
+
+C) A phone showing a white card, centred: a green tick in a pale green circle, "Your answers are saved" (semibold), "The operator will call you at your turn." (muted), a full-width amber box "Keep the phone that gets the OTP with you.", and an outline button "Change my answers".
+```
+
+### Prompt W2: answers wait for you
+
+```
+Website image W2. Canvas 1280×800 px, full bleed. Same split layout.
+
+Left panel text:
+- Headline: "Answers wait if a website logs you out"
+- Line: "Sent answers stay for about 2 hours."
+
+Right side: the Chrome window with the form, and the extension popup open on it, drawn at about 1.3x:
+  - Header band: brand mark + "Voice2Fill", chip "386 min"; second line "Signed in as Selvi".
+  - White row "This page  forms.example.in".
+  - A card with a 2px #1E4E9C border. Its title bar is #DCE8FB: "Customer answers waiting" in bold blue, and on the right a small blue count "2".
+  - Row: "Ramesh Kumar" (semibold) "•••• 3210" (12px muted), under it "Applicant registration · Sent 10:42 am · 1 h 42 left" (12px muted), a dark "Use" button and a small × icon.
+  - Row: "Lakshmi" "•••• 7788", "Applicant registration · Sent 10:47 am · 1 h 47 left", the same buttons.
+  - Under the card, two buttons side by side: dark "QR for this page", outline "QR for other".
+```
+
+### Prompt W3: fetch from scan
+
+```
+Website image W3. Canvas 1280×800 px, full bleed. Same split layout.
+
+Left panel text:
+- Headline: "Fetch documents from your scanner"
+- Line: "Pick the scan. It is sized to the field's rules."
+
+Right side: a desktop window titled "Fetch from scan", with the honey-gold header: brand mark + "Fetch from scan", a chip "2 upload fields" on the right, and a second line "Applicant registration".
+  - A white bar: green dot "Connected", a Lucide folder icon, "Scans" in semibold, then outline buttons "Refresh" and "Change folder".
+  - Small uppercase heading "New scans", and on the right "Last hour".
+  - A row of three scan cards (white, 7:8 thumbnails of flat placeholder paper with grey lines, no readable text or real document design), each with a time such as "10:52 am" and a file name such as "scan_0014.jpg". The first card has a blue border and a round blue "1" at its top left. The third card is faded with a green "Used" pill.
+  - A thin line, then semibold "1 scan selected. Use for which field?"
+  - Two field buttons: "Address proof *" with "JPG / PDF · max 500 KB · up to 3 pages" (12px muted), and "Applicant photo *" with "JPG · max 50 KB".
+  - White footer, 12px muted: "Scans stay on this computer until the form ends."
+```
+
+### Prompt W4: Tamil typing
+
+```
+Website image W4. Canvas 1280×800 px, full bleed. Same split layout.
+
+Left panel text:
+- Headline: "Speak Tamil, copy the text"
+- Line: "For letters, messages and remark boxes."
+
+Right side: a Chrome window with a plain "Remarks" text box, and the extension popup open on it, showing Tamil typing:
+  - Honey-gold header: a blue square with a white "த", "Tamil typing", chip "386 min", and a close "×". Second line: "Speak Tamil, then copy the text anywhere".
+  - A white card, centred: a 68 px red round mic button, "Tap to add more" (semibold), and in 12px muted "Last recording used 12 seconds of your plan".
+  - Small uppercase "TAMIL TEXT", and on the right "You can edit it".
+  - A white text box in 17px Noto Sans Tamil: "ஐயா, எனது சான்றிதழின் நகல் வேண்டும்."
+  - Footer: a dark "Copy text" button (wide) and an outline "Clear" button.
+```
+
+### Prompt W5: Typing only
+
+```
+Website image W5. Canvas 1280×800 px, full bleed. Same split layout.
+
+Left panel text:
+- Headline: "Noisy counter? Typing only."
+- Line: "The customer types on their phone. No voice minutes."
+
+Right side, two things side by side:
+
+A) The extension popup with the card below the two QR buttons: a checkbox ticked with a blue outline around the card, "Typing only (no voice)" in semibold, and "The customer types every answer. No mic on the phone, no voice minutes used." (12px muted). Under it, an outline "Cancel" and a dark "Generate QR".
+
+B) A phone showing the phone page with no mic anywhere: a light blue banner with a pencil icon, "Tap a field to type its answer."; field rows with "✎ Type" buttons and no "Speak" button; the bottom bar with bold "3 / 16 filled" and the dark "Send to desktop" button filling the whole width. The gold "த" bubble stays at the edge; the blue lightbulb does not show.
+```
+
+---
+
 ## Checklist for every exported asset
 
-- [ ] **Exact size:** icon 128×128 (plus 48, 32, 16); screenshots 1280×800; promo tile 440×280; marquee 1400×560.
+- [ ] **Exact size:** icon 128×128 (plus 48, 32, 16); screenshots and website images 1280×800; promo tile 440×280; marquee 1400×560.
 - [ ] **Format and framing:** PNG; square corners; background reaches every edge.
 - [ ] **Only real features, with the app's real wording.** Compare against the prompts above.
+- [ ] **Current screens only:** the mic is in the bottom bar. No "Check before sending" screen, no "Full form / Field by field" tabs, no "Scan form on this page" button, no spoken commands.
+- [ ] **A person clicks Fill form.** Answers never appear on the page by themselves, and never while someone is still speaking.
 - [ ] **Made-up data only:** no real people, real Aadhaar/ID numbers, or real email addresses.
 - [ ] **No real portal names or logos:** no government emblem, department or bank, and no other company's logo.
 - [ ] **No claims:** no "best", ratings, user counts or awards.
-- [ ] **Tamil renders correctly.** Ask a Tamil reader to check the transcript in screenshot 2 and the "தமிழ்" button.
+- [ ] **Tamil renders correctly.** Ask a Tamil reader to check the speech bubble in screenshot 2, the QR line in W1 and the text in W4.
 - [ ] **Half-size check:** the promo tile is still clear at 220×140.
 - [ ] **Same branding everywhere:** the icon, blue and mic match across all assets.
 

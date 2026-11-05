@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { checkFile, FileCommitRequest, formatOfMime, type FieldFile } from '@vff/shared';
 import { requirePhone } from '@/lib/auth';
+import { recordUse } from '@/lib/billing/plans';
 import { getUploadField, uploadName } from '@/lib/files/fields';
 import { inspectUpload, removeObjects } from '@/lib/files/storage';
 import { fail, must, route } from '@/lib/http';
@@ -60,6 +61,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
       .select('id, field_id, file_name, mime, bytes, pages, status, reason, created_at')
       .single(),
   ) as FieldFile;
+  await recordUse(session.user_id, 'documents', { sessionId: session.id, ref: field.field_key });
   const old = (previous as { path: string } | null)?.path;
   if (old && old !== body.path) await removeObjects([old]);
   return NextResponse.json(row, { status: 201 });

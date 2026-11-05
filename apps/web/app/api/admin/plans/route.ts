@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { CreatePlanRequest, type Plan } from '@vff/shared';
 import { requireAdmin } from '@/lib/auth';
-import { isMissing, listPlans } from '@/lib/billing/plans';
+import { isMissing, listPlans, PLAN_LIMIT_COLUMNS } from '@/lib/billing/plans';
 import { fail, route } from '@/lib/http';
 import { db } from '@/lib/supabase-admin';
 
@@ -19,8 +19,9 @@ export const POST = route(async (req) => {
   const { data, error } = await db()
     .from('plans')
     .insert({ ...body, sort: ((last as { sort: number } | null)?.sort ?? 0) + 1 })
-    .select('id, name, price_inr, minutes, days, is_active, sort')
+    .select(PLAN_LIMIT_COLUMNS)
     .single();
+  if (error?.code === '42703') throw fail(500, 'Apply migration 0026_plan_counters.sql to set plan limits.');
   if (error?.code === '23505') throw fail(409, 'A plan with this id already exists');
   if (isMissing(error)) throw fail(500, 'Apply migration 0013_subscriptions.sql to use plans.');
   if (error) throw fail(500, 'Database error');

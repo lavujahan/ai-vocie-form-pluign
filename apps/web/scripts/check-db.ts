@@ -310,6 +310,28 @@ try {
       // Relative to the period's minutes, so changing the Trial's minutes (migration 0015) doesn't break it.
       check('Plans: a top-up adds minutes to the current period', !topup.error && s3?.minutes_total === (s2?.minutes_total ?? 0) + 50, topup.error?.message ?? JSON.stringify(s3));
       check('Plans: plan and top-up payments are recorded', pays?.length === 2, JSON.stringify(pays));
+
+      // ---- Plan counters (migration 0026): the Trial's limits, uses counted once, extras ----
+      const counters = async () =>
+        (await admin.rpc('subscription_status', { p_user: b.id })).data?.[0] as
+          | { documents_total: number | null; documents_used: number; nonvoice_qrs_total: number | null; computers_total: number | null }
+          | undefined;
+      const c0 = await counters();
+      check('Counters: subscription_status has them (apply migration 0026)', c0?.documents_used !== undefined, JSON.stringify(c0));
+      if (c0?.documents_used !== undefined) {
+        check('Counters: a period copies its plan limits', c0.computers_total !== null && c0.documents_total !== null, JSON.stringify(c0));
+        const doc = { user_id: b.id, session_id: session.id, kind: 'document', ref: 'check-db-field' };
+        const first = await admin.from('feature_events').insert(doc);
+        const again = await admin.from('feature_events').insert(doc);
+        const c1 = await counters();
+        check('Counters: a document counts once per field', !first.error && again.error?.code === '23505' && c1?.documents_used === 1, JSON.stringify({ first: first.error, again: again.error, c1 }));
+        const extra = await admin.rpc('add_extra', {
+          p_user: b.id, p_kind: 'nonvoice_qrs', p_count: 10, p_amount: 0, p_method: 'upi', p_reference: null, p_note: null, p_admin: null,
+        });
+        const c2 = await counters();
+        check('Counters: add_extra adds to the current period', !extra.error && c2?.nonvoice_qrs_total === (c0.nonvoice_qrs_total ?? 0) + 10, extra.error?.message ?? JSON.stringify(c2));
+        await admin.from('feature_events').delete().eq('user_id', b.id);
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 import 'server-only';
-import type { AdminUserRow, GrantPlanRequest, PaymentRow, TopUpRequest } from '@vff/shared';
+import type { AdminUserRow, ExtraRequest, GrantPlanRequest, PaymentRow, TopUpRequest } from '@vff/shared';
 import { ADMIN_USER_COLUMNS } from '../admin';
 import { fail, must } from '../http';
 import { db } from '../supabase-admin';
@@ -26,7 +26,7 @@ function planError(error: { code?: string; message: string } | null): never | vo
   if (!error) return;
   if (isMissing(error)) throw fail(500, 'Apply migration 0013_subscriptions.sql to use plans.');
   if (error.message.includes('already_planned')) throw fail(409, 'This user already has a plan starting later. Renew it after that one instead.');
-  if (error.message.includes('no_active_plan')) throw fail(409, 'This user has no active plan to add minutes to. Renew the plan instead.');
+  if (error.message.includes('no_active_plan')) throw fail(409, 'This user has no active plan to add to. Renew the plan instead.');
   if (error.message.includes('unknown_plan')) throw fail(404, 'Plan not found');
   if (error.message.includes('unknown_user')) throw fail(404, 'User not found');
   console.error('plan update failed', error);
@@ -70,6 +70,26 @@ export async function addMinutes(userId: string, body: TopUpRequest, adminId: st
     p_note: body.note || null,
     p_admin: adminId,
   });
+  planError(error);
+}
+
+/** Adds minutes or any plan counter to the user's current period (migration 0026), with its payment. */
+export async function addExtra(userId: string, body: ExtraRequest, adminId: string): Promise<void> {
+  const { error } = await db().rpc('add_extra', {
+    p_user: userId,
+    p_kind: body.kind,
+    p_count: body.count,
+    p_amount: body.amount_inr ?? 0,
+    p_method: body.method,
+    p_reference: body.reference || null,
+    p_note: body.note || null,
+    p_admin: adminId,
+  });
+  if (isMissing(error)) {
+    if (body.kind !== 'minutes') throw fail(500, 'Apply migration 0026_plan_counters.sql to add to plan limits.');
+    const { kind: _kind, count, ...payment } = body;
+    return addMinutes(userId, { minutes: count, ...payment }, adminId);
+  }
   planError(error);
 }
 

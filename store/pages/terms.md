@@ -21,20 +21,24 @@ These terms apply to Voice Form Filler ("the service"): the Chrome extension, th
 
 ## 2. Plans
 
-Every plan gives you a number of **voice minutes** for a number of days. A voice minute is one minute of recording on the phone (from tapping the microphone to tapping Stop), sent for transcription. Scanning a form, filling it, photos and uploads don't use minutes.
+Every plan has every feature. A plan gives you, for a number of days, a number of **voice minutes** and limits on the other things below. A voice minute is one minute of recording on the phone (from tapping the microphone to tapping Stop), sent for transcription.
 
-| Plan | Price | Voice minutes | Lasts |
-| --- | --- | --- | --- |
-| Trial | Free | 15 | 7 days (once per person) |
-| Starter | ₹99 | 60 | 30 days |
-| Basic | ₹249 | 150 | 30 days |
-| Pro | ₹649 | 400 | 30 days |
-| Business | ₹1,949 | 1,200 | 30 days |
-| Extra minutes | ₹79 | 50 | Until the current plan ends |
+| Plan | Price | Voice minutes | Computers | Documents | Voice Form Fill QR | Non Voice Form Fill QR | Lasts |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Trial | Free | 15 | 1 | 10 | 15 | 5 | 7 days (once per person) |
+| Starter | ₹149 | 60 | 1 | 30 | 60 | 20 | 30 days |
+| Basic | ₹249 | 150 | 1 | 80 | 150 | 50 | 30 days |
+| Pro | ₹649 | 400 | 2 | 250 | 400 | 150 | 30 days |
+| Business | ₹1,949 | 1,200 | 3 | 800 | 1,200 | 500 | 30 days |
+| Extra minutes | ₹79 | 50 | | | | | Until the current plan ends |
 
-- The extension shows your plan, the minutes left and the end date.
-- When the minutes run out or the plan ends, you can't scan new forms or record speech until you renew. A recording that has already started is finished.
-- Unused minutes don't carry over to the next plan.
+- **Computers:** how many computers can be signed in at the same time. Signing in on one more asks you to sign one of the others out.
+- **Documents:** each file that goes into a form's upload field, from the phone or from your scanner. A new file for the same field of the same form doesn't count again.
+- **Voice Form Fill QR / Non Voice Form Fill QR:** each click on **Generate QR**, with voice on or with Typing only. Making a new QR for an expired one that nobody scanned doesn't count.
+- We can add extra of any of these to your current plan.
+- The extension shows your plan, the minutes and other limits left, and the end date.
+- When the minutes run out or the plan ends, you can't scan new forms or record speech until you renew. A recording that has already started is finished. When another limit runs out, only that feature stops.
+- Unused minutes and limits don't carry over to the next plan.
 - We may change prices. A new price applies from your next renewal, never to a plan you have already paid for.
 
 ## 3. Paying and renewing

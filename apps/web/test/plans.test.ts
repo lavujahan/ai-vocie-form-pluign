@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planBlock, toPlanStatus, type RawPlanStatus } from '@/lib/billing/plans';
+import { planBlock, regenerateIsFree, toPlanStatus, type RawPlanStatus } from '@/lib/billing/plans';
 import { MSG } from '@/lib/session-rules';
 
 const NOW = new Date('2026-10-27T10:00:00Z');
@@ -67,5 +67,69 @@ describe('planBlock', () => {
   it('blocks when every minute is used, but not with a few seconds left', () => {
     expect(planBlock('user', toPlanStatus(raw({ used_ms: 150 * 60_000 }), NOW))).toEqual({ code: 'quota_exceeded', error: MSG.minutesUsed });
     expect(planBlock('user', toPlanStatus(raw({ used_ms: 150 * 60_000 - 5_000 }), NOW))).toBeNull();
+  });
+});
+
+describe('plan counters (migration 0026)', () => {
+  const withCounters = (over: Partial<RawPlanStatus> = {}) =>
+    toPlanStatus(
+      raw({
+        computers_total: 2,
+        documents_total: 250,
+        documents_used: 249,
+        voice_qrs_total: 400,
+        voice_qrs_used: 12,
+        nonvoice_qrs_total: 150,
+        nonvoice_qrs_used: 150,
+        ...over,
+      }),
+      NOW,
+    );
+
+  it('reads each counter, with null for no limit', () => {
+    expect(withCounters({ documents_total: null }).counters).toEqual({
+      computers: 2,
+      documents: { total: null, used: 249 },
+      voice_qrs: { total: 400, used: 12 },
+      nonvoice_qrs: { total: 150, used: 150 },
+    });
+  });
+
+  it('has no counters before the migration', () => {
+    expect(toPlanStatus(raw(), NOW).counters).toBeUndefined();
+  });
+
+  it('refuses a counter that is used up, and only that one', () => {
+    const p = withCounters();
+    expect(planBlock('user', p, { minutes: false, counter: 'nonvoice_qrs' })).toEqual({ code: 'limit_nonvoice_qrs', error: MSG.nonvoiceQrsUsed });
+    expect(planBlock('user', p, { counter: 'voice_qrs' })).toBeNull();
+    expect(planBlock('user', p, { minutes: false, counter: 'documents' })).toBeNull();
+    expect(planBlock('user', p, { minutes: false, counter: 'documents', count: 2 })?.code).toBe('limit_documents');
+  });
+
+  it('never limits a counter without a limit, an admin, or a period from before the migration', () => {
+    expect(planBlock('user', withCounters({ nonvoice_qrs_total: null }), { minutes: false, counter: 'nonvoice_qrs' })).toBeNull();
+    expect(planBlock('admin', withCounters(), { minutes: false, counter: 'nonvoice_qrs' })).toBeNull();
+    expect(planBlock('user', toPlanStatus(raw(), NOW), { minutes: false, counter: 'nonvoice_qrs' })).toBeNull();
+  });
+
+  it('still says minutes first when both are used up', () => {
+    expect(planBlock('user', withCounters({ used_ms: 999_999_999, voice_qrs_used: 400 }), { counter: 'voice_qrs' })?.code).toBe('quota_exceeded');
+  });
+});
+
+describe('regenerateIsFree', () => {
+  const prev = { user_id: 'u1', paired_at: null, voice_enabled: true };
+
+  it('is free for an expired QR of the same user and voice choice that nobody scanned', () => {
+    expect(regenerateIsFree(prev, 'u1', true)).toBe(true);
+    expect(regenerateIsFree({ ...prev, voice_enabled: undefined }, 'u1', true)).toBe(true);
+  });
+
+  it('counts when it was scanned, is someone else’s, changes the voice choice, or is unknown', () => {
+    expect(regenerateIsFree({ ...prev, paired_at: '2026-10-27T09:00:00Z' }, 'u1', true)).toBe(false);
+    expect(regenerateIsFree(prev, 'u2', true)).toBe(false);
+    expect(regenerateIsFree(prev, 'u1', false)).toBe(false);
+    expect(regenerateIsFree(null, 'u1', true)).toBe(false);
   });
 });

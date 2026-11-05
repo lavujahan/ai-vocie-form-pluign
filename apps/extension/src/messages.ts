@@ -1,6 +1,7 @@
 import type {
   AccountResponse,
   CreateSessionResponse,
+  DeviceInfo,
   FieldOption,
   ResolveOptionResponse,
   FillReport,
@@ -83,10 +84,12 @@ export type PopupRequest = (
   | { type: 'GET_ACCOUNT' }
   /** Re-read Latest forms (QR for other was opened). */
   | { type: 'GET_LATEST' }
-  | { type: 'LOGIN'; phone: string; pin: string }
+  /** `replace_device_id`: too many computers signed in, sign that one out to sign in here. */
+  | { type: 'LOGIN'; phone: string; pin: string; replace_device_id?: string }
   | { type: 'LOGOUT' }
   /** `voice: false`: a typing-only form (the customer types on their phone; no mic, no voice minutes). */
-  | { type: 'START_SESSION'; voice?: boolean }
+  /** `regenerate`: a new QR for this tab's expired one (not counted when nobody scanned it). */
+  | { type: 'START_SESSION'; voice?: boolean; regenerate?: boolean }
   | { type: 'END_SESSION' }
   /** Turn voice on or off for this tab's form. */
   | { type: 'SET_VOICE'; voice: boolean }
@@ -112,14 +115,16 @@ export type PopupRequest = (
   | { type: 'OPEN_SCAN_WINDOW' }
   /** The scan window saved a file: it is in IndexedDB, the worker reads the list again. */
   | { type: 'SCAN_SAVED' }
+  /** Fetch from scan is about to save a file for this field: counts it as a document, or refuses when none are left. */
+  | { type: 'SCAN_COUNT'; session_code: string; field_key: string }
   /** × beside a saved scan: the field goes back to waiting for a file. */
   | { type: 'SCAN_REMOVE'; field_key: string }
 ) & { tab_id?: number };
 
 export type PopupResponse =
   | { ok: true; state: ExtState; text?: string; qr?: CreateSessionResponse }
-  /** `code`: why the server refused, e.g. quota_exceeded. */
-  | { ok: false; error: string; code?: string; state: ExtState };
+  /** `code`: why the server refused, e.g. quota_exceeded; too_many_computers comes with the computers signed in. */
+  | { ok: false; error: string; code?: string; devices?: DeviceInfo[]; state: ExtState };
 
 /** chrome.storage.session key of the Tamil typing text: kept in this browser only, until sign out or Chrome closes. */
 export const TAMIL_TEXT_KEY = 'vf-tamil-text';

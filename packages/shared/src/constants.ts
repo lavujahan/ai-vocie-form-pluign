@@ -29,3 +29,12 @@ export const USER_COOKIE = 'vf_session';
 /** Admin → Users → Add minutes: the default top-up. */
 export const TOPUP_MINUTES = 50;
 export const TOPUP_PRICE_INR = 79;
+
+/** Plan counters (migration 0026) as users and admins see them. Never call them "forms". */
+export const COUNTER_LABELS = {
+  minutes: 'Voice minutes',
+  computers: 'Computers',
+  documents: 'Documents',
+  voice_qrs: 'Voice Form Fill QR',
+  nonvoice_qrs: 'Non Voice Form Fill QR',
+} as const;

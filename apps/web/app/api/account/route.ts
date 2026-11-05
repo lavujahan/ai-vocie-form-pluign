@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { AccountResponse } from '@vff/shared';
 import { requireUser, toPublicUser } from '@/lib/auth';
+import { activeDevices } from '@/lib/billing/devices';
 import { planStatus } from '@/lib/billing/plans';
 import { isMissingCompletions } from '@/lib/completions';
 import { route } from '@/lib/http';
@@ -25,7 +26,7 @@ async function formsCompleted(userId: string, since: string): Promise<AccountRes
 /** The signed-in user, their plan and the forms they completed: the extension popup shows them. */
 export const GET = route(async (req) => {
   const user = await requireUser(req);
-  const status = user.role === 'admin' ? null : await planStatus(user.id);
+  const [status, devices] = user.role === 'admin' ? [null, null] : await Promise.all([planStatus(user.id), activeDevices(user.id)]);
   // "This plan": since the current period started; without a plan, the last 30 days.
   const since = status?.plan.starts_at ?? new Date(Date.now() - 30 * DAY_MS).toISOString();
   return NextResponse.json({
@@ -33,6 +34,7 @@ export const GET = route(async (req) => {
     plan: status?.plan ?? null,
     // Admins are never limited, and nobody is before migration 0013.
     unlimited: user.role === 'admin' || status === null,
+    ...(devices ? { computers_in_use: devices.length } : {}),
     forms_completed: await formsCompleted(user.id, since),
   } satisfies AccountResponse);
 });

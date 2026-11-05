@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { PAIR_CODE_TTL_MIN, QueueSessionRequest, type CreateSessionResponse } from '@vff/shared';
 import { pageOf } from '@/lib/agents/formCache';
 import { requireUser } from '@/lib/auth';
-import { assertCanUse } from '@/lib/billing/plans';
+import { assertCanUse, recordUse } from '@/lib/billing/plans';
 import { env } from '@/lib/env';
 import { fail, must, route } from '@/lib/http';
 import { cloneFieldRows } from '@/lib/queue';
@@ -20,7 +20,9 @@ export const runtime = 'nodejs';
 export const POST = route(async (req) => {
   const user = await requireUser(req);
   const { source_id, voice } = QueueSessionRequest.parse(await req.json());
-  await assertCanUse(user.id, user.role, { minutes: voice });
+  // Generate QR for a customer counts one Voice / Non Voice Form Fill QR.
+  const counter = voice ? 'voice_qrs' : 'nonvoice_qrs';
+  await assertCanUse(user.id, user.role, { minutes: voice, counter });
 
   const source = await getSessionById(source_id);
   if (source.user_id !== user.id) throw fail(403, 'Not allowed');
@@ -55,6 +57,7 @@ export const POST = route(async (req) => {
   }
   const session = must(inserted) as { id: string };
   must(await db().from('form_fields').insert(cloneFieldRows(fields, session.id)));
+  if (user.role !== 'admin') await recordUse(user.id, counter, { sessionId: session.id });
 
   return NextResponse.json(
     {

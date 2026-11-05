@@ -1,10 +1,10 @@
 import 'server-only';
-import type { Plan, PlanStatus, UserRole } from '@vff/shared';
+import type { CounterKind, Plan, PlanCounters, PlanStatus, UserRole } from '@vff/shared';
 import { fail, must } from '../http';
 import { MSG } from '../session-rules';
 import { db } from '../supabase-admin';
 
-/** One row of subscription_status() (bigint may be a string). */
+/** One row of subscription_status() (bigint may be a string). The counter columns come with migration 0026. */
 export type RawPlanStatus = {
   user_id: string;
   role: UserRole;
@@ -15,13 +15,33 @@ export type RawPlanStatus = {
   minutes_total: number | string | null;
   used_ms: number | string | null;
   paid_until: string | null;
+  computers_total?: number | null;
+  documents_total?: number | null;
+  documents_used?: number | null;
+  voice_qrs_total?: number | null;
+  voice_qrs_used?: number | null;
+  nonvoice_qrs_total?: number | null;
+  nonvoice_qrs_used?: number | null;
 };
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
+/** A limit: null (or missing) = no limit. */
+const limitOf = (v: number | string | null | undefined) => (v === null || v === undefined ? null : Number(v));
+
+function toCounters(r: RawPlanStatus): PlanCounters | undefined {
+  if (r.documents_used === undefined) return undefined; // migration 0026 not applied
+  return {
+    computers: limitOf(r.computers_total),
+    documents: { total: limitOf(r.documents_total), used: Number(r.documents_used ?? 0) },
+    voice_qrs: { total: limitOf(r.voice_qrs_total), used: Number(r.voice_qrs_used ?? 0) },
+    nonvoice_qrs: { total: limitOf(r.nonvoice_qrs_total), used: Number(r.nonvoice_qrs_used ?? 0) },
+  };
+}
 
 export function toPlanStatus(r: RawPlanStatus, now = new Date()): PlanStatus {
   const total = Number(r.minutes_total ?? 0);
   const used = Number(r.used_ms ?? 0) / 60_000;
+  const counters = toCounters(r);
   return {
     plan_id: r.plan_id,
     plan_name: r.plan_name,
@@ -33,21 +53,33 @@ export function toPlanStatus(r: RawPlanStatus, now = new Date()): PlanStatus {
     minutes_left: Math.max(0, total - used),
     active: !!r.ends_at && Date.parse(r.ends_at) > now.getTime() && (!r.starts_at || Date.parse(r.starts_at) <= now.getTime()),
     paid_until: r.paid_until,
+    ...(counters ? { counters } : {}),
   };
 }
 
+type BlockCode = 'plan_expired' | 'quota_exceeded' | `limit_${CounterKind}`;
+
+const COUNTER_MSG: Record<CounterKind, string> = {
+  documents: MSG.documentsUsed,
+  voice_qrs: MSG.voiceQrsUsed,
+  nonvoice_qrs: MSG.nonvoiceQrsUsed,
+};
+
 /**
  * Why a user can't scan or speak (null = allowed). Admins are never blocked. With `minutes: false`
- * (a typing-only form, the Tamil helper: no voice minutes used) only an ended plan blocks.
+ * (a typing-only form, the Tamil helper: no voice minutes used) only an ended plan blocks. `counter`:
+ * also refused when `count` more would go over that counter's limit.
  */
 export function planBlock(
   role: UserRole,
   plan: PlanStatus | null,
-  { minutes = true }: { minutes?: boolean } = {},
-): { code: 'plan_expired' | 'quota_exceeded'; error: string } | null {
+  { minutes = true, counter, count = 1 }: { minutes?: boolean; counter?: CounterKind; count?: number } = {},
+): { code: BlockCode; error: string } | null {
   if (role === 'admin') return null;
   if (!plan?.active) return { code: 'plan_expired', error: MSG.planEnded };
   if (minutes && plan.minutes_left <= 0) return { code: 'quota_exceeded', error: MSG.minutesUsed };
+  const c = counter ? plan.counters?.[counter] : undefined;
+  if (counter && c && c.total !== null && c.used + count > c.total) return { code: `limit_${counter}`, error: COUNTER_MSG[counter] };
   return null;
 }
 
@@ -72,10 +104,15 @@ export async function planStatus(userId: string): Promise<{ role: UserRole; plan
 }
 
 /**
- * Throws 402 when the user has no active plan or (unless `minutes: false`) no voice minutes left.
- * Called before anything that costs AI money (scanning a form, transcribing speech). Admins skip the lookup.
+ * Throws 402 when the user has no active plan, (unless `minutes: false`) no voice minutes left, or (with
+ * `counter`) not `count` more of that counter left. Called before anything that costs AI money or uses a
+ * counter. Admins skip the lookup.
  */
-export async function assertCanUse(userId: string, role?: UserRole, opts: { minutes?: boolean } = {}): Promise<void> {
+export async function assertCanUse(
+  userId: string,
+  role?: UserRole,
+  opts: { minutes?: boolean; counter?: CounterKind; count?: number } = {},
+): Promise<void> {
   if (role === 'admin') return;
   const all = await planStatuses(userId);
   if (!all) return;
@@ -84,7 +121,55 @@ export async function assertCanUse(userId: string, role?: UserRole, opts: { minu
   if (block) throw fail(402, block.error, { code: block.code });
 }
 
+const EVENT_KIND: Record<CounterKind, string> = { documents: 'document', voice_qrs: 'voice_qr', nonvoice_qrs: 'nonvoice_qr' };
+
+/**
+ * Counts one use (migration 0026). With `ref`, a use counts once per session (e.g. a document per upload
+ * field): false when it was already counted. Never throws: the work it counts has already been done.
+ */
+export async function recordUse(
+  userId: string,
+  counter: CounterKind,
+  { sessionId = null, ref = null }: { sessionId?: string | null; ref?: string | null } = {},
+): Promise<boolean> {
+  const { error } = await db().from('feature_events').insert({ user_id: userId, session_id: sessionId, kind: EVENT_KIND[counter], ref });
+  if (!error) return true;
+  if (error.code !== '23505' && !isMissing(error)) console.warn('use not counted', counter, error);
+  return false;
+}
+
+/**
+ * Regenerate on an expired QR (the same form, the same voice choice, nobody scanned it) makes a new QR
+ * without counting one: only Generate QR counts.
+ */
+export function regenerateIsFree(
+  previous: { user_id: string; paired_at: string | null; voice_enabled?: boolean | null } | null,
+  userId: string,
+  voice: boolean,
+): boolean {
+  return !!previous && previous.user_id === userId && !previous.paired_at && (previous.voice_enabled ?? true) === voice;
+}
+
+/** Was this use already counted (a document for this upload field of this session)? */
+export async function wasCounted(sessionId: string, counter: CounterKind, ref: string): Promise<boolean> {
+  const { data, error } = await db()
+    .from('feature_events')
+    .select('id')
+    .eq('session_id', sessionId)
+    .eq('kind', EVENT_KIND[counter])
+    .eq('ref', ref)
+    .limit(1)
+    .maybeSingle();
+  return !error && !!data;
+}
+
+const PLAN_COLUMNS = 'id, name, price_inr, minutes, days, is_active, sort';
+export const PLAN_LIMIT_COLUMNS = `${PLAN_COLUMNS}, computers, documents, voice_qrs, nonvoice_qrs`;
+
 export async function listPlans(): Promise<Plan[]> {
-  const rows = must(await db().from('plans').select('id, name, price_inr, minutes, days, is_active, sort').order('sort').order('price_inr')) as Plan[];
+  let res = await db().from('plans').select(PLAN_LIMIT_COLUMNS).order('sort').order('price_inr');
+  // Migration 0026 not applied: plans without limits.
+  if (res.error?.code === '42703') res = (await db().from('plans').select(PLAN_COLUMNS).order('sort').order('price_inr')) as typeof res;
+  const rows = must(res) as Plan[];
   return rows.map((p) => ({ ...p, price_inr: Number(p.price_inr) }));
 }

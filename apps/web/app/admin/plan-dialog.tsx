@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { Monitor, X } from 'lucide-react';
 import {
+  COUNTER_LABELS,
   TOPUP_MINUTES,
   TOPUP_PRICE_INR,
   type AdminUserRow,
+  type ExtraRequest,
   type PaymentMethod,
   type PlanStatus,
   type UserPlanResponse,
@@ -48,7 +50,28 @@ export function PlanCell({ user }: { user: AdminUserRow }) {
   );
 }
 
-type Mode = 'renew' | 'topup';
+type Mode = 'renew' | 'extra';
+type ExtraKind = ExtraRequest['kind'];
+const EXTRA_KINDS: ExtraKind[] = ['minutes', 'documents', 'voice_qrs', 'nonvoice_qrs', 'computers'];
+/** Default amount for an extra: the usual top-up for minutes; the admin sets a price for the others. */
+const defaultCount = (k: ExtraKind) => (k === 'minutes' ? TOPUP_MINUTES : k === 'computers' ? 1 : 50);
+const defaultAmount = (k: ExtraKind) => (k === 'minutes' ? TOPUP_PRICE_INR : 0);
+
+/** This period's use of each counter, with + Add (minutes first). null: no limit. */
+function usageRows(p: PlanStatus, computersInUse: number | null): { kind: ExtraKind; used: number; total: number | null }[] {
+  const rows: { kind: ExtraKind; used: number; total: number | null }[] = [
+    { kind: 'minutes', used: Math.min(p.minutes_total, Math.floor(p.minutes_used)), total: p.minutes_total },
+  ];
+  const c = p.counters;
+  if (!c) return rows;
+  rows.push(
+    { kind: 'documents', ...c.documents },
+    { kind: 'voice_qrs', ...c.voice_qrs },
+    { kind: 'nonvoice_qrs', ...c.nonvoice_qrs },
+    { kind: 'computers', used: computersInUse ?? 0, total: c.computers },
+  );
+  return rows;
+}
 
 /** A user's plan: renew or change it, add minutes, and see past periods and payments. */
 export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onClose: () => void; onSaved: (u: AdminUserRow) => void }) {
@@ -57,7 +80,8 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
   const [mode, setMode] = useState<Mode>('renew');
   const [planId, setPlanId] = useState('');
   const [start, setStart] = useState<'after_current' | 'now'>('after_current');
-  const [minutes, setMinutes] = useState(String(TOPUP_MINUTES));
+  const [kind, setKind] = useState<ExtraKind>('minutes');
+  const [count, setCount] = useState(String(TOPUP_MINUTES));
   const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<PaymentMethod>('upi');
   const [reference, setReference] = useState('');
@@ -97,7 +121,25 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
   function switchMode(m: Mode) {
     setMode(m);
     setError(null);
-    setAmount(m === 'topup' ? String(TOPUP_PRICE_INR) : String(plan?.price_inr ?? ''));
+    setAmount(m === 'extra' ? String(defaultAmount(kind)) : String(plan?.price_inr ?? ''));
+  }
+
+  function pickExtra(k: ExtraKind) {
+    setKind(k);
+    setCount(String(defaultCount(k)));
+    setAmount(String(defaultAmount(k)));
+    setMode('extra');
+    setError(null);
+  }
+
+  async function signOut(deviceId: string) {
+    setError(null);
+    try {
+      await api(`/api/admin/users/${user.id}/devices/${deviceId}`, { method: 'DELETE' });
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   async function save(e: React.FormEvent) {
@@ -106,9 +148,9 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
     setError(null);
     const payment = { amount_inr: Number(amount) || 0, method, reference: reference || undefined, note: note || undefined };
     try {
-      const { user: saved } = await api<{ user: AdminUserRow }>(`/api/admin/users/${user.id}/${mode === 'renew' ? 'plan' : 'topup'}`, {
+      const { user: saved } = await api<{ user: AdminUserRow }>(`/api/admin/users/${user.id}/${mode === 'renew' ? 'plan' : 'extra'}`, {
         method: 'POST',
-        body: JSON.stringify(mode === 'renew' ? { plan_id: planId, start, ...payment } : { minutes: Number(minutes), ...payment }),
+        body: JSON.stringify(mode === 'renew' ? { plan_id: planId, start, ...payment } : { kind, count: Number(count), ...payment }),
       });
       onSaved(saved);
       setReference('');
@@ -122,7 +164,7 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
   }
 
   const valid =
-    Number(amount) >= 0 && (mode === 'renew' ? !!plan : Number.isInteger(Number(minutes)) && Number(minutes) > 0);
+    Number(amount) >= 0 && (mode === 'renew' ? !!plan : Number.isInteger(Number(count)) && Number(count) > 0);
   // A renewal starts when the paid time ends; say when.
   const renewStarts =
     start === 'now' || !status?.paid_until || Date.parse(status.paid_until) <= Date.now() ? 'today' : date(status.paid_until);
@@ -161,11 +203,66 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
             </div>
           )}
 
+          {status?.plan_id && status.active && (
+            <section className="mt-4">
+              <h3 className="text-xs font-semibold text-muted">Use this period</h3>
+              <ul className="mt-1 divide-y divide-line text-sm">
+                {usageRows(status, data?.devices?.length ?? null).map((r) => {
+                  const pct = r.total ? Math.min(100, Math.round((r.used / r.total) * 100)) : 0;
+                  return (
+                    <li key={r.kind} className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-1 py-2">
+                      <span>{COUNTER_LABELS[r.kind]}</span>
+                      <span className="text-xs tabular-nums text-muted">
+                        <b className="font-semibold text-ink">{r.used}</b> {r.total === null ? '· no limit' : `of ${r.total}`}
+                      </span>
+                      <Button type="button" className="min-h-8 px-2.5 text-xs" onClick={() => pickExtra(r.kind)}>
+                        + Add
+                      </Button>
+                      {r.total !== null && (
+                        <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
+                          <div className={cx('h-full rounded-full', pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warn-ink' : 'bg-accent-ink')} style={{ width: `${pct}%` }} />
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
+
+          {!!data?.devices?.length && (
+            <section className="mt-4">
+              <h3 className="text-xs font-semibold text-muted">
+                Computers signed in · {data.devices.length}
+                {status?.counters?.computers != null && ` of ${status.counters.computers}`}
+              </h3>
+              <ul className="mt-1 divide-y divide-line text-sm">
+                {data.devices.map((d) => (
+                  <li key={d.id} className="flex items-center gap-3 py-2">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-bg text-accent-ink">
+                      <Monitor size={16} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium">{d.name}</span>
+                      <span className="block text-xs text-muted">
+                        {d.label ? `${d.label} · ` : ''}last used {shortDate.format(new Date(d.last_seen_at))}{' '}
+                        {new Date(d.last_seen_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}
+                      </span>
+                    </span>
+                    <Button type="button" className="min-h-8 px-2.5 text-xs" onClick={() => signOut(d.id)}>
+                      Sign out
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <div className="mt-4 flex gap-1 rounded-lg bg-subtle p-1 text-sm" role="tablist">
             {(
               [
                 ['renew', 'Renew / change plan'],
-                ['topup', 'Add minutes'],
+                ['extra', 'Add extra'],
               ] as const
             ).map(([m, label]) => (
               <button
@@ -173,8 +270,8 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
                 type="button"
                 role="tab"
                 aria-selected={mode === m}
-                disabled={m === 'topup' && !canTopUp}
-                title={m === 'topup' && !canTopUp ? 'Needs an active plan' : undefined}
+                disabled={m === 'extra' && !canTopUp}
+                title={m === 'extra' && !canTopUp ? 'Needs an active plan' : undefined}
                 onClick={() => switchMode(m)}
                 className={cx(
                   'flex-1 rounded-md px-3 py-1.5 font-medium disabled:opacity-40',
@@ -232,10 +329,22 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
                 )}
               </>
             ) : (
-              <label className="block">
-                <span className="text-xs font-medium text-muted">Voice minutes to add (until {date(status?.ends_at ?? null)})</span>
-                <Input inputMode="numeric" value={minutes} onChange={(e) => setMinutes(e.target.value.replace(/\D/g, '').slice(0, 6))} className="mt-1" />
-              </label>
+              <div className="grid grid-cols-[1.4fr_1fr] gap-2">
+                <label className="block">
+                  <span className="text-xs font-medium text-muted">Add</span>
+                  <select className={cx(SELECT, 'mt-1')} value={kind} onChange={(e) => pickExtra(e.target.value as ExtraKind)}>
+                    {EXTRA_KINDS.map((k) => (
+                      <option key={k} value={k}>
+                        {COUNTER_LABELS[k]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-muted">How many (until {date(status?.ends_at ?? null)})</span>
+                  <Input inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value.replace(/\D/g, '').slice(0, 6))} className="mt-1" />
+                </label>
+              </div>
             )}
 
             <div className="grid grid-cols-2 gap-2">
@@ -259,7 +368,7 @@ export function PlanDialog({ user, onClose, onSaved }: { user: AdminUserRow; onC
             {Number(amount) === 0 && <p className="text-xs text-muted">Amount 0: no payment is recorded (free).</p>}
             {error && <p className="text-xs text-danger-ink">{error}</p>}
             <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={!valid || !data}>
-              {mode === 'renew' ? 'Save plan' : 'Add minutes'}
+              {mode === 'renew' ? 'Save plan' : `Add ${count || ''} ${COUNTER_LABELS[kind]}`}
             </Button>
           </form>
 

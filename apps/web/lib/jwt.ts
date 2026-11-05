@@ -6,6 +6,8 @@ export type UserClaims = {
   role: 'authenticated';
   scope: 'user';
   app_role: 'admin' | 'user';
+  /** The computer this sign-in is for (user_devices, migration 0026); signing it out ends the token. */
+  did?: string;
 };
 
 export type PhoneClaims = {

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { LoginRequest, USER_COOKIE, USER_JWT_TTL_HOURS, type LoginResponse } from '@vff/shared';
 import { signUserJwt, toPublicUser, verifyPin } from '@/lib/auth';
+import { claimDevice } from '@/lib/billing/devices';
 import { env } from '@/lib/env';
 import { clientIp, fail, route } from '@/lib/http';
 import { attemptLogin } from '@/lib/login';
@@ -17,7 +18,14 @@ export const POST = route(async (req) => {
   }
 
   const user = toPublicUser(outcome.user);
-  const { token, expires_at } = await signUserJwt(user);
+  // Plan counter "Computers": this computer joins the ones signed in, or 409 with the list to pick one to sign out.
+  const deviceId = await claimDevice(
+    user,
+    body,
+    new Date(Date.now() + USER_JWT_TTL_HOURS * 3600_000).toISOString(),
+    req.headers.get('user-agent'),
+  );
+  const { token, expires_at } = await signUserJwt(user, deviceId);
   const res = NextResponse.json({ token, expires_at, user } satisfies LoginResponse);
 
   // Web (admin panel) logins also get an httpOnly cookie.

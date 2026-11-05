@@ -15,6 +15,10 @@ export const MSG = {
   phoneReplaced: 'This phone was disconnected because the QR code was shown again on the computer. Scan it to continue.',
   planEnded: 'Your plan has ended. Renew it to keep filling forms by voice.',
   minutesUsed: 'You have used all the voice minutes in your plan. Renew it or add minutes to continue.',
+  documentsUsed: 'All the documents in this plan are used. Renew the plan or add more to send files.',
+  voiceQrsUsed: 'You have used all the Voice Form Fill QRs in your plan. Renew it or add more to continue.',
+  nonvoiceQrsUsed: 'You have used all the Non Voice Form Fill QRs in your plan. Renew it or add more to continue.',
+  signedOutElsewhere: 'This computer was signed out from another computer. Sign in again to continue.',
   voiceOff: 'Voice is off for this form. Tap Type on a field to fill it.',
   heldGone: 'These answers are no longer available. Scan the form again.',
 } as const;

@@ -206,8 +206,28 @@ export type MappingResult = z.infer<typeof MappingResult>;
 export const Phone = z.string().regex(/^\d{6,15}$/, 'Phone must be 6–15 digits');
 export const Pin = z.string().regex(new RegExp(`^\\d{${PIN_LENGTH}}$`), `PIN must be ${PIN_LENGTH} digits`);
 
-export const LoginRequest = z.object({ phone: Phone, pin: Pin });
+export const LoginRequest = z.object({
+  phone: Phone,
+  pin: Pin,
+  /** The extension's own random id for this computer (plan counter "Computers"); the admin panel sends none. */
+  device_key: z.string().regex(/^[\w-]{16,64}$/).optional(),
+  /** e.g. "Chrome · Windows", shown in the list of computers. */
+  device_label: z.string().trim().max(60).optional(),
+  /** Too many computers: sign this one out, then sign in here. */
+  replace_device_id: z.string().uuid().optional(),
+});
 export type LoginRequest = z.infer<typeof LoginRequest>;
+
+/** A computer the user is signed in on (migration 0026). */
+export type DeviceInfo = {
+  id: string;
+  /** "Computer 1", "Computer 2"… in the order they first signed in. */
+  name: string;
+  /** e.g. "Chrome · Windows". */
+  label: string | null;
+  signed_in_at: string;
+  last_seen_at: string;
+};
 
 export const UserRole = z.enum(['admin', 'user']);
 export type UserRole = z.infer<typeof UserRole>;
@@ -232,6 +252,10 @@ export type ApiError = {
   locked_until?: string;
   /** Machine-readable reason, e.g. 'tab_closed' or 'cleared' (phone requests). */
   code?: string;
+  /** code 'too_many_computers': the computers signed in, to pick one to sign out. */
+  devices?: DeviceInfo[];
+  /** code 'too_many_computers': how many the plan allows. */
+  max_computers?: number;
 };
 
 export const CreateUserRequest = z.object({
@@ -263,7 +287,17 @@ export type AdminUserRow = PublicUser & {
 
 // ---------- Plans and payments (migration 0013) ----------
 
-/** A plan that is sold: `minutes` of voice (speech-to-text audio) for `days` days. */
+/**
+ * Plan counters (migration 0026), per period: `computers` signed in at once, `documents` sent into a form,
+ * `voice_qrs` / `nonvoice_qrs` (each Generate QR with voice on / with Typing only). null = no limit.
+ */
+export const LIMIT_KEYS = ['computers', 'documents', 'voice_qrs', 'nonvoice_qrs'] as const;
+export type LimitKey = (typeof LIMIT_KEYS)[number];
+/** The counters that count uses (computers are counted as they are signed in). */
+export type CounterKind = Exclude<LimitKey, 'computers'>;
+export type PlanLimits = Record<LimitKey, number | null>;
+
+/** A plan that is sold: `minutes` of voice (speech-to-text audio) for `days` days, and its limits. */
 export type Plan = {
   id: string;
   name: string;
@@ -272,7 +306,9 @@ export type Plan = {
   days: number;
   is_active: boolean;
   sort: number;
-};
+} & Partial<PlanLimits>;
+
+const limit = (min: number) => z.number().int().min(min).max(1_000_000).nullable().optional();
 
 export const PlanInput = z.object({
   name: z.string().trim().min(1).max(60),
@@ -280,6 +316,10 @@ export const PlanInput = z.object({
   minutes: z.number().int().min(0).max(1_000_000),
   days: z.number().int().min(1).max(366),
   is_active: z.boolean(),
+  computers: limit(1),
+  documents: limit(0),
+  voice_qrs: limit(0),
+  nonvoice_qrs: limit(0),
 });
 export type PlanInput = z.infer<typeof PlanInput>;
 
@@ -303,12 +343,20 @@ export type PlanStatus = {
   active: boolean;
   /** End of the last period paid for: later than ends_at when renewed early. */
   paid_until: string | null;
+  /** This period's counters (null total = no limit); missing before migration 0026. */
+  counters?: PlanCounters;
 };
+
+/** A counter of the current period: `total` is the plan's limit plus extras (null = no limit). */
+export type Counter = { total: number | null; used: number };
+export type PlanCounters = Record<CounterKind, Counter> & { computers: number | null };
 
 /** GET /api/account: the signed-in user and their plan (the extension popup shows it). */
 export type AccountResponse = {
   user: PublicUser;
   plan: PlanStatus | null;
+  /** Computers signed in now, this one included (missing before migration 0026). */
+  computers_in_use?: number;
   /** Admins, and every user before plans are set up, are never limited. */
   unlimited: boolean;
   /**
@@ -345,6 +393,14 @@ export const TopUpRequest = z.object({
   ...PaymentFields,
 });
 export type TopUpRequest = z.infer<typeof TopUpRequest>;
+
+/** Admin → Add extra: more of one counter (or minutes) until the current period ends, with its payment. */
+export const ExtraRequest = z.object({
+  kind: z.enum(['minutes', 'computers', 'documents', 'voice_qrs', 'nonvoice_qrs']),
+  count: z.number().int().min(1).max(100_000),
+  ...PaymentFields,
+});
+export type ExtraRequest = z.infer<typeof ExtraRequest>;
 
 const optionalText = (max: number) =>
   z
@@ -397,7 +453,7 @@ export type SubscriptionRow = {
   extra_minutes: number;
   note: string | null;
   created_at: string;
-};
+} & Partial<PlanLimits> & { extra_computers?: number; extra_documents?: number; extra_voice_qrs?: number; extra_nonvoice_qrs?: number };
 
 /** Admin: one user's plan, its history and payments. */
 export type UserPlanResponse = {
@@ -405,6 +461,8 @@ export type UserPlanResponse = {
   plans: Plan[];
   subscriptions: SubscriptionRow[];
   payments: PaymentRow[];
+  /** Computers signed in now (missing before migration 0026). */
+  devices?: DeviceInfo[];
 };
 
 /** Admin → Billing: money received in the chosen dates against the AI cost of the same dates. */
@@ -716,6 +774,10 @@ export const QueueSessionRequest = z.object({
   voice: z.boolean().default(true),
 });
 export type QueueSessionRequest = z.infer<typeof QueueSessionRequest>;
+
+/** Extension → server: Fetch from scan saved a file for this upload field (counted as a document). */
+export const ScanDocumentRequest = z.object({ field_key: z.string().min(1).max(200) });
+export type ScanDocumentRequest = z.infer<typeof ScanDocumentRequest>;
 
 /** Extension → server: × on a form under Latest forms. */
 export const HideLatestRequest = z.object({ source_id: z.string().uuid() });

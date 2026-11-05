@@ -61,7 +61,7 @@ The images can be built in parallel with Phases 1 and 2, but they need the D1 ti
 | # | Step | Status |
 | --- | --- | --- |
 | S.1 | Apply `supabase/migrations/0013_subscriptions.sql` and run `pnpm --filter web check:db`. Existing users get a 7-day Trial; renew paying customers in Admin → Users → Plan. | ☐ |
-| S.2 | Apply `supabase/migrations/0015_plan_prices.sql`, then check the plan prices in Admin → Plans (Trial free 7 days / 15 min, Starter ₹99 / 60 min, Basic ₹249 / 150 min, Pro ₹649 / 400 min, Business ₹1,949 / 1,200 min; extra minutes ₹79 / 50 min). | ☐ |
+| S.2 | Apply `supabase/migrations/0015_plan_prices.sql` and `0026_plan_counters.sql`, then check the plan prices and limits in Admin → Plans (Trial free 7 days / 15 min, Starter ₹149 / 60 min, Basic ₹249 / 150 min, Pro ₹649 / 400 min, Business ₹1,949 / 1,200 min; extra minutes ₹79 / 50 min). | ☐ |
 | S.3 | Set `VITE_ACCOUNT_URL` (WhatsApp chat link or your site) for the production build: the popup's "Get one" and "Renew" links. Put the same contact in place of `{{ACCOUNT_CONTACT}}` in the description. | ☐ |
 | S.4 | Publish [pages/terms.md](pages/terms.md) (plans, payments, refunds) and link it from the homepage and support page. Have it reviewed; check whether you need GST registration. | ☐ |
 | S.5 | The privacy policy now lists plan and payment records (sections 2 and 5): publish the updated page. | ☐ |

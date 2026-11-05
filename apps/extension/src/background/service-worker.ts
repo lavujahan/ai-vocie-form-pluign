@@ -47,6 +47,7 @@ import {
 import contentScript from '../content/index.ts?script';
 import { clearScans, deleteScan, deleteScans, getScan, listScans, scanId, setScanStatus } from '../scans-db';
 import { api, ApiError } from './api';
+import { deviceKey, deviceLabel } from './device';
 import {
   assertRoom,
   changesSince,
@@ -129,7 +130,7 @@ function publicState(tabId: number | undefined): ExtState {
     lastFill: t?.lastFill ?? null,
     canUndo: t?.canUndo ?? false,
     otherSessions: otherSessions(state.tabs, t ? tabId : undefined),
-    notice: t?.notice ?? null,
+    notice: state.auth ? (t?.notice ?? null) : signedOutReason,
     uploadClicks: t?.uploadClicks ?? [],
     scans: t ? scansOf(t.session.session_code) : [],
   };
@@ -183,7 +184,22 @@ function broadcast() {
   for (const [port, tabId] of ports) port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
 }
 
+/** Why this computer was signed out by the server (e.g. from another computer), shown on the sign-in card. */
+let signedOutReason: string | null = null;
+
+/** Signs out after a 401: says why when the server signed this computer out. */
+async function logoutAfter(e: ApiError) {
+  await logout();
+  if (e.body.code === 'signed_out') {
+    signedOutReason = e.message;
+    broadcast();
+  }
+}
+
 async function logout() {
+  signedOutReason = null;
+  // This computer stops counting against the plan's computers (best effort: the token may be gone already).
+  if (state.auth) void api('/api/auth/logout', { method: 'POST', token: state.auth.token }).catch(() => null);
   // Phones of these forms stop sending (nothing would be filled any more).
   await Promise.all(Object.values(state.tabs).map((t) => reportDesktop(t.session, { state: 'closed' })));
   stopRealtime();
@@ -607,7 +623,7 @@ async function refreshSnapshot(tabId: number) {
       return;
     }
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) await logout();
+    if (e instanceof ApiError && e.status === 401) await logoutAfter(e);
     // Purged on the server (sessions live about 40 minutes): this tab has nothing to fill any more.
     else if (e instanceof ApiError && e.status === 404 && tabOf(tabId)?.session.session_id === s.session_id) {
       await save({ tabs: endTab(state.tabs, tabId) });
@@ -891,8 +907,11 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       return;
 
     case 'LOGIN': {
-      const r = await api<LoginResponse>('/api/auth/login', { body: { phone: req.phone, pin: req.pin } });
+      const r = await api<LoginResponse>('/api/auth/login', {
+        body: { phone: req.phone, pin: req.pin, device_key: await deviceKey(), device_label: deviceLabel(), replace_device_id: req.replace_device_id },
+      });
       account = null;
+      signedOutReason = null;
       await save({ auth: { token: r.token, expires_at: r.expires_at, user: r.user } });
       await ensureRealtime();
       await Promise.all([refreshAccount(), refreshHeld(), refreshLatest()]);
@@ -918,9 +937,14 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       if (!scan?.schema?.fields?.length) throw new Error('No form fields found on this page');
       // Typing only: the customer's phone shows no mic and the server refuses recordings.
       const voice = req.voice !== false;
-      const created = await api<CreateSessionResponse>(`/api/sessions${voice ? '' : '?voice=0'}`, { body: scan.schema, token: state.auth.token });
       // Only this tab's session is replaced (its phone is told it ended); forms in other tabs keep going.
       const previous = tabOf(tab.id)?.session;
+      // Each Generate QR counts against the plan; Regenerate on an expired QR nobody scanned doesn't.
+      const query = new URLSearchParams({
+        ...(voice ? {} : { voice: '0' }),
+        ...(req.regenerate && previous ? { regen: previous.session_code } : {}),
+      }).toString();
+      const created = await api<CreateSessionResponse>(`/api/sessions${query ? `?${query}` : ''}`, { body: scan.schema, token: state.auth.token });
       const session: ActiveSession = {
         ...created,
         tab_id: tab.id,
@@ -1016,6 +1040,11 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       return;
     }
 
+    case 'SCAN_COUNT':
+      if (!state.auth) throw new Error('Please sign in');
+      await api(`/api/sessions/${req.session_code}/documents`, { body: { field_key: req.field_key }, token: state.auth.token });
+      return;
+
     case 'SCAN_SAVED':
       scans = await listScans();
       await save();
@@ -1088,14 +1117,20 @@ chrome.runtime.onMessage.addListener((req: PopupRequest | ResolveOptionMessage |
       const extra = typeof result === 'string' ? { text: result } : result ? { qr: result } : {};
       return { ok: true, state: publicState(tabId), ...extra } satisfies PopupResponse;
     } catch (e) {
-      if (e instanceof ApiError && e.status === 401 && req.type !== 'LOGIN') await logout();
+      if (e instanceof ApiError && e.status === 401 && req.type !== 'LOGIN') await logoutAfter(e);
       // Plan ended or minutes used up: the popup shows it from the refreshed plan.
       if (e instanceof ApiError && e.status === 402) await refreshAccount();
       const error =
         e instanceof ApiError && e.body.attempts_left !== undefined
           ? `${e.message}. ${e.body.attempts_left} ${e.body.attempts_left === 1 ? 'try' : 'tries'} left.`
           : (e as Error).message;
-      return { ok: false, error, code: e instanceof ApiError ? e.body.code : undefined, state: publicState(tabId) } satisfies PopupResponse;
+      return {
+        ok: false,
+        error,
+        code: e instanceof ApiError ? e.body.code : undefined,
+        devices: e instanceof ApiError ? e.body.devices : undefined,
+        state: publicState(tabId),
+      } satisfies PopupResponse;
     }
   })().then(sendResponse);
   return true;

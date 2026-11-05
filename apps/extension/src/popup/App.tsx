@@ -1,6 +1,20 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, Pencil, Printer, Smartphone, X } from 'lucide-react';
-import { formatSize, LOCK_MINUTES, MAX_PIN_ATTEMPTS, PIN_LENGTH, SENT_HOLD_MIN, type AccountResponse, type FieldFile, type HeldForm, type LatestForm, type SessionField } from '@vff/shared';
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Loader2, Monitor, Pencil, Printer, Smartphone, X } from 'lucide-react';
+import {
+  COUNTER_LABELS,
+  formatSize,
+  LOCK_MINUTES,
+  MAX_PIN_ATTEMPTS,
+  PIN_LENGTH,
+  SENT_HOLD_MIN,
+  USER_JWT_TTL_HOURS,
+  type AccountResponse,
+  type DeviceInfo,
+  type FieldFile,
+  type HeldForm,
+  type LatestForm,
+  type SessionField,
+} from '@vff/shared';
 import { NOT_ON_PAGE, type ActiveSession, type ExtState, type PopupRequest, type PopupResponse, type ScanInfo, type StateMessage } from '../messages';
 import { ACCOUNT_URL, PRIVACY_URL } from '../env';
 import { groupFields, type FieldGroup, type FieldItem } from './groups';
@@ -148,7 +162,7 @@ export function App() {
       </Screen>
     );
   } else if (!state.auth) {
-    body = <SignIn send={send} />;
+    body = <SignIn request={request} notice={state.notice} />;
   } else if (!state.session) {
     body = <StartCard state={state} send={send} request={request} site={site} others={others} />;
   } else if (!state.session.snapshot || (state.session.snapshot.session.status === 'waiting' && !state.session.reconnect)) {
@@ -176,21 +190,64 @@ export function App() {
 
 type Send = (req: PopupRequest) => Promise<string | null>;
 
-function SignIn({ send }: { send: Send }) {
+/** `notice`: why the server signed this computer out, if it did. */
+function SignIn({ request, notice }: { request: (req: PopupRequest) => Promise<PopupResponse>; notice: string | null }) {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The plan's computers are all signed in: pick one to sign out. */
+  const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
+
+  async function signIn(replace?: string) {
+    setBusy(replace ?? 'form');
+    const res = await request({ type: 'LOGIN', phone, pin, ...(replace ? { replace_device_id: replace } : {}) });
+    setBusy(null);
+    setError(res.ok ? null : res.error);
+    setDevices(!res.ok && res.code === 'too_many_computers' ? (res.devices ?? []) : null);
+  }
+
+  if (devices) {
+    return (
+      <Screen header={<Header sub="Fill web forms by speaking on your phone" />}>
+        <Banner tone="warn">{error}</Banner>
+        <div className="grid divide-y divide-line rounded-lg border border-line bg-card px-3">
+          {devices.map((d) => (
+            <div key={d.id} className="flex items-center gap-2.5 py-2.5">
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-bg text-accent-ink">
+                <Monitor size={16} />
+              </span>
+              <span className="min-w-0 flex-1 text-xs">
+                <b className="block text-[13px] font-semibold text-ink">{d.name}</b>
+                <span className="text-muted">
+                  {join(d.label, `last used ${new Date(d.last_seen_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`)}
+                </span>
+              </span>
+              <Button loading={busy === d.id} disabled={!!busy} onClick={() => signIn(d.id)}>
+                Sign out
+              </Button>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-muted">
+          That computer asks for the PIN again at its next step, and its open forms end. A computer not used for {USER_JWT_TTL_HOURS}{' '}
+          hours is signed out by itself.
+        </p>
+        <Button className="w-full" disabled={!!busy} onClick={() => (setDevices(null), setError(null))}>
+          Cancel
+        </Button>
+      </Screen>
+    );
+  }
 
   return (
     <Screen header={<Header sub="Fill web forms by speaking on your phone" />}>
+      {notice && !error && <Banner tone="warn">{notice}</Banner>}
       <form
         className="grid gap-2.5"
         onSubmit={async (e) => {
           e.preventDefault();
-          setBusy(true);
-          setError(await send({ type: 'LOGIN', phone, pin }));
-          setBusy(false);
+          await signIn();
         }}
       >
         <label className="grid gap-1 text-xs text-muted">
@@ -214,7 +271,7 @@ function SignIn({ send }: { send: Send }) {
             onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, PIN_LENGTH))}
           />
         </label>
-        <Button type="submit" variant="primary" className="w-full" loading={busy} disabled={phone.length < 6 || pin.length !== PIN_LENGTH}>
+        <Button type="submit" variant="primary" className="w-full" loading={busy === 'form'} disabled={phone.length < 6 || pin.length !== PIN_LENGTH}>
           Sign in
         </Button>
         <p className={error ? 'text-xs text-danger-ink' : 'text-xs text-muted'}>
@@ -754,7 +811,39 @@ function PlanMeter({ account, inFooter = false }: { account: AccountResponse; in
       >
         <div className={`h-full rounded-full ${low ? 'bg-warn-ink' : 'bg-accent-ink'}`} style={{ width: `${pct}%` }} />
       </div>
+      <CounterLine account={account} />
     </div>
+  );
+}
+
+/**
+ * The plan's other counters this period, e.g. "Documents 61/250 · Voice Form Fill QR 141/400": amber when
+ * most is used, red when used up; computers as they are. Counters without a limit are left out.
+ */
+function CounterLine({ account }: { account: AccountResponse }) {
+  const c = account.plan?.counters;
+  if (!c) return null;
+  type Item = { label: string; used: number; total: number | null; plain?: boolean };
+  const all: Item[] = [
+    { label: COUNTER_LABELS.documents, ...c.documents },
+    { label: COUNTER_LABELS.voice_qrs, ...c.voice_qrs },
+    { label: COUNTER_LABELS.nonvoice_qrs, ...c.nonvoice_qrs },
+    ...(account.computers_in_use !== undefined ? [{ label: COUNTER_LABELS.computers, used: account.computers_in_use, total: c.computers, plain: true }] : []),
+  ];
+  const items = all.filter((i): i is Item & { total: number } => i.total !== null);
+  if (!items.length) return null;
+  return (
+    <p className="flex flex-wrap gap-x-2 text-muted">
+      {items.map((i) => {
+        // Computers: this one is always signed in, so all of them in use is normal.
+        const tone = i.plain ? '' : i.used >= i.total ? 'font-medium text-danger-ink' : i.used >= i.total * 0.8 ? 'font-medium text-warn-ink' : '';
+        return (
+          <span key={i.label} className={`tabular-nums ${tone}`}>
+            {i.label} {Math.min(i.used, i.total)}/{i.total}
+          </span>
+        );
+      })}
+    </p>
   );
 }
 
@@ -793,8 +882,8 @@ function QrCard({ state, send, others }: { state: ExtState; send: Send; others: 
               loading={busy}
               onClick={async () => {
                 setBusy(true);
-                // A new QR for the same form, with the same voice choice.
-                setError(await send({ type: 'START_SESSION', voice: voiceOn(s) }));
+                // A new QR for the same form, with the same voice choice (not counted when nobody scanned it).
+                setError(await send({ type: 'START_SESSION', voice: voiceOn(s), regenerate: true }));
                 setBusy(false);
               }}
             >

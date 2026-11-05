@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { checkFile, extensionOf, FileUploadUrlRequest, formatOfMime, type FileUploadUrlResponse } from '@vff/shared';
 import { requirePhone } from '@/lib/auth';
+import { assertCanUse, wasCounted } from '@/lib/billing/plans';
 import { getUploadField } from '@/lib/files/fields';
 import { createUploadUrl, newPath } from '@/lib/files/storage';
 import { fail, route } from '@/lib/http';
@@ -26,6 +27,10 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const { field, rules } = await getUploadField(session.id, body.field_key);
   const problem = checkFile(rules, body);
   if (problem) throw fail(422, problem);
+  // Plan counter: a document counts once per upload field, so a newer file for the same field is free.
+  if (!(await wasCounted(session.id, 'documents', field.field_key))) {
+    await assertCanUse(session.user_id, undefined, { minutes: false, counter: 'documents' });
+  }
 
   const ext = extensionOf(formatOfMime(body.mime)!);
   return NextResponse.json((await createUploadUrl(newPath(session.id, field.field_key, ext))) satisfies FileUploadUrlResponse);

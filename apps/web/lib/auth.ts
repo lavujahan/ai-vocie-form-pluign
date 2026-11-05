@@ -5,6 +5,7 @@ import { SESSION_JWT_TTL_MIN, USER_COOKIE, USER_JWT_TTL_HOURS, type PublicUser }
 import { env } from './env';
 import { fail } from './http';
 import { signJwt, verifyJwt, type PhoneClaims, type UserClaims } from './jwt';
+import { deviceStillSignedIn } from './billing/devices';
 import { MSG, phoneTokenCurrent } from './session-rules';
 import { db } from './supabase-admin';
 
@@ -19,9 +20,10 @@ export type DbUser = PublicUser & {
 export const hashPin = (pin: string) => bcrypt.hash(pin, 10);
 export const verifyPin = (pin: string, hash: string) => bcrypt.compare(pin, hash);
 
-export function signUserJwt(user: PublicUser) {
+/** `deviceId`: the computer it is for, when computers are counted (see billing/devices). */
+export function signUserJwt(user: PublicUser, deviceId?: string | null) {
   return signJwt(
-    { role: 'authenticated', scope: 'user', app_role: user.role },
+    { role: 'authenticated', scope: 'user', app_role: user.role, ...(deviceId ? { did: deviceId } : {}) },
     user.id,
     USER_JWT_TTL_HOURS * 3600,
     env.jwtSecret,
@@ -37,7 +39,7 @@ export function signSessionJwt(sessionId: string, pairedAt: string | null) {
   );
 }
 
-function bearer(req: NextRequest): string | null {
+export function bearer(req: NextRequest): string | null {
   const h = req.headers.get('authorization');
   if (h?.startsWith('Bearer ')) return h.slice(7);
   return req.cookies.get(USER_COOKIE)?.value ?? null;
@@ -45,14 +47,22 @@ function bearer(req: NextRequest): string | null {
 
 export const toPublicUser = (u: DbUser): PublicUser => ({ id: u.id, name: u.name, phone: u.phone, role: u.role });
 
-/** Extension or admin user. Re-checks the DB so deactivated users lose access immediately. */
+/**
+ * Extension or admin user. Re-checks the DB so deactivated users lose access immediately, and a computer
+ * signed out from another one (plan counter "Computers") at its next request.
+ */
 export async function requireUser(req: NextRequest): Promise<DbUser> {
   const token = bearer(req);
   const claims = token ? await verifyJwt(token, env.jwtSecret) : null;
   if (!claims || claims.scope !== 'user') throw fail(401, 'Please sign in again');
-  const { data } = await db().from('users').select('*').eq('id', (claims as UserClaims).sub).maybeSingle();
+  const { sub, did } = claims as UserClaims;
+  const [{ data }, signedIn] = await Promise.all([
+    db().from('users').select('*').eq('id', sub).maybeSingle(),
+    did ? deviceStillSignedIn(did) : Promise.resolve(true),
+  ]);
   const user = data as DbUser | null;
   if (!user || !user.is_active) throw fail(401, 'Account is inactive');
+  if (!signedIn) throw fail(401, MSG.signedOutElsewhere, { code: 'signed_out' });
   return user;
 }
 

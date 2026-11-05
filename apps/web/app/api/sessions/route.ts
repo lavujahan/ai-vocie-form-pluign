@@ -5,7 +5,7 @@ import { analyzeAndStore, savedReading } from '@/lib/agents/formAnalyzer';
 import { formFingerprint } from '@/lib/agents/formCache';
 import { purgeExpiredFiles } from '@/lib/files/storage';
 import { requireUser } from '@/lib/auth';
-import { assertCanUse } from '@/lib/billing/plans';
+import { assertCanUse, recordUse, regenerateIsFree } from '@/lib/billing/plans';
 import { env } from '@/lib/env';
 import { fail, must, route } from '@/lib/http';
 import { fieldRows, insertFieldRows } from '@/lib/sessions';
@@ -26,10 +26,23 @@ function dedupeKeys<T extends { field_key: string }>(fields: T[]): T[] {
 
 export const POST = route(async (req) => {
   const user = await requireUser(req);
+  const params = new URL(req.url).searchParams;
   // `?voice=0`: a typing-only form (no mic on the phone, recordings refused), which uses no voice minutes.
-  const voice = new URL(req.url).searchParams.get('voice') !== '0';
-  // No active plan, or no minutes left for a voice form: refuse before the Form Analyzer spends anything.
-  await assertCanUse(user.id, user.role, { minutes: voice });
+  const voice = params.get('voice') !== '0';
+  // Plan counters: each Generate QR counts one Voice / Non Voice Form Fill QR. `?regen=<code>`: Regenerate
+  // on that expired QR, free when nobody scanned it.
+  const counter = voice ? 'voice_qrs' : 'nonvoice_qrs';
+  const regen = params.get('regen');
+  const previous = regen
+    ? ((await db().from('form_sessions').select('user_id, paired_at, voice_enabled').eq('session_code', regen).maybeSingle()).data as {
+        user_id: string;
+        paired_at: string | null;
+        voice_enabled?: boolean;
+      } | null)
+    : null;
+  const counted = !regenerateIsFree(previous, user.id, voice);
+  // No active plan, no minutes left for a voice form, or no QRs left: refuse before the Form Analyzer spends anything.
+  await assertCanUse(user.id, user.role, { minutes: voice, ...(counted ? { counter } : {}) });
   const schema = FormSchema.parse(await req.json());
   schema.fields = dedupeKeys(schema.fields);
 
@@ -59,6 +72,7 @@ export const POST = route(async (req) => {
     throw fail(503, 'Typing-only forms need a server update (migration 0021). Untick "Typing only" to scan with voice.');
   }
   const session = must(inserted) as { id: string };
+  if (counted && user.role !== 'admin') await recordUse(user.id, counter, { sessionId: session.id });
 
   // A form read before (by anyone) gets its saved field list, not this scan's: options that loaded or a
   // ticked checkbox don't change it, so the mapper's prompt starts with the same text every time.

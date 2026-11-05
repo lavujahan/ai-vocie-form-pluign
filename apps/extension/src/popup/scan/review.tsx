@@ -122,6 +122,13 @@ export function Review({
   async function save() {
     if (!result) return;
     setSaving(true);
+    // Counted as a document of the plan (once per field); refused when none are left.
+    const counted = await request({ type: 'SCAN_COUNT', session_code: code, field_key: field.field_key });
+    if (!counted.ok) {
+      setFailed(counted.error);
+      setSaving(false);
+      return;
+    }
     try {
       await putScan({
         id: scanId(code, field.field_key),
