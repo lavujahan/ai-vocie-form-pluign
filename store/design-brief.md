@@ -3,7 +3,7 @@
 These are prompts for Claude Design, covering every image and the video in the store plan ([chrome-web-store.md](chrome-web-store.md) → Images).
 
 **How to use**
-1. Start one Claude Design project. Paste **Prompt 0 (shared brief)** first, once.
+1. Start one Claude Design project with the **Voice2Fill** design system (https://claude.ai/artifact/GYwpmpkRqvxqWQV4vCn5pb). Paste **Prompt 0 (shared brief)** first, once: the brand, colours and type now come from the design system, so Prompt 0 keeps only the app screens, sample data and store rules.
 2. Then paste the asset prompts one at a time, in order: icon first, because every other asset uses it.
 3. Export each asset at the exact size listed, as PNG, and check it against the **checklist** at the end.
 
@@ -16,37 +16,10 @@ The Chrome Web Store takes 5 screenshots, so the newest features are in **Websit
 ## Prompt 0: shared brief (paste first)
 
 ```
-You are designing Chrome Web Store assets for a real Chrome extension called "Voice Form Filler". Every screen you draw must look like the real app described below. Do not invent features, buttons, badges, ratings or text that are not listed here.
+You are designing Chrome Web Store assets for a real Chrome extension called "Voice Form Filler". Use the Voice2Fill design system for the brand, logo, colours (its "App · light" and "Extension popup" themes), type, radii and tone. Every screen you draw must look like the real app described below. Do not invent features, buttons, badges, ratings or text that are not listed here.
 
 WHAT THE PRODUCT DOES
 A Chrome extension reads the form on a desktop web page and shows a QR code. The user scans it with their phone, taps a mic and speaks the answers in Tamil, English or Tanglish. After they stop, the answers appear on the phone. They tap Send to desktop, and the operator clicks Fill form on the computer: the page changes only on that click. Photos and documents for upload fields are taken on the phone or fetched from the scanner's folder, converted to the site's size rules and put into the form. Customers in a queue can fill a form on their own phones before their turn; the answers wait for the operator. The user always checks and submits the form themselves. There are no spoken commands: Send and Start over are buttons.
-
-BRAND
-- Name: Voice Form Filler
-- Mark: the Lucide "mic" icon (outline, 2px stroke, round caps), white on a blue rounded square.
-- Tone: calm, practical, trustworthy. For service-centre operators and office staff in Tamil Nadu. Not flashy, not "AI magic".
-
-COLOURS (use these exact values)
-Brand blue (saturated, for backgrounds of promo art): #1E4E9C
-Light blue (accent background, selected tabs, pills): #DCE8FB
-Red (mic button): #D4433D
-Highlight yellow (outline around a field that was just filled on the web page): #F2B705
-App UI colours:
-  page background #FAF9F7 · card #FFFFFF · subtle #F4F3F0 · border #E5E3DF
-  text #1F1E1C · muted text #6B6863
-  accent text #1E4E9C on #DCE8FB
-  "live"/success text #1F6B2A on #D7F0D9
-  warning text #7A5000 on #F9E2B0
-  danger text #A32B26 on #FBE0DE
-Extension popup colours (the popup only; always light):
-  page background mild gold #FBF3DC · cards white #FFFFFF with 1px #DFCB92 border · row dividers #EFE4C6
-  header band honey gold #EBC865 with a 1px #CFA63C line under it, text #1A1813
-  text #1A1813 · muted text #574E3C · progress track #E8D7A6 · live dot #1F8A34
-Do not use gradients, glows, neon or purple.
-
-TYPE
-System UI sans-serif (Segoe UI / Roboto / Inter look). For Tamil text use Noto Sans Tamil.
-Headlines: semibold, sentence case. UI text inside the app screens: 14px body, 12px small, 16px titles (at 1x).
 
 APP UI COMPONENTS (draw the app screens with exactly these)
 - Card: white, 1px #E5E3DF border, 12px radius, 16px padding.

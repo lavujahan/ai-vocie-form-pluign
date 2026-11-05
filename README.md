@@ -133,15 +133,15 @@ When OpenAI changes its prices or `AGENT_MODEL` changes to a new model, update `
 
 Users pay for a monthly plan with a number of **voice minutes** (the audio their phones send to Sarvam). Payments are made outside the app (UPI or bank transfer) and recorded by the admin; there is no payment gateway yet.
 
-- **Plans** (`/admin/plans`): price, voice minutes, the counters below, days, on sale or not. Seeded (migration `0015`, priced for a 35% margin at about ₹1.03 of AI cost per voice minute; Starter raised to ₹149 in `0026`): Trial (free, 7 days, 15 min), Starter (₹149, 30 days, 60 min), Basic (₹249, 150 min), Pro (₹649, 400 min), Business (₹1,949, 1,200 min). Extra minutes default to 50 for ₹79. A change applies from each user's next renewal: a period keeps the minutes and limits it started with.
+- **Plans** (`/admin/plans`): price, voice minutes, the counters below, days, on sale or not. Seeded (migration `0015`, priced for a 35% margin at about ₹1.03 of AI cost per voice minute; Starter raised to ₹149 in `0026`; limits and Business minutes set in `0027`): Trial (free, 7 days, 15 min), Starter (₹149, 30 days, 60 min), Basic (₹249, 150 min), Pro (₹649, 400 min), Business (₹1,949, 1,000 min). Extra minutes default to 50 for ₹79. A change applies from each user's next renewal: a period keeps the minutes and limits it started with.
 - **Plan counters** (migration `0026`): every feature is in every plan; plans differ by how much they allow per period. An empty limit is no limit, and periods that started before `0026` keep no limits until they renew.
 
   | Counter | Counted when | Trial | Starter | Basic | Pro | Business |
   | --- | --- | --- | --- | --- | --- | --- |
   | Computers | signed in at once (the extension sends a random device key; `user_devices`) | 1 | 1 | 1 | 2 | 3 |
-  | Documents | a file goes into an upload field, from the phone or Fetch from scan; once per field of a form | 10 | 30 | 80 | 250 | 800 |
-  | Voice Form Fill QR | each **Generate QR** with voice on (this page or QR for other) | 15 | 60 | 150 | 400 | 1,200 |
-  | Non Voice Form Fill QR | each **Generate QR** with Typing only | 5 | 20 | 50 | 150 | 500 |
+  | Documents | a file goes into an upload field, from the phone or Fetch from scan; once per field of a form | 20 | 200 | 300 | 600 | 1,500 |
+  | Voice Form Fill QR | each **Generate QR** with voice on (this page or QR for other) | 10 | 40 | 100 | 300 | 800 |
+  | Non Voice Form Fill QR | each **Generate QR** with Typing only | 10 | 120 | 250 | 450 | 1,250 |
 
   Not counted: **Regenerate** on an expired QR nobody scanned (`?regen=<code>`), Connect phone again, Use, Start over, turning voice on or off later. Uses are rows in `feature_events` (kept when sessions are purged). When one runs out only that feature is refused (402 `limit_documents` / `limit_voice_qrs` / `limit_nonvoice_qrs`). One computer too many is refused at sign-in (409 `too_many_computers`, with the list); the popup lets the user sign one of them out, and that computer gets 401 `signed_out` at its next request. Admins are never limited.
 - **Users → Plan** (card icon): renew or change the plan and record the payment (amount, UPI / bank / cash, reference); see this period's use of every counter, and **Add extra** minutes or any counter until the period ends (`add_extra()`, amount 0 = free); see and sign out the computers signed in; and see past periods and payments. A renewal starts when the paid time ends, so paying early loses nothing; *Start now* replaces the current period. Unused minutes don't carry over. New users get the Trial while it is on sale; when `0013` is applied, every existing user gets a Trial from that moment.

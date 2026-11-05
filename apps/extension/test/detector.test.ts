@@ -130,3 +130,33 @@ describe("the input's own rules and help text", () => {
     expect(detect().schema.fields[0].context).toBe('We send the receipt here');
   });
 });
+
+describe('a profile form with labels after checkboxes and a read-only date picker (Tamil Nilam)', () => {
+  it('labels checkboxes and radios by the text after them, not a far-off heading or their id', () => {
+    page(`
+      <h1>User Profile</h1>
+      <div class="inner">
+        <div class="row"><label for="tAdd">Temporary Address*</label><textarea id="tAdd"></textarea>
+          <input type="checkbox" id="filladdress" name="filladdress"> <span>Same as Above</span></div>
+        <div class="row"><div id="lblGender">Gender*</div><div>
+          <input type="radio" name="gen" value="M"> <span>Male</span> <input type="radio" name="gen" value="F"> <span>Female</span></div></div>
+        <div class="row"><div><input type="checkbox" id="isDeveloper" name="isDeveloper"> <span>Are you a Building Promoter?</span></div></div>
+        <div class="row"><div><input type="checkbox" id="isPowerAgent"> <!-- note --> <span>I am a Power Agent</span></div></div>
+      </div>`);
+    const byKey = Object.fromEntries(detect().schema.fields.map((f) => [f.field_key, f]));
+    expect(byKey.filladdress.label).toBe('Same as Above');
+    expect(byKey.isDeveloper.label).toBe('Are you a Building Promoter?');
+    expect(byKey.isPowerAgent.label).toBe('I am a Power Agent');
+    expect(byKey.gen).toMatchObject({ label: 'Gender', options: [{ value: 'M', label: 'Male' }, { value: 'F', label: 'Female' }] });
+  });
+
+  it('keeps an empty read-only date picker or required field, skips a read-only field the site filled', () => {
+    page(`
+      <label for="name">Name*</label><input id="name" readonly required value="Jahan">
+      <label for="dob">DOB*</label><input id="dob" readonly placeholder="Enter Dob(dd-MM-yyyy)">
+      <label for="joined">Joined</label><input id="joined" readonly class="hasDatepicker">
+      <label for="ref">Reference*</label><input id="ref" readonly required>
+      <label for="age">Age</label><input id="age" readonly>`);
+    expect(detect().schema.fields.map((f) => f.field_key)).toEqual(['dob', 'joined', 'ref']);
+  });
+});

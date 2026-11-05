@@ -1,14 +1,33 @@
 # Design brief: website marketing posters (hooks, fears, benefits)
 
-These are prompts for **Claude Design**, for the posters in marketing sections 4 (hooks), 5 (fears) and 6 (benefits).
+These are prompts for **Claude Design**, for the posters in marketing sections 4 (hooks), 5 (fears) and 6 (benefits), and for the same posters on Instagram (feed posts and Reels).
 
 **How to use**
-1. Start a new Claude Design project. Paste **Prompt M0 (shared brief)** first, once.
+1. Start a new Claude Design project with the **Voice2Fill** design system (https://claude.ai/artifact/GYwpmpkRqvxqWQV4vCn5pb; mark it as your default and every new project gets it). Paste **Prompt M0** first, once: it is short, because the colours, type, logo, tone, illustration style, product snippets, sample data, layout rules and plans all come from the design system.
 2. Then paste the poster prompts one at a time, in order.
-3. Export each poster in both sizes, **1600×900** for desktop and **1080×1350** for mobile and WhatsApp, and check it against the checklist at the end.
+3. Export each poster in the three formats below, and check it against the checklist at the end.
 
-The style comes from the app itself: the colours from `packages/shared/ui/tokens.css`, and the components and wording from [design-brief.md](design-brief.md).
+The style comes from the app itself, kept in the Voice2Fill design system (its colours are the app's `packages/shared/ui/tokens.css`). When a price, limit or feature changes, update the design system's *Plans and pricing* and *Posters and video* sections too.
 The posters can be a bit bolder than the store screenshots: bigger headlines, a gold background colour, and flat illustrated people. They must still look like the same product.
+
+---
+
+## Formats (every poster)
+
+| Format | Size | Ratio | Where it goes | Layout |
+| --- | --- | --- | --- | --- |
+| **16:9** | 1920×1080 | 16:9 | Website sections, YouTube thumbnail and community post, WhatsApp and Facebook links, presentations | Text left, art right |
+| **Instagram post** | 1080×1350 | 4:5 | Instagram and Facebook feed, WhatsApp | Text top, art bottom |
+| **Instagram Reel / Story** | 1080×1920 | 9:16 | Reels (cover and still Reel), Stories, WhatsApp Status, YouTube Shorts | Text top, art in the middle, button low |
+
+**Safe zones (Instagram covers the edges with its own buttons and captions):**
+- **Instagram post:** the profile grid shows posts cropped to 3:4, so keep text and the mark at least 64px from the left and right edges.
+- **Reel / Story:** keep all text, the mark and the button inside the middle **1080×1420**: nothing important in the top **250px** or the bottom **250px**, nor in the right **120px** (the like and share buttons). The Reel's caption sits over the bottom, so put the call-to-action button above that band.
+- **16:9:** keep text at least 96px from every edge (YouTube puts the time stamp bottom right).
+
+**Making a Reel:** the 9:16 still is the Reel's cover and its last frame. For motion, make a 6–8 second version in the same canvas: the background and art fade in (0–1 s), the Tamil headline rises in (1–2 s), the English line follows (2–3 s), the product snippet does its one action (a field gets the yellow outline, the mic pulses once, a price card slides up) (3–6 s), then hold on the full poster with the button (6–8 s). Calm and slow: no flashes, spins or zooms. Add music and the Tamil voice-over in Instagram or a video editor.
+
+1600×900 posters made earlier are the same 16:9 shape: export them at 1920×1080 rather than redrawing.
 
 ---
 
@@ -34,46 +53,9 @@ The posters can be a bit bolder than the store screenshots: bigger headlines, a 
 ## Prompt M0: shared brief (paste first)
 
 ```
-You are designing website marketing posters for a real product called "Voice2Fill" (Chrome extension name: "Voice Form Filler"). The audience is e-Sevai / common service centre operators, browsing-centre owners and data-entry staff in Tamil Nadu, plus the citizens they serve.
-
-WHAT THE PRODUCT DOES (do not invent anything else)
-A Chrome extension reads the form on a desktop web page and shows a QR code. The applicant scans it with their own phone, taps a red mic and speaks the answers in Tamil, English or Tanglish. The answers appear on the computer's form (in English), and each filled field gets a yellow outline. Unclear answers come back to the phone as "Did you mean…?" buttons. Photos and documents are taken on the phone, converted to the site's size rules (e.g. "JPG · max 50 KB") and put into the form. Up to 5 forms can be filled at once, one per browser tab, each with its own QR code and phone. The operator always checks and submits the form; it never submits by itself. Voice is never stored; answers are deleted within about 2 hours; photos are deleted once the computer receives them.
-
-BRAND
-- Name on posters: "Voice2Fill". Mark: white Lucide "mic" icon (outline, 2px stroke, round caps) on a #1E4E9C rounded square.
-- Main tagline (Tamil): "சொன்னா போதும்!"  English: "Speak. It fills."
-- Tone: calm, practical, warm, local. Like a trusted shop poster, not a tech startup ad.
-
-COLOURS (exact)
-Brand blue #1E4E9C · light blue #DCE8FB · red mic #D4433D · highlight yellow #F2B705
-Honey gold #EBC865 with line #CFA63C and ink #1A1813 · mild gold #FBF3DC
-Page #FAF9F7 · card #FFFFFF · subtle #F4F3F0 · border #E5E3DF · ink #1F1E1C · muted #6B6863
-Success/live: #1F6B2A on #D7F0D9 · Warning: #7A5000 on #F9E2B0 · Danger: #A32B26 on #FBE0DE
-No gradients, glows, neon, purple, glassmorphism, 3D, robots, brains, sparkles or "AI" icons.
-
-TYPE
-Tamil: Noto Sans Tamil, semibold. Latin: Inter / Segoe UI look, semibold, sentence case.
-Each poster: one big Tamil headline (2 lines max), one English line under it (about 45% of the Tamil size), and at most one short supporting line. Text must stay readable at half size.
-
-ILLUSTRATION STYLE
-Flat vector, simple shapes, 2-3 tones per object, soft rounded corners, thin outlines matching Lucide. People are Tamil Nadu locals drawn simply (an operator at a counter, an elderly woman in a saree, a young man, a student), friendly and dignified, with no detailed or photorealistic faces. Settings: a small service-centre counter with a desktop monitor, a printer and a queue. No government emblem, seal, flag, ministry, portal name, bank or any other company's logo. Monitors show a generic form titled "Applicant registration" at "forms.example.in".
-
-PRODUCT UI SNIPPETS (draw these simply but faithfully when used)
-- Phone page: background #FAF9F7, white cards (12px radius, 1px #E5E3DF border), a 96px round red #D4433D mic button, "Listening… 0:07" in red.
-- Filled form field: input with a 2px #F2B705 outline around it.
-- Pills: 6px radius, e.g. green "● Live", green "Ready: JPG · 38 KB", amber "Pick one".
-- "Did you mean…?" box: pale amber (#F9E2B0 at 60%) with two white outline option buttons.
-- QR card: white, rounded, with a QR pattern.
-
-SAMPLE DATA (made up; never real people or ID numbers)
-Ramesh Kumar · Murugan · 9876543210 · Lakshmi · Salem · Omalur · Kanniyampatti
-
-LAYOUT RULES
-- Make every poster in two sizes: 1600×900 (desktop, text left / art right) and 1080×1350 (mobile, text top / art bottom).
-- Full bleed, square outer corners, generous margins (≥ 72px desktop, ≥ 64px mobile).
-- Small Voice2Fill mark + name in a corner of every poster.
-- No "best", "#1", "fastest", star ratings, user counts, awards, "government approved" or "official".
-- Never say the product submits forms. Never show plan sizes as "number of forms"; plans are in minutes only.
+You are designing website marketing posters for "Voice2Fill" (Chrome extension name: "Voice Form Filler").
+Use the Voice2Fill design system for everything shared: read its brand book, its "Posters and video" section and its "Plans and pricing" section, and use its tokens, type styles, logo, illustration style, product snippets and sample data exactly. Draw only the features its "Posters and video" section lists.
+Make every poster in three formats: 16:9 at 1920×1080 (text left, art right), Instagram post at 1080×1350 (text top, art bottom) and Instagram Reel / Story at 1080×1920 (text top, art in the middle, button low). Keep the Reel's text and button inside the middle 1080×1420, clear of the top and bottom 250px and the right 120px. Put the Voice2Fill mark and name in a corner, inside the safe zone.
 
 Reply "Ready" and wait for the first poster prompt.
 ```
@@ -165,7 +147,7 @@ These use the app's own status colours: the **problem** is in the amber warning 
 ### Prompt F0: the full infographic (one image for the section)
 
 ```
-Fear infographic F0. Size 1600×1200 desktop and 1080×1920 mobile. Background #FAF9F7.
+Fear infographic F0. Size 1600×1200 for the website and 1080×1920 for Reels and Stories (inside the safe zone; five rows stacked). For the Instagram feed, use F1–F5. Background #FAF9F7.
 
 Title (Tamil): "கவலை வேண்டாம்"   English line: "The worries every centre has — and the answer"
 
@@ -198,7 +180,7 @@ Voice2Fill mark bottom right.
 
 ```
 Make five separate posters, F1 to F5, one per row of the F0 infographic, using the same text and icons.
-Size 1080×1350 (and 1600×900).
+Formats: Instagram post 1080×1350, Reel / Story 1080×1920 (the two halves stacked, the arrow badge between them) and 16:9 1920×1080 (the two halves side by side, worry left, answer right). As a carousel post, F1–F5 go in order after a first slide made from F0's title.
 Layout: top half background #F9E2B0 with the worry (Tamil big, English under) and a simple flat illustration of that worry (e.g. a customer walking out of a long queue; a "Rejected" stamped paper; a crowd at the door; an empty chair at the keyboard; a phone full of document photos).
 Bottom half background #D7F0D9 with the answer and a flat illustration of the same scene, now calm (e.g. 5 people on phones; the phone review screen; a calm counter; a new staff member smiling at the screen; a shield-check over a phone).
 A thin #CFA63C line between the halves with a round white arrow badge in the middle.
@@ -264,20 +246,34 @@ Benefit poster B4. Background #EBC865.
 
 Headline: "ஒரு நாளைக்கு ₹22 தான்"
 English line: "About ₹22 a day"
-Support line: "Pro plan · 400 voice minutes · ₹649 a month. Only recording time counts."
+Support line: "Pro plan · 400 voice minutes · ₹649 a month. Every feature is in every plan. Only recording time counts."
 
-Art: a white price card in the app's card style: the Voice2Fill mark, "Pro", "₹649 / month", a light blue pill "400 voice minutes", and a small muted line "Scanning and filling are free". Next to it a flat illustration of a tea glass and a calendar page, suggesting "less than a daily tea break".
+Art: a large white price card in the app's card style (12px radius, 1px #E5E3DF border):
+- Top: "Pro", "₹649 / month", a light blue pill "400 voice minutes · 30 days", and under it four small grey chips with Pro's limits: "2 computers", "600 documents", "300 Voice Form Fill QRs", "450 Non Voice Form Fill QRs". In the card's top-right corner a small flat tea glass in front of a calendar page ("less than a daily tea break").
+- A divider labelled "Every plan includes", then 8 features in two columns, each a Lucide icon in a light blue (#DCE8FB) tile, a semibold line and a muted line:
+  scan · "Scan from your scanner" / "Straight into the upload field"
+  smartphone · "Photos from phone or WhatsApp" / "Take a photo or pick a file"
+  file-down · "Big PDFs made smaller" / "Every page kept"
+  files · "Photos into one PDF" / "Sized to the site's rules"
+  layers · "Up to 5 forms at once" / "One QR per customer"
+  clock · "Answers wait 2 hours" / "Even if the site logs you out"
+  history · "Latest forms" / "QR for the next customer"
+  badge-check · "Typing and filling are free" / "Only recording time counts"
+16:9: text left, card right. Instagram post: the card full width under the headline (the tea art can be left out). Reel / Story: headline at the top of the safe zone, the card in the middle, the button above the bottom 250px; in the motion version the card slides up and the limit chips appear one by one.
 Bottom: a dark (#1F1E1C) button with white text "Start your free 7-day trial" and a muted line under it "15 voice minutes · no card needed".
-Never show how many forms the minutes cover.
+Never show how many forms the minutes cover. No WhatsApp logo, only the word.
 ```
 
 ---
 
 ## Checklist for every poster
 
-- [ ] **Both sizes:** 1600×900 and 1080×1350 (F0: 1600×1200 and 1080×1920).
+- [ ] **All three formats:** 16:9 1920×1080, Instagram post 1080×1350, Reel / Story 1080×1920 (F0: 1600×1200 and 1080×1920).
+- [ ] **Safe zones:** nothing important in a Reel's top and bottom 250px or right 120px; feed-post text 64px from the sides.
+- [ ] **Reels:** the still works as the cover; the 6–8 s motion version ends on the full poster.
 - [ ] **Exact colours** from the brief; no gradients, glows or purple.
-- [ ] **Only real features**: QR, phone mic, Tamil/Tanglish, yellow outline, "Did you mean…?", photo sizing, 5 tabs, auto-delete.
+- [ ] **Only real features**: QR, phone mic, Tamil/Tanglish, yellow outline, "Did you mean…?", photo sizing, photos into one PDF, PDF made smaller, Fetch from scan, 5 tabs, QR for other, answers wait 2 hours, Typing only, auto-delete.
+- [ ] **Prices and limits match Admin → Plans** (Starter ₹149; Pro 400 min · 300 / 450 QRs · 600 documents · 2 computers).
 - [ ] **Nothing auto-submits**: the operator always checks.
 - [ ] **No emblems, government or portal names, or other companies' logos** (including WhatsApp).
 - [ ] **No "best", "#1", ratings, user counts, "official" or "approved".**

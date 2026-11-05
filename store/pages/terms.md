@@ -25,11 +25,11 @@ Every plan has every feature. A plan gives you, for a number of days, a number o
 
 | Plan | Price | Voice minutes | Computers | Documents | Voice Form Fill QR | Non Voice Form Fill QR | Lasts |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Trial | Free | 15 | 1 | 10 | 15 | 5 | 7 days (once per person) |
-| Starter | ₹149 | 60 | 1 | 30 | 60 | 20 | 30 days |
-| Basic | ₹249 | 150 | 1 | 80 | 150 | 50 | 30 days |
-| Pro | ₹649 | 400 | 2 | 250 | 400 | 150 | 30 days |
-| Business | ₹1,949 | 1,200 | 3 | 800 | 1,200 | 500 | 30 days |
+| Trial | Free | 15 | 1 | 20 | 10 | 10 | 7 days (once per person) |
+| Starter | ₹149 | 60 | 1 | 200 | 40 | 120 | 30 days |
+| Basic | ₹249 | 150 | 1 | 300 | 100 | 250 | 30 days |
+| Pro | ₹649 | 400 | 2 | 600 | 300 | 450 | 30 days |
+| Business | ₹1,949 | 1,000 | 3 | 1,500 | 800 | 1,250 | 30 days |
 | Extra minutes | ₹79 | 50 | | | | | Until the current plan ends |
 
 - **Computers:** how many computers can be signed in at the same time. Signing in on one more asks you to sign one of the others out.

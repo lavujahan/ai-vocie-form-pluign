@@ -10,7 +10,7 @@ Prompts for **Claude Design**, for two videos:
 **Written from the code at commit `7b38bb7`.** Where this file disagrees with `chrome-web-store.md` or the README, this file is right (see **What changed in the code** below). `design-brief.md` and `pages/home.md` match it.
 
 **How to use**
-1. Start a new Claude Design project. Paste **Prompt V0** once.
+1. Start a new Claude Design project with the **Voice2Fill** design system (https://claude.ai/artifact/GYwpmpkRqvxqWQV4vCn5pb). Paste **Prompt V0** once: the colours, logo and caption type come from the design system.
 2. For V1, paste **Prompt V1**, then **Prompt V1-Vertical**.
 3. For V2, paste **one chapter at a time**. A long video is easier to fix chapter by chapter.
 4. Add the Tamil voice-over and quiet background music in a video editor afterwards. The voice-over lines and timings are in each table.
@@ -50,7 +50,7 @@ OUTPUT
 Build each video as one self-contained HTML page that plays by itself from a timeline, with a Play button and a scrubber, at 1920×1080 and 30 fps. Use real 3D (Three.js) if you can. If not, use CSS 3D transforms and tell me. The animation must give the same result every time it plays, so I can record the screen. Add no audio; I will add voice-over and music later. Reserve the bottom 15% for captions.
 
 3D STYLE
-A warm, soft "Orginal miniature" look: rounded matte objects, like a small handmade model of a Tamil Nadu service centre. Soft studio light, gentle shadows, a slow and steady camera (slow push-ins and small orbits, never fast spins). Plain background colours from the palette below.
+A warm, soft "Orginal miniature" look: rounded matte objects, like a small handmade model of a Tamil Nadu service centre. Soft studio light, gentle shadows, a slow and steady camera (slow push-ins and small orbits, never fast spins). Plain background colours from the Voice2Fill design system.
 Allowed for this video: 3D and soft shadows.
 Still not allowed: neon, glows, lens flares, particles, purple, glass effects, robots, brains, sparkles, holograms, floating "AI" text. This is a calm, trustworthy shop tool, not "AI magic".
 
@@ -60,15 +60,8 @@ Stylised rounded 3D characters, friendly and dignified, like a good animated fil
 PLACE
 A small service-centre counter: desktop computer, a flatbed scanner, printer, tube light, wall fan, a plastic chair or two, paper tokens, an open shutter onto the street. No government emblem, seal, flag, ministry, department or portal name. No bank names. No logos of any other company (no WhatsApp, Chrome or Android logos; a plain browser-window shape is fine). Any computer shows a plain form titled "Applicant registration" at "forms.example.in".
 
-COLOURS (exact)
-Brand blue #1E4E9C · light blue #DCE8FB · red mic #D4433D · filled-field yellow #F2B705
-Honey gold #EBC865, gold line #CFA63C, gold ink #1A1813 · mild gold #FBF3DC
-Page #FAF9F7 · card #FFFFFF · subtle #F4F3F0 · border #E5E3DF · ink #1F1E1C · muted #6B6863
-Success #1F6B2A on #D7F0D9 · Warning #7A5000 on #F9E2B0 · Danger #A32B26 on #FBE0DE
-
 CAPTIONS AND TITLES
-Tamil first in Noto Sans Tamil semibold, with a smaller English line under it in Inter or Segoe UI. Sentence case. Captions: white text on a #1E4E9C bar at the bottom left. Keep every word on screen for at least 2 seconds.
-Logo: white Lucide "mic" outline icon on a #1E4E9C rounded square, with the name "Voice2Fill".
+Use the Voice2Fill design system's colours, type and logo. Tamil first, with a smaller English line under it. Captions: white text on a `brand` blue bar at the bottom left. Keep every word on screen for at least 2 seconds.
 
 REAL PRODUCT SCREENS
 Every screen shown on a phone or computer must be this exact UI, drawn flat and sharp as a texture on the device. When the viewer must read a screen, turn the camera to face it straight on and hold. Never invent a button, badge or feature.
@@ -132,7 +125,7 @@ HONESTY RULES (the product must never look better than it is)
 - Captcha and OTP are typed on the computer. In a queue, the customer keeps the phone that gets the OTP.
 - Tamil typing uses voice minutes. Typing only, the Tamil helper and photos use none.
 - No time-saved numbers, percentages, customer counts, ratings or "best / #1 / fastest / official / government approved".
-- Plans are shown in voice minutes only. Never show how many forms a plan covers.
+- Plans are shown in voice minutes and the design system's plan counters only (its "Plans and pricing" section). Never show how many forms a plan covers.
 
 Reply "Ready" and wait for the first video prompt.
 ```

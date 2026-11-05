@@ -52,10 +52,19 @@ function byIds(doc: Document | ShadowRoot, ids: string): string {
     .join(' ');
 }
 
-/** Short text right before the control: previous siblings, then the parent's previous siblings. */
+/** A label in `node` that isn't part of `start` (another field's label). */
+const holdsOtherLabel = (node: Element, start: Element) =>
+  [...node.querySelectorAll('label')].some((l) => !start.contains(l) && !l.contains(start));
+
+/**
+ * Short text right before the control: previous siblings, then the parent's previous siblings. It stops
+ * at a block holding other fields' labels: the text before that block is a section title ("User
+ * Profile"), not this field's label.
+ */
 function nearbyText(el: Element): string {
   let node: Element | null = el;
   for (let depth = 0; node && depth < 3; depth++, node = node.parentElement) {
+    if (depth && holdsOtherLabel(node, el)) break;
     let sib = node.previousElementSibling;
     for (let i = 0; sib && i < 3; i++, sib = sib.previousElementSibling) {
       if (sib.matches(CANDIDATES) || sib.querySelector(CANDIDATES)) break;
@@ -72,6 +81,21 @@ function nearbyText(el: Element): string {
   }
   return '';
 }
+
+/** Text right after a checkbox / radio ("<input> <span>I agree</span>"): its own label on many sites. */
+function textAfter(el: Element): string {
+  let next = el.nextSibling;
+  while (next && (next.nodeType === 8 || (next.nodeType === 3 && !clean(next.textContent)))) next = next.nextSibling;
+  if (next?.nodeType === 3) return clean(next.textContent).slice(0, 200);
+  if (next?.nodeType !== 1) return '';
+  const n = next as Element;
+  if (n.matches(CANDIDATES) || n.querySelector(CANDIDATES)) return '';
+  const t = textWithoutControls(n);
+  return t.length <= 200 ? t : '';
+}
+
+const isChoice = (el: Element) =>
+  (el.tagName === 'INPUT' && /^(checkbox|radio)$/i.test((el as HTMLInputElement).type)) || /^(checkbox|radio)$/.test(el.getAttribute('role') ?? '');
 
 export function resolveLabel(el: HTMLElement): string {
   const root = el.getRootNode() as Document | ShadowRoot;
@@ -93,6 +117,10 @@ export function resolveLabel(el: HTMLElement): string {
   const labelledby = el.getAttribute('aria-labelledby');
   if (labelledby) {
     const t = byIds(root, labelledby);
+    if (t) return t;
+  }
+  if (isChoice(el)) {
+    const t = textAfter(el);
     if (t) return t;
   }
   const placeholder = clean(el.getAttribute('placeholder'));
@@ -131,9 +159,7 @@ function resolveLabelForChoice(input: HTMLInputElement): string {
   const aria = clean(input.getAttribute('aria-label'));
   if (aria) return aria;
   // <input> followed by a text node or <span>
-  const next = input.nextSibling;
-  if (next && clean(next.textContent)) return clean(next.textContent);
-  return '';
+  return textAfter(input);
 }
 
 function isPlaceholderOption(o: HTMLOptionElement, index: number): boolean {
@@ -182,6 +208,19 @@ function fieldTypeOf(el: HTMLElement): FieldType | null {
   if (role === 'combobox') return 'combobox';
   if (el.isContentEditable || el.getAttribute('contenteditable') !== null) return 'contenteditable';
   return null;
+}
+
+const DATE_HINT = /\b(dd|mm|yyyy)[-/. ](dd|mm|yyyy)\b|date|dob|calendar/i;
+
+/**
+ * A read-only input the user still has to fill: an empty date-picker field (read-only so dates are
+ * picked from the calendar, not typed) or an empty required one. A read-only input with a value is the
+ * site's own (a name taken from the login) and is skipped.
+ */
+function fillableReadOnly(el: HTMLInputElement): boolean {
+  if (el.value.trim()) return false;
+  const hints = [el.className, el.id, el.name, el.placeholder, el.type].join(' ');
+  return el.required || el.getAttribute('aria-required') === 'true' || DATE_HINT.test(hints);
 }
 
 function isRequired(el: HTMLElement, label: string, rawLabel?: string): boolean {
@@ -339,7 +378,8 @@ export function detect(doc: Document = document): { schema: FormSchemaInput; reg
       const type = fieldTypeOf(el);
       if (!type) continue;
       // Disabled dropdowns are kept: in a cascade (District → Taluk) the child is disabled until its parent is chosen.
-      if (((el as HTMLInputElement).disabled && el.tagName !== 'SELECT') || (el as HTMLInputElement).readOnly) continue;
+      if ((el as HTMLInputElement).disabled && el.tagName !== 'SELECT') continue;
+      if ((el as HTMLInputElement).readOnly && !fillableReadOnly(el as HTMLInputElement)) continue;
       const name = el.getAttribute('name') ?? '';
       if (SKIP_NAME.test(name) || SKIP_NAME.test(el.id)) continue;
       // Upload fields are kept when something visible opens them (styled button, label, drop zone).
