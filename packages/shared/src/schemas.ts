@@ -156,26 +156,28 @@ export const FormAnalysis = z.object({
 export type FormAnalysis = z.infer<typeof FormAnalysis>;
 
 /**
- * What the Form Analyzer writes: the saved FormAnalysis without the defaults it would repeat on every
- * field (output is most of its cost). Fields by short id; validation null when the page states none;
- * the rare Tamil-text fields, later sections and upload rules as short lists. Code fills in the rest.
+ * What the Form Analyzer writes: the saved FormAnalysis without what it would repeat on every field
+ * (output is most of its cost). Per field only what every field has, under short names: id (k), clean
+ * label (l), semantic type (t) and Tamil label (ta). Everything most fields lack is a short list of ids:
+ * required fields, rules the page states, dependent fields, Tamil-text fields, later sections and upload
+ * rules. Code fills in the rest (readingFromAnswer).
  */
 export const AnalyzerAnswer = z.object({
   form_purpose: z.string().describe('Short sentence-case name for the form, e.g. "Customer onboarding"'),
   fields: z.array(
     z.object({
-      field_key: z.string(),
-      clean_label: z.string(),
-      semantic_type: SemanticType,
-      required: z.boolean(),
-      validation: ValidationRules.nullable(),
-      depends_on: z.string().nullable(),
-      label_ta: z.string().describe("Short Tamil translation of the label for the phone screen, e.g. \"தந்தை பெயர்\" for Father's name"),
+      k: z.string().describe('The field id, exactly as listed: f1, f2, …'),
+      l: z.string().describe('clean_label: a short human label in sentence case'),
+      t: SemanticType.describe('semantic_type'),
+      ta: z.string().describe("label_ta: the label in short, simple Tamil for the phone, e.g. \"தந்தை பெயர்\" for Father's name"),
     }),
   ),
+  required: z.array(z.string()).describe('Ids of the required fields'),
+  rules: z.array(ValidationRules.extend({ k: z.string() })).describe('Only for fields whose format or length the page text states; usually empty'),
+  parents: z.array(z.object({ k: z.string(), parent: z.string() })).describe('Fields that depend on another field (taluk → district), with that parent id; usually empty'),
   tamil_fields: z.array(z.string()).describe('Ids of the fields whose label asks for the value in Tamil; usually empty'),
   step_starts: z.array(z.string()).describe('The first field of each later section, only when the form is clearly split into steps; usually empty'),
-  uploads: z.array(FileRules.extend({ field_key: z.string() })).describe('One entry per upload field (type file)'),
+  uploads: z.array(FileRules.extend({ k: z.string() })).describe('One entry per upload field (type file)'),
 });
 export type AnalyzerAnswer = z.infer<typeof AnalyzerAnswer>;
 

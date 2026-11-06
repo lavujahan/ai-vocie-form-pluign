@@ -1,9 +1,10 @@
 /**
- * Reads the saved forms with the old Form Analyzer (before the short answer, scripts/eval-analyzer-old.ts)
+ * Reads the saved forms with the old Form Analyzer (before the compact answer, scripts/eval-analyzer-old.ts)
  * and with today's, on exactly the same input, to check that the change keeps the reading's quality.
  *   pnpm eval:analyzer                  (needs OPENAI_API_KEY and Supabase in apps/web/.env.local)
  *   pnpm eval:analyzer --limit 5        (at most 5 forms, most used first; default 10)
  *   pnpm eval:analyzer --model gpt-4o   (another model; default: the app's)
+ *   pnpm eval:analyzer --new-model gpt-5.4-mini@none   (the new reader on its own model, e.g. without thinking)
  *   pnpm eval:analyzer --self           (old against old: how much two runs differ anyway)
  * The input is the field list saved with a reading (migration 0018); a form saved before it is read from its
  * snapshot, without dropdown options (those fields are marked *). The page text is not saved, so both
@@ -32,6 +33,7 @@ const arg = (name: string) => {
 };
 const limit = Number(arg('limit') ?? 10);
 const model = arg('model');
+const newModel = arg('new-model') ?? model;
 const self = process.argv.includes('--self');
 if (self) console.log('Old against old: the differences are what two runs of the same reader give anyway.');
 /** ₹ per $ for the report (the admin page uses its own rate). */
@@ -63,10 +65,10 @@ const show = (v: unknown) => (v === null || v === undefined || v === '' ? '—' 
 const hasFormat = (f: FieldAnalysis) => !!(f.validation?.regex || f.validation?.format || f.validation?.min_length || f.validation?.max_length);
 
 type Read = { reading: FormAnalysis; usage: UsageEvent[]; ms: number };
-async function read(fn: typeof analyzeForm, schema: FormSchema): Promise<Read> {
+async function read(fn: typeof analyzeForm, schema: FormSchema, spec = model): Promise<Read> {
   const usage: UsageEvent[] = [];
   const t0 = Date.now();
-  const reading = await fn(schema, { model, onUsage: (run) => usage.push(openaiEvent({ user_id: null, session_id: null }, 'analyze', run)) });
+  const reading = await fn(schema, { model: spec, onUsage: (run) => usage.push(openaiEvent({ user_id: null, session_id: null }, 'analyze', run)) });
   return { reading, usage, ms: Date.now() - t0 };
 }
 const sum = (r: Read, k: 'output_tokens' | 'input_tokens' | 'cost_usd') => r.usage.reduce((a, e) => a + (e[k] ?? 0), 0);
@@ -78,7 +80,7 @@ const changed = new Map<string, number>();
 for (const row of rows) {
   const schema = FormSchema.parse({ page_url: row.page_url, page_title: row.form_name, html_snippet: '', fields: fieldsOf(row) });
   const unseen = noOptions(row);
-  const [o, n] = await Promise.all([read(analyzeFormOld, schema), read(self ? analyzeFormOld : analyzeForm, schema)]);
+  const [o, n] = await Promise.all([read(analyzeFormOld, schema), read(self ? analyzeFormOld : analyzeForm, schema, self ? model : newModel)]);
   const before = new Map(sanitizeAnalysis(o.reading, schema).map((f) => [f.field_key, f]));
   const after = new Map(sanitizeAnalysis(n.reading, schema).map((f) => [f.field_key, f]));
 

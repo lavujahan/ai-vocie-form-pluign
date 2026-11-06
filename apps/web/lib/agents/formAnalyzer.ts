@@ -9,12 +9,14 @@ import {
   type ValidationRules,
 } from '@vff/shared';
 import {
+  fieldSig,
   fieldSnapshot,
   formFingerprint,
   emptiedByTemplate,
   formTemplate,
   isFresh,
   isMissingTable,
+  knownFieldReadings,
   pageOf,
   promptVersion,
   type CachedReading,
@@ -32,19 +34,20 @@ For the form:
 
 Fields are listed by id (f1, f2, …); answer with these ids, exactly as listed. The site's key ("key: …", when it has words) is only a hint for an unclear label.
 
-For every field in the input (include every field once):
-- clean_label: a short human label in sentence case ("Full name", "Mobile number"). Remove asterisks and "(required)".
-- semantic_type: the closest type from the allowed list. Use "choice" for option fields without a better type, "boolean" for a single yes/no checkbox, "free_text" for remarks/descriptions.
-- required: true if the field is marked required, has an asterisk, or the text says it is mandatory.
-- validation: only for a format or length the page states in its text (help text, "nearby", the form text): regex (JavaScript, without ^$ anchors), min/max length, and a human-readable format hint (e.g. "10 digits", "DD/MM/YYYY"). The input's own maxlength, minlength, pattern and title are applied by code: don't repeat them. null otherwise — never guess.
-- depends_on: the id of a parent field this one depends on (e.g. state → country), otherwise null.
-- label_ta: the label in simple, common Tamil for someone reading it on a phone ("Father's name" → "தந்தை பெயர்", "Mobile number" → "கைபேசி எண்", "Date of birth" → "பிறந்த தேதி", "Taluk" → "வட்டம்"). Tamil script only; keep it short; use the English word in Tamil letters when that is what people say ("ஆதார் எண்"). Keep whose or what it is: "Owner's mobile number" → "உரிமையாளரின் கைபேசி எண்" (not just "கைபேசி எண்"), "Bull's age" → "காளையின் வயது".
-- A field labelled only in Tamil next to the same field in English ("Applicant Name" and "விண்ணப்பதாரர் பெயர்") takes the value in Tamil: its clean_label ends with "in Tamil" ("Applicant name in Tamil") and its id goes in tamil_fields.
+For every field in the input, one entry in "fields" (include every field once), with these short names:
+- k: the field id.
+- l (clean label): a short human label in sentence case ("Full name", "Mobile number"). Remove asterisks and "(required)".
+- t (semantic type): the closest type from the allowed list. Use "choice" for option fields without a better type, "boolean" for a single yes/no checkbox, "free_text" for remarks/descriptions.
+- ta (Tamil label): the label in simple, common Tamil for someone reading it on a phone ("Father's name" → "தந்தை பெயர்", "Mobile number" → "கைபேசி எண்", "Date of birth" → "பிறந்த தேதி", "Taluk" → "வட்டம்"). Tamil script only; keep it short; use the English word in Tamil letters when that is what people say ("ஆதார் எண்"). Keep whose or what it is: "Owner's mobile number" → "உரிமையாளரின் கைபேசி எண்" (not just "கைபேசி எண்"), "Bull's age" → "காளையின் வயது".
+- A field labelled only in Tamil next to the same field in English ("Applicant Name" and "விண்ணப்பதாரர் பெயர்") takes the value in Tamil: its l ends with "in Tamil" ("Applicant name in Tamil") and its id goes in tamil_fields.
 
-For the whole form:
+For the whole form, as lists of ids (empty when none):
+- required: the ids of the fields that are marked required, have an asterisk, or that the text says are mandatory.
+- rules: only for a format or length the page states in its text (help text, "nearby", the form text): one entry per such field, with its id as k: regex (JavaScript, without ^$ anchors), min/max length, and a human-readable format hint (e.g. "10 digits", "DD/MM/YYYY"). The input's own maxlength, minlength, pattern and title are applied by code: don't repeat them. Never guess. Usually empty.
+- parents: a field that depends on another (taluk → district, district → state): its id as k and the parent's id. Usually empty.
 - tamil_fields: the ids of fields whose value is written in Tamil: the label asks for it ("Name in Tamil", "தமிழில் பெயர்", "Name in regional language"), or a Tamil-only label next to its English twin. Usually empty.
 - step_starts: only if the form is clearly split into steps or sections filled one after another: the id of the first field of each step after the first. Usually empty.
-- uploads: one entry per upload field (type file), with its id as field_key. Read the rules from the accept attribute and the text near the field or anywhere on the page ("Photo: JPG, below 50 KB, 3.5 x 4.5 cm", "Upload community certificate in PDF, max 1 MB"):
+- uploads: one entry per upload field (type file), with its id as k. Read the rules from the accept attribute and the text near the field or anywhere on the page ("Photo: JPG, below 50 KB, 3.5 x 4.5 cm", "Upload community certificate in PDF, max 1 MB"):
   kind = photo (a person's photo), signature, or document (certificates, ID cards, any scan);
   formats = the allowed file types (jpg / png / pdf), empty if not stated;
   max_kb / min_kb = stated size limits in KB (1 MB = 1024 KB), null if not stated; never guess a size;
@@ -141,17 +144,21 @@ async function readOnce(schema: FormSchema, opts: AnalyzeOpts): Promise<FormAnal
 }
 
 /**
- * The saved reading from the AI's short answer: the site's keys back in place of f1, f2, …, and per field
- * what the answer lists once for the form: Tamil output (tamil_fields), the step (step_starts, counted in
- * form order) and the upload rules (uploads).
+ * The saved reading from the AI's compact answer: the site's keys back in place of f1, f2, …, the short
+ * names spelled out, and per field what the answer lists once for the form: required (required), the
+ * page's rules (rules), the parent field (parents), Tamil output (tamil_fields), the step (step_starts,
+ * counted in form order) and the upload rules (uploads).
  */
 export function readingFromAnswer(answer: AnalyzerAnswer, schema: FormSchema): FormAnalysis {
   const keyOf = new Map(schema.fields.map((f, i) => [shortId(i), f.field_key]));
   // An id the form doesn't have stays as it is, and sanitizeAnalysis drops it.
   const site = (id: string) => keyOf.get(id) ?? id;
+  const required = new Set(answer.required.map(site));
+  const rules = new Map(answer.rules.map(({ k, ...r }) => [site(k), r]));
+  const parents = new Map(answer.parents.map((p) => [site(p.k), site(p.parent)]));
   const tamil = new Set(answer.tamil_fields.map(site));
   const starts = new Set(answer.step_starts.map(site));
-  const uploads = new Map(answer.uploads.map(({ field_key, ...rules }) => [site(field_key), rules]));
+  const uploads = new Map(answer.uploads.map(({ k, ...rules }) => [site(k), rules]));
   const stepOf = new Map<string, number>();
   let step = 0;
   for (const f of schema.fields) {
@@ -161,11 +168,15 @@ export function readingFromAnswer(answer: AnalyzerAnswer, schema: FormSchema): F
   return {
     form_purpose: answer.form_purpose,
     fields: answer.fields.map((f) => {
-      const key = site(f.field_key);
+      const key = site(f.k);
       return {
-        ...f,
         field_key: key,
-        depends_on: f.depends_on ? site(f.depends_on) : null,
+        clean_label: f.l,
+        semantic_type: f.t,
+        label_ta: f.ta,
+        required: required.has(key),
+        validation: rules.get(key) ?? null,
+        depends_on: parents.get(key) ?? null,
         step_index: stepOf.get(key) ?? 0,
         output_script: tamil.has(key) ? 'ta' : 'en',
         file_rules: uploads.get(key) ?? null,
@@ -305,9 +316,31 @@ export async function savedReading(schema: FormSchema): Promise<SavedForm | null
 }
 
 /**
+ * Fields this site's saved readings have read before (any page of the same origin, any session, anyone),
+ * by fieldSig: a form's later pages and revealed fields, and a login or OTP box seen on another page.
+ * Empty when there are none or the table is missing.
+ */
+async function knownFields(schema: FormSchema): Promise<Map<string, FieldAnalysis>> {
+  const { db } = await import('../supabase-admin');
+  const res = await db()
+    .from('form_cache')
+    .select('analysis, fields, prompt_version, created_at, edited_at')
+    .like('page_url', `${new URL(schema.page_url).origin}/%`)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (res.error) {
+    if (!isMissingTable(res.error.code)) console.warn('saved field readings lookup failed', res.error);
+    return new Map();
+  }
+  return knownFieldReadings((res.data ?? []) as never, { promptVersion: promptVersion(ANALYZER_INSTRUCTIONS) });
+}
+
+/**
  * The form's reading: the shared saved one when it is fresh (no AI call, nothing billed), else a new
  * one from the AI, saved with the form's field list for the next scan of this form by anyone.
  * `saved`: the route already looked it up (null: there is none).
+ * `partial` (fields that appeared later): a field this site's saved readings have read before keeps that
+ * reading, and only the others go to the AI; none left, no AI call at all.
  */
 async function readForm(
   schema: FormSchema,
@@ -320,7 +353,14 @@ async function readForm(
   const found = saved === undefined ? await savedReading(schema) : saved;
   if (found) return found.analysis;
 
-  const analysis = await analyzeForm(schema, { onUsage });
+  const known = partial ? await knownFields(schema) : new Map<string, FieldAnalysis>();
+  const reused = schema.fields.flatMap((f) => known.get(fieldSig(f)) ?? []);
+  const toRead = schema.fields.filter((f) => !known.has(fieldSig(f)));
+  if (!toRead.length) return { form_purpose: '', fields: reused };
+  if (reused.length) console.log(`form reading: ${reused.length} of ${schema.fields.length} new fields known, reading ${toRead.length}`);
+
+  const read = await analyzeForm({ ...schema, fields: toRead }, { onUsage });
+  const analysis = { form_purpose: read.form_purpose, fields: [...reused, ...read.fields] };
   const reading = { form_purpose: analysis.form_purpose, fields: sanitizeAnalysis(analysis, schema) };
   const row = {
     fingerprint: formFingerprint(schema),

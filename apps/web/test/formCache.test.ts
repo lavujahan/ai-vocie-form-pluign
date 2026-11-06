@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AdminFormPatch, FormSchema, type FieldAnalysis } from '@vff/shared';
-import { applyFieldEdits, formFingerprint, formTemplate, isFresh, readingExpiresAt } from '@/lib/agents/formCache';
+import { applyFieldEdits, fieldSig, formFingerprint, formTemplate, isFresh, knownFieldReadings, readingExpiresAt } from '@/lib/agents/formCache';
 
 const schema = (over: Partial<FormSchema> = {}, field: Record<string, unknown> = {}) =>
   FormSchema.parse({
@@ -103,5 +103,54 @@ describe('admin edits of a reading', () => {
 
   it('rejects an empty English label', () => {
     expect(() => AdminFormPatch.parse({ fields: [{ field_key: 'a', clean_label: '  ', label_ta: '', required: false }] })).toThrow();
+  });
+});
+
+describe('knownFieldReadings (fields that appear later reuse earlier readings)', () => {
+  const PV = { promptVersion: 'v1' };
+  const NOW = new Date('2026-11-06T10:00:00Z');
+  const reading = (key: string, clean: string): FieldAnalysis =>
+    ({ field_key: key, clean_label: clean, label_ta: '', semantic_type: 'other', validation: null, required: false, depends_on: null, step_index: 0, output_script: 'en', file_rules: null }) as FieldAnalysis;
+  const row = (created_at: string, fields: [string, string, string][], clean: string, over: Record<string, unknown> = {}) => ({
+    analysis: { form_purpose: '', fields: fields.map(([k]) => reading(k, `${clean} ${k}`)) },
+    fields: fields.map(([field_key, label, field_type]) => ({ field_key, label, field_type })),
+    prompt_version: 'v1',
+    created_at,
+    edited_at: null,
+    ...over,
+  });
+
+  it('finds a field by its key, label and type, from any saved reading of the page', () => {
+    const known = knownFieldReadings(
+      [row('2026-11-05T09:00:00Z', [['taluk', 'Taluk', 'select']], 'old'), row('2026-11-05T10:00:00Z', [['village', 'Village', 'select']], 'step')],
+      PV,
+      NOW,
+    );
+    expect(known.get(fieldSig({ field_key: 'taluk', label: 'Taluk', field_type: 'select' }))?.clean_label).toBe('old taluk');
+    expect(known.get(fieldSig({ field_key: 'village', label: 'Village', field_type: 'select' }))?.clean_label).toBe('step village');
+  });
+
+  it('does not match a field whose label or type changed', () => {
+    const known = knownFieldReadings([row('2026-11-05T09:00:00Z', [['taluk', 'Taluk', 'select']], 'old')], PV, NOW);
+    expect(known.has(fieldSig({ field_key: 'taluk', label: 'Taluk name', field_type: 'select' }))).toBe(false);
+    expect(known.has(fieldSig({ field_key: 'taluk', label: 'Taluk', field_type: 'text' }))).toBe(false);
+  });
+
+  it('takes the newest reading of a field', () => {
+    const known = knownFieldReadings(
+      [row('2026-11-01T09:00:00Z', [['taluk', 'Taluk', 'select']], 'older'), row('2026-11-05T09:00:00Z', [['taluk', 'Taluk', 'select']], 'newer')],
+      PV,
+      NOW,
+    );
+    expect(known.get(fieldSig({ field_key: 'taluk', label: 'Taluk', field_type: 'select' }))?.clean_label).toBe('newer taluk');
+  });
+
+  it('skips readings made with other instructions or older than 30 days', () => {
+    const known = knownFieldReadings(
+      [row('2026-11-05T09:00:00Z', [['a', 'A', 'text']], 'x', { prompt_version: 'v0' }), row('2026-09-01T09:00:00Z', [['b', 'B', 'text']], 'x')],
+      PV,
+      NOW,
+    );
+    expect(known.size).toBe(0);
   });
 });

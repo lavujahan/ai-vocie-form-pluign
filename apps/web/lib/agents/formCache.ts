@@ -91,6 +91,34 @@ export function fieldSnapshot(schema: FormSchema) {
   }));
 }
 
+/** A field's identity across sessions and readings: its key, label and type, as in formFingerprint. */
+export const fieldSig = (f: { field_key: string; label: string; field_type: string }) => JSON.stringify([f.field_key, f.label, f.field_type]);
+
+type SavedRow = Pick<CachedReading, 'analysis' | 'created_at' | 'edited_at' | 'prompt_version'> & {
+  fields: { field_key: string; label: string; field_type: string }[] | null;
+};
+
+/**
+ * Every field one page's fresh saved readings (whole forms and fields that appeared later) have read, by
+ * fieldSig: a field that appears later and was read before, in any session, needs no AI. The newest
+ * reading of a field wins; `rows` may come in any order.
+ */
+export function knownFieldReadings(rows: SavedRow[], current: { promptVersion: string }, now = new Date()): Map<string, FieldAnalysis> {
+  const known = new Map<string, FieldAnalysis>();
+  const newestFirst = [...rows].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  for (const row of newestFirst) {
+    if (!isFresh(row, current, now)) continue;
+    const site = new Map((row.fields ?? []).map((f) => [f.field_key, f]));
+    for (const a of row.analysis.fields) {
+      const f = site.get(a.field_key);
+      if (!f) continue;
+      const sig = fieldSig(f);
+      if (!known.has(sig)) known.set(sig, a);
+    }
+  }
+  return known;
+}
+
 /** No form_cache table yet (migration 0012 not applied): read every form, as before. */
 export const isMissingTable = (code: string | undefined) => code === '42P01' || code === 'PGRST205';
 

@@ -76,6 +76,49 @@ describe('sanitizeMapping (output guardrail)', () => {
     expect(r.values[0].value).toBe('95432498' + '00');
   });
 
+  it('adds up amounts spoken in words instead of joining their pieces', () => {
+    const cost = { field_key: 'cost', label: 'Cost of work', field_type: 'number', required: false, options: [], semantic_type: 'number' } as AgentField;
+    const map = (value: string, parts: [string, string][]) =>
+      sanitizeMapping(
+        { values: [{ field_key: 'cost', value, confidence: 0.9, source_phrase: null, number_parts: parts.map(([heard, digits]) => ({ heard, digits })) }] },
+        [cost],
+        null,
+      ).values[0].value;
+    expect(map('25000', [['twenty', '20'], ['five', '5'], ['thousand', '000']])).toBe('25000');
+    expect(map('1500', [['one', '1'], ['thousand', '000'], ['five', '5'], ['hundred', '00']])).toBe('1500');
+    expect(map('200000', [['rendu', '2'], ['lakh', '00000']])).toBe('200000');
+    expect(map('25000', [['இருபத்தைந்து', '25'], ['ஆயிரம்', '000']])).toBe('25000');
+    expect(map('25', [['twenty', '20'], ['five', '5']])).toBe('25');
+    // Read out digit by digit (an application number): the pieces are still joined.
+    expect(map('120034', [['one', '1'], ['two', '2'], ['double zero', '00'], ['three', '3'], ['four', '4']])).toBe('120034');
+    expect(map('9000', [['nine', '9'], ['triple zero', '000']])).toBe('9000');
+  });
+
+  it('still joins the pieces of phone, Aadhaar and PIN numbers, whatever was said', () => {
+    const r = sanitizeMapping(
+      {
+        values: [
+          {
+            field_key: 'phone',
+            value: '987654321',
+            confidence: 0.9,
+            source_phrase: null,
+            number_parts: [
+              { heard: 'ninety eight', digits: '98' },
+              { heard: 'seventy six', digits: '76' },
+              { heard: 'fifty four', digits: '54' },
+              { heard: 'thirty two', digits: '32' },
+              { heard: 'ten', digits: '10' },
+            ],
+          },
+        ],
+      },
+      EVAL_FORM,
+      null,
+    );
+    expect(r.values[0].value).toBe('9876543210');
+  });
+
   it('only keeps the target field in field-by-field mode', () => {
     const r = sanitizeMapping(
       {
@@ -152,15 +195,18 @@ describe('Form Analyzer short answer', () => {
     ],
   } satisfies FormSchema;
   const answerField = (id: string, more: Partial<AnalyzerAnswer['fields'][number]> = {}): AnalyzerAnswer['fields'][number] => ({
-    field_key: id, clean_label: id, semantic_type: 'other', required: false, validation: null, depends_on: null, label_ta: 'பெயர்', ...more,
+    k: id, l: id, t: 'other', ta: 'பெயர்', ...more,
   });
-  const answer = {
+  const answer: AnalyzerAnswer = {
     form_purpose: 'Test form',
-    fields: [answerField('f1'), answerField('f2'), answerField('f3'), answerField('f4', { depends_on: 'f3' }), answerField('f5')],
+    fields: [answerField('f1'), answerField('f2'), answerField('f3'), answerField('f4'), answerField('f5')],
+    required: [],
+    rules: [],
+    parents: [{ k: 'f4', parent: 'f3' }],
     tamil_fields: ['f2'],
     step_starts: ['f3'],
-    uploads: [{ field_key: 'f5', kind: 'photo', formats: ['jpg'], max_kb: 50, min_kb: null, max_pages: null, width_px: null, height_px: null, shape: null, note: null }],
-  } as AnalyzerAnswer;
+    uploads: [{ k: 'f5', kind: 'photo', formats: ['jpg'], max_kb: 50, min_kb: null, max_pages: null, width_px: null, height_px: null, shape: null, note: null }],
+  };
 
   it('puts the site keys back and fills Tamil output, steps and upload rules from the short lists', () => {
     const r = readingFromAnswer(answer, schema);
@@ -179,15 +225,32 @@ describe('Form Analyzer short answer', () => {
     expect(sanitizeAnalysis(r, schema)[0].validation).toBeNull();
   });
 
+  it('spells out the short names and fills required, rules and parents from their lists', () => {
+    const r = readingFromAnswer(
+      {
+        ...answer,
+        fields: [answerField('f1', { l: 'Full name', t: 'full_name', ta: 'பெயர்' }), ...answer.fields.slice(1)],
+        required: ['f1', 'f3'],
+        rules: [{ k: 'f1', regex: null, min_length: 3, max_length: null, format: 'At least 3 letters' }],
+      },
+      schema,
+    );
+    expect(r.fields[0]).toMatchObject({ field_key: 'txtName', clean_label: 'Full name', semantic_type: 'full_name', label_ta: 'பெயர்', required: true });
+    expect(r.fields[0].validation).toMatchObject({ min_length: 3, format: 'At least 3 letters' });
+    expect(r.fields.map((f) => f.required)).toEqual([true, false, true, false, false]);
+    expect(r.fields.map((f) => f.depends_on)).toEqual([null, null, null, 'ddlDistrict', null]);
+    expect(r.fields[1].validation).toBeNull();
+  });
+
   it('drops an id the form does not have', () => {
     const r = readingFromAnswer({ ...answer, fields: [...answer.fields, answerField('f99')] }, schema);
     expect(sanitizeAnalysis(r, schema)).toHaveLength(5);
   });
 
   it('reads the fields the answer left out again, once, on their own', async () => {
-    const first = { ...answer, fields: answer.fields.filter((f) => f.field_key !== 'f2' && f.field_key !== 'f4') };
+    const first = { ...answer, fields: answer.fields.filter((f) => f.k !== 'f2' && f.k !== 'f4'), parents: [] };
     // The second call lists only the two missing fields, as f1 and f2.
-    const second = { ...answer, fields: [answerField('f1', { clean_label: 'Name in Tamil' }), answerField('f2', { depends_on: 'f1' })], tamil_fields: ['f1'], step_starts: [], uploads: [] };
+    const second = { ...answer, fields: [answerField('f1', { l: 'Name in Tamil' }), answerField('f2')], parents: [{ k: 'f2', parent: 'f1' }], tamil_fields: ['f1'], step_starts: [], uploads: [] };
     const model = new ScriptedModel([[assistantMessage(JSON.stringify(first))], [assistantMessage(JSON.stringify(second))]]);
     const r = await analyzeForm(schema, { model });
     expect(model.calls).toHaveLength(2);

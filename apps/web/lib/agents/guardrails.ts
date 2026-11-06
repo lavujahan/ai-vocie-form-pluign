@@ -2,6 +2,25 @@ import type { InputGuardrail, OutputGuardrail } from '@openai/agents';
 import { MappingResult, normalizeText, type MappedValue } from '@vff/shared';
 import { fieldLabel, validateForField, type AgentField } from './tools';
 
+/** Fields whose numbers are always said digit by digit (or in digit groups): their pieces are joined. */
+const DIGIT_FIELDS = new Set(['phone', 'aadhaar', 'pincode']);
+/** Words that make a number an amount (added up, not read out): thousand, lakh, hundred… in English, Tamil and Tanglish. */
+const MAGNITUDE = /thousand|hundred|lakh|lac|crore|million|billion|ஆயிர|நூறு|நூற்|லட்ச|இலட்ச|கோடி|aayir|ayir|nooru|nootri|latch|laksh|kodi/i;
+
+/**
+ * True when the spoken pieces are a digit sequence, read out (a mobile number, Aadhaar, an account number),
+ * so joining them gives the number: always for phone / Aadhaar / PIN fields; otherwise only when every
+ * piece is one digit or a "double nine" / "triple zero" group. An amount or quantity ("twenty five",
+ * "twenty five thousand", "rendu lakh", "ஐம்பது") is one number: the AI's own value is kept.
+ */
+export function spokenDigitByDigit(field: Pick<AgentField, 'semantic_type'>, parts: { heard: string; digits: string }[]): boolean {
+  if (field.semantic_type && DIGIT_FIELDS.has(field.semantic_type)) return true;
+  return parts.every((p) => {
+    const d = p.digits.replace(/\D/g, '');
+    return d.length === 1 || (/^(\d)\1+$/.test(d) && !MAGNITUDE.test(p.heard));
+  });
+}
+
 export type MapperContext = { transcript: string; fieldKeys: Set<string> };
 
 /** True when the transcript has no real speech in it (silence, noise, a single character). */
@@ -67,9 +86,10 @@ export function sanitizeMapping(
     if (!field) continue;
     if (targetFieldKey && raw.field_key !== targetFieldKey) continue;
     // For numbers spoken as words the agent lists each piece it heard with its digits; joining
-    // those is more reliable than its one-shot answer (which can drop or swap digits). No word
-    // lists here: the AI did the interpreting, code only concatenates.
-    const joined = raw.number_parts?.length ? raw.number_parts.map((p) => p.digits.replace(/\D/g, '')).join('') : '';
+    // those is more reliable than its one-shot answer (which can drop or swap digits). The AI did the
+    // interpreting, code only concatenates — but only for numbers said digit by digit (spokenDigitByDigit):
+    // "twenty five thousand" is 25000, not the pieces 20·5·000 side by side.
+    const joined = raw.number_parts?.length && spokenDigitByDigit(field, raw.number_parts) ? raw.number_parts.map((p) => p.digits.replace(/\D/g, '')).join('') : '';
     // Only for values that are all digits: joining would drop the letters of a code like a GST number.
     const lettered = /[\p{L}]/u.test(raw.value ?? '');
     const v = joined && !lettered ? { ...raw, value: joined } : raw;

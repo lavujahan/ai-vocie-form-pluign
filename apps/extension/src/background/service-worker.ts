@@ -21,6 +21,7 @@ import type {
   SessionSnapshot,
   SessionValue,
   UtteranceRow,
+  FormSchemaInput,
 } from '@vff/shared';
 import { SENT_HOLD_MIN } from '@vff/shared';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../env';
@@ -48,6 +49,7 @@ import contentScript from '../content/index.ts?script';
 import { clearScans, deleteScan, deleteScans, getScan, listScans, scanId, setScanStatus } from '../scans-db';
 import { api, ApiError } from './api';
 import { deviceKey, deviceLabel } from './device';
+import { addToRead, READ_QUIET_MS } from './reads';
 import {
   assertRoom,
   changesSince,
@@ -292,11 +294,35 @@ const withFields = (snap: SessionSnapshot, fields: SessionField[]): SessionSnaps
   fields: [...snap.fields, ...fields.filter((f) => !snap.fields.some((x) => x.id === f.id))].sort(byPosition),
 });
 
+/** Per tab: fields added with read=later that wait for one AI reading (see READ_QUIET_MS). */
+const toRead = new Map<number, { code: string; schema: FormSchemaInput; timer: ReturnType<typeof setTimeout> }>();
+
+/** New fields were added: (re)start the quiet wait, then read everything that appeared meanwhile at once. */
+function readLater(tabId: number, code: string, change: FormSchemaInput, added: string[]) {
+  const waiting = toRead.get(tabId);
+  const schema = addToRead(waiting?.code === code ? waiting.schema : null, change, added);
+  if (!schema) return;
+  if (waiting) clearTimeout(waiting.timer);
+  toRead.set(tabId, { code, schema, timer: setTimeout(() => void readNow(tabId), READ_QUIET_MS) });
+}
+
+async function readNow(tabId: number) {
+  const waiting = toRead.get(tabId);
+  toRead.delete(tabId);
+  if (!waiting || !state.auth) return;
+  try {
+    await api(`/api/sessions/${waiting.code}/fields/read`, { body: waiting.schema, token: state.auth.token });
+  } catch (e) {
+    // An older server read them already when they were added (it has no /fields/read).
+    console.warn('could not read the new fields', e);
+  }
+}
+
 /**
- * The page watcher saw a change: new fields are added to the session (the phone shows them), as the
- * next step or, when a choice revealed them, in the step on the page. Then the phone is told which
- * fields a choice hides now (the other branch of the form). Values waiting for their field are filled
- * on the next "Fill form", like everything else.
+ * The page watcher saw a change: new fields are added to the session at once (the phone shows them), as
+ * the next step or, when a choice revealed them, in the step on the page; the AI reads them once the page
+ * is quiet (readLater). Then the phone is told which fields a choice hides now (the other branch of the
+ * form). Values waiting for their field are filled on the next "Fill form", like everything else.
  */
 async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
   await ready;
@@ -305,11 +331,13 @@ async function fieldsChanged(tabId: number, change: FieldsChangedMessage) {
   if (change.schema.fields.length) {
     try {
       const step = change.new_step === false ? 'same' : 'next';
-      const res = await api<AddFieldsResponse>(`/api/sessions/${t.session.session_code}/fields?step=${step}`, {
+      const code = t.session.session_code;
+      const res = await api<AddFieldsResponse>(`/api/sessions/${code}/fields?step=${step}&read=later`, {
         body: change.schema,
         token: state.auth.token,
       });
       if (res.fields.length) {
+        readLater(tabId, code, change.schema, res.fields.map((f) => f.field_key));
         patchSnapshot(tabId, (snap) => withFields(snap, res.fields));
         await save();
       }

@@ -26,6 +26,8 @@ type Ctx = { params: Promise<{ code: string }> };
  * Either way they go after the existing fields, so the mapper's prompt still starts with the same text
  * (cached). The phone gets them through Realtime (form_fields INSERT). The Form Analyzer reads just these;
  * a set read before (by anyone) gets its saved field list, like a whole form.
+ * `&read=later`: add them now and leave the reading to POST /fields/read, which the extension sends once
+ * the page has been quiet for a moment, with every field that appeared meanwhile (one AI call, not one each).
  */
 export const POST = route<Ctx>(async (req, { params }) => {
   const { code } = await params;
@@ -35,7 +37,8 @@ export const POST = route<Ctx>(async (req, { params }) => {
   assertWritable(session);
 
   const schema = FormSchema.parse(await req.json());
-  const nextStep = new URL(req.url).searchParams.get('step') !== 'same';
+  const query = new URL(req.url).searchParams;
+  const nextStep = query.get('step') !== 'same';
   const { fresh, startPosition, stepIndex } = newFieldsPlacement(await getFieldRows(session.id), schema.fields, nextStep);
   if (!fresh.length) return NextResponse.json({ fields: [] } satisfies AddFieldsResponse);
 
@@ -43,7 +46,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const saved = await savedReading(step);
   if (saved?.template) step.fields = saved.template;
   const inserted = await insertFieldRows(fieldRows(session.id, step.fields, startPosition, stepIndex));
-  after(() => analyzeAndStore(session.id, step, { partial: true, userId: user.id, saved }));
+  if (query.get('read') !== 'later') after(() => analyzeAndStore(session.id, step, { partial: true, userId: user.id, saved }));
   return NextResponse.json({ fields: inserted.map(toSessionField) } satisfies AddFieldsResponse, { status: 201 });
 });
 
