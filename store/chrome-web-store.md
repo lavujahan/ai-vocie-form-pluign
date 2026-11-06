@@ -208,7 +208,7 @@ With Voice2Fill:
 A letter, a message, a remark box: typing Tamil is slow.
 
 With Voice2Fill:
-• Click the gold த bubble in the extension and speak into the computer's microphone.
+• Click the gold த bubble in the extension. Speak on your phone (scan the QR, no microphone needed on the computer) or into the computer's microphone.
 • Your words appear as Tamil text. Edit a word if you need to, then copy and paste it anywhere.
 • Tamil typing uses your voice minutes: only the time you speak counts.
 
@@ -279,7 +279,7 @@ WHAT YOU NEED
 • A Voice2Fill account (phone number and PIN; free trial for new accounts)
 • A phone with a browser and a microphone
 • Chrome on the computer with the form
-• For Tamil typing, a microphone or headset on the computer
+• For Tamil typing, a phone, or a microphone or headset on the computer
 
 
 NOT SUPPORTED (YET)
@@ -334,7 +334,7 @@ Then tick all three certifications:
 The User Data FAQ requires a **clear notice inside the extension, and a user action to agree, before any data is collected**. A notice that is only in the privacy policy or on the store page doesn't count.
 - **Currently:** the sign-in and Scan cards have no notice, so this has to be fixed before you submit.
 - **Fix:** add a short notice to the sign-in card (`SignIn` in `apps/extension/src/popup/App.tsx`), linked to the privacy policy. Signing in then counts as agreeing. Example wording:
-  > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about an hour, or about 2 hours after your customer sends them. With Tamil typing, your voice goes to Sarvam AI from this computer's mic and is not stored. [Privacy policy]
+  > Scanning sends this page's address and form fields to Voice Form Filler. Your spoken answers are turned into text by Sarvam AI and OpenAI and deleted within about an hour, or about 2 hours after your customer sends them. With Tamil typing, your voice goes to Sarvam AI from your phone or this computer's mic and is not stored. [Privacy policy]
 - Clicking "QR for this page" and then "Generate QR" afterwards is the action that starts collection, so the notice must appear before the first scan.
 
 ## Minimum permissions (reviewers check this)
@@ -343,7 +343,7 @@ The privacy page says that asking for more permissions than you need can get the
 - **Done:** the manifest has no `content_scripts`. Nothing runs on any website until the user taps QR for this page and then Generate QR.
 - **How:** on Scan, the popup asks Chrome for that one site (`chrome.permissions.request`). Once allowed, the worker registers the detector for that site only (`chrome.scripting.registerContentScripts`), so a wizard's next page and reloads keep working (watcher and tab-moved checks unchanged). If the user says No, the page is still scanned once through `activeTab`.
 - **Removing access** in Chrome unregisters the detector for that site.
-- **Microphone:** Tamil typing uses the computer's mic through the standard browser prompt, in a small window the first time. The manifest needs no extra permission for it, and the mic is closed after each recording.
+- **Microphone:** Tamil typing can use a phone (its own browser asks for the mic) or the computer's mic through the standard browser prompt, in a small window the first time. The manifest needs no extra permission for it, and the mic is closed after each recording.
 
 ## Remote code
 

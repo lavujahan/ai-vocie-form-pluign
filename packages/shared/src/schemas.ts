@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TRANSLATE_MAX_CHARS } from './constants';
+import { TAMIL_PIECE_MAX_CHARS, TRANSLATE_MAX_CHARS } from './constants';
 import { PIN_LENGTH } from './pin';
 
 // ---------- Detector output ----------
@@ -941,3 +941,31 @@ export type FillReport = {
   /** Options of dropdowns whose lists loaded during the fill (sent to the phone for editing). */
   options?: Record<string, FieldOption[]>;
 };
+
+// ---------- Tamil typing on the phone (migration 0028) ----------
+
+/** Phone → server: edit or delete one sentence it wrote. */
+export const TamilPieceUpdate = z
+  .object({ text: z.string().trim().min(1).max(TAMIL_PIECE_MAX_CHARS).optional(), deleted: z.boolean().optional() })
+  .refine((b) => b.text !== undefined || b.deleted !== undefined, 'Nothing to update');
+export type TamilPieceUpdate = z.infer<typeof TamilPieceUpdate>;
+
+/** One sentence spoken on the phone (one recording, all its 28 s pieces joined). */
+export type TamilPadPiece = { seq: number; text: string; deleted: boolean; updated_at: string };
+
+/** A Tamil typing QR: `qr_url` opens /t/<code> on the phone. */
+export type TamilPadCreateResponse = { pad_id: string; code: string; qr_url: string; expires_at: string };
+
+export type TamilPadInfo = {
+  pad_id: string;
+  code: string;
+  expires_at: string;
+  paired_at: string | null;
+  ended_at: string | null;
+  pieces: TamilPadPiece[];
+};
+
+export type TamilPadPairResponse = { token: string; token_expires_at: string; pieces: TamilPadPiece[] };
+
+/** `piece`: the sentence this recording made or changed; null when nothing was heard. */
+export type TamilPadDictateResponse = { text: string; piece: TamilPadPiece | null };

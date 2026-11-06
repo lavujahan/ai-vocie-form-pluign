@@ -180,6 +180,7 @@ export function App() {
           own={TAMIL_WINDOW}
           chip={<MinutesChip account={state.account} />}
           planNote={planBlocked(state.account) ? <PlanMeter account={state.account!} /> : null}
+          pad={state.tamilPad ?? null}
           send={request}
           onClose={() => (TAMIL_WINDOW ? window.close() : setTamil('hidden'))}
         />

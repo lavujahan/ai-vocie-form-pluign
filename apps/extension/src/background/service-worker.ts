@@ -20,6 +20,9 @@ import type {
   SessionInfo,
   SessionSnapshot,
   SessionValue,
+  TamilPadCreateResponse,
+  TamilPadInfo,
+  TamilPadPiece,
   UtteranceRow,
   FormSchemaInput,
 } from '@vff/shared';
@@ -29,7 +32,9 @@ import {
   MOVED_REASON,
   NO_UPLOAD_FIELD,
   siteOf,
+  TAMIL_MARKS_KEY,
   TAMIL_TEXT_KEY,
+  type TamilPadView,
   type ActiveSession,
   type ContentRequest,
   type ExtState,
@@ -50,6 +55,7 @@ import { clearScans, deleteScan, deleteScans, getScan, listScans, scanId, setSca
 import { api, ApiError } from './api';
 import { deviceKey, deviceLabel } from './device';
 import { addToRead, READ_QUIET_MS } from './reads';
+import { applyPieces, type PadMarks } from './tamil-pad';
 import {
   assertRoom,
   changesSince,
@@ -86,12 +92,20 @@ let latestForms: LatestForm[] = [];
 let latestFailed = false;
 /** Files saved from "Fetch from scan" (the files themselves stay in IndexedDB, which is the record of them). */
 let scans: ScanInfo[] = [];
+/**
+ * Tamil typing on the phone (one per browser, not per tab). Kept in chrome.storage.session like `state`.
+ * `seen`: each sentence's seq → deleted, for the count the popup shows.
+ */
+type Pad = TamilPadCreateResponse & { paired: boolean; ended: boolean; seen: Record<string, boolean>; note: string | null };
+let pad: Pad | null = null;
+const PAD_KEY = 'vf-tamil-pad';
 /** Open popups, and the tab each one was opened on. */
 const ports = new Map<chrome.runtime.Port, number | undefined>();
 
 const ready = (async () => {
   state = migrate<Auth>((await chrome.storage.session.get('state')).state);
   if (state.auth && new Date(state.auth.expires_at) <= new Date()) state = { auth: null, tabs: {} };
+  pad = state.auth ? (((await chrome.storage.session.get(PAD_KEY))[PAD_KEY] as Pad | undefined) ?? null) : null;
   // Drop sessions whose tab was closed while the worker was not running.
   const ended: string[] = [];
   for (const id of Object.keys(state.tabs)) {
@@ -135,6 +149,19 @@ function publicState(tabId: number | undefined): ExtState {
     notice: state.auth ? (t?.notice ?? null) : signedOutReason,
     uploadClicks: t?.uploadClicks ?? [],
     scans: t ? scansOf(t.session.session_code) : [],
+    tamilPad: state.auth && pad ? padView(pad) : null,
+  };
+}
+
+function padView(p: Pad): TamilPadView {
+  return {
+    code: p.code,
+    qr_url: p.qr_url,
+    expires_at: p.expires_at,
+    paired: p.paired,
+    ended: p.ended,
+    count: Object.values(p.seen).filter((deleted) => !deleted).length,
+    note: p.note,
   };
 }
 
@@ -209,7 +236,10 @@ async function logout() {
   heldForms = [];
   latestForms = [];
   latestFailed = false;
-  await chrome.storage.session.remove(TAMIL_TEXT_KEY);
+  // The phone of Tamil typing stops too.
+  if (pad && !pad.ended && state.auth) void api(`/api/tamil-pads/${pad.code}`, { method: 'DELETE', token: state.auth.token }).catch(() => null);
+  pad = null;
+  await chrome.storage.session.remove([TAMIL_TEXT_KEY, TAMIL_MARKS_KEY, PAD_KEY]);
   await clearScans().catch((e) => console.warn('could not clear scans', e));
   scans = [];
   await save({ auth: null, tabs: {} });
@@ -705,6 +735,8 @@ function realtimeClient(token: string) {
 /** Subscribes every tab session that has no channel yet, and drops channels of ended sessions. */
 async function ensureRealtime() {
   const wanted = new Set(Object.values(state.tabs).map((t) => t.session.session_id));
+  // Tamil typing on the phone has a channel of its own while it is on.
+  if (pad && !pad.ended) wanted.add(`pad:${pad.pad_id}`);
   if (!state.auth || !SUPABASE_URL || !SUPABASE_ANON_KEY || !wanted.size) return stopRealtime();
   const r = realtimeClient(state.auth.token);
   for (const [id, c] of channels) {
@@ -712,7 +744,7 @@ async function ensureRealtime() {
     channels.delete(id);
     void r.client.removeChannel(c.channel);
   }
-  for (const id of wanted) if (!channels.has(id)) subscribe(r, id);
+  for (const id of wanted) if (!channels.has(id)) (id.startsWith('pad:') ? subscribePad(r, id.slice(4)) : subscribe(r, id));
 }
 
 function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
@@ -837,6 +869,99 @@ function subscribe(r: NonNullable<typeof rt>, sessionId: string) {
       if (entry.live && tabId !== null) await refreshSnapshot(tabId);
     });
   });
+}
+
+// ---------- Tamil typing on the phone ----------
+
+async function savePad(next: Pad | null) {
+  pad = next;
+  await (next ? chrome.storage.session.set({ [PAD_KEY]: next }) : chrome.storage.session.remove(PAD_KEY));
+  broadcast();
+}
+
+/** Sentences go into the Tamil text one batch at a time (the popup edits the same text). */
+let padWrites: Promise<void> = Promise.resolve();
+function applyPad(padId: string, pieces: TamilPadPiece[]) {
+  padWrites = padWrites
+    .then(async () => {
+      if (pad?.pad_id !== padId) return;
+      const r = await chrome.storage.session.get([TAMIL_TEXT_KEY, TAMIL_MARKS_KEY]);
+      const text = typeof r[TAMIL_TEXT_KEY] === 'string' ? (r[TAMIL_TEXT_KEY] as string) : '';
+      const marks = (r[TAMIL_MARKS_KEY] as PadMarks | undefined) ?? {};
+      const out = applyPieces(text, marks, pieces);
+      await chrome.storage.session.set({ [TAMIL_TEXT_KEY]: out.text, [TAMIL_MARKS_KEY]: out.marks });
+      const seen = { ...pad.seen };
+      for (const p of pieces) if (p.text || p.deleted) seen[p.seq] = p.deleted;
+      await savePad({ ...pad, seen, note: out.note ?? pad.note });
+    })
+    .catch((e) => console.warn('tamil text not updated', e));
+  return padWrites;
+}
+
+/** Catch up: the popup opened, or the channel (re)joined after missing events. */
+async function refreshPad() {
+  const p = pad;
+  if (!p || !state.auth) return;
+  try {
+    const info = await api<TamilPadInfo>(`/api/tamil-pads/${p.code}`, { token: state.auth.token });
+    if (pad?.pad_id !== p.pad_id) return;
+    await applyPad(p.pad_id, info.pieces);
+    if (pad && (pad.paired !== !!info.paired_at || pad.ended !== !!info.ended_at)) {
+      await savePad({ ...pad, paired: !!info.paired_at, ended: !!info.ended_at });
+      if (info.ended_at) await ensureRealtime();
+    }
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) await logoutAfter(e);
+    // Purged on the server: the phone's link is long gone.
+    else if (e instanceof ApiError && e.status === 404 && pad?.pad_id === p.pad_id) {
+      await savePad({ ...pad, ended: true });
+      await ensureRealtime();
+    }
+  }
+}
+
+function subscribePad(r: NonNullable<typeof rt>, padId: string) {
+  const key = `pad:${padId}`;
+  const channel = r.client
+    .channel(`ext:${key}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tamil_pad_pieces', filter: `pad_id=eq.${padId}` }, (p) => {
+      const row = p.new as TamilPadPiece | undefined;
+      if (row?.seq) void applyPad(padId, [row]);
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tamil_pads', filter: `id=eq.${padId}` }, async (p) => {
+      const row = p.new as { paired_at: string | null; ended_at: string | null };
+      if (pad?.pad_id !== padId) return;
+      await savePad({ ...pad, paired: !!row.paired_at, ended: !!row.ended_at });
+      if (row.ended_at) await ensureRealtime();
+    });
+  const entry: Channel = { channel, live: false };
+  channels.set(key, entry);
+  void r.authed.then(() => {
+    if (channels.get(key) !== entry) return;
+    channel.subscribe((status) => {
+      entry.live = status === 'SUBSCRIBED';
+      if (entry.live) void refreshPad();
+    });
+  });
+}
+
+/** A new Tamil typing QR; the one before stops. The text stays. */
+async function startPad() {
+  if (!state.auth) throw new Error('Please sign in');
+  const end = pad && !pad.ended ? `?end=${encodeURIComponent(pad.code)}` : '';
+  const created = await api<TamilPadCreateResponse>(`/api/tamil-pads${end}`, { method: 'POST', token: state.auth.token });
+  // The new pad numbers its sentences from 1 again: forget what the box held of the old one's.
+  await chrome.storage.session.remove(TAMIL_MARKS_KEY);
+  await savePad({ ...created, paired: false, ended: false, seen: {}, note: null });
+  await ensureRealtime();
+}
+
+async function endPad() {
+  if (!pad || pad.ended) return;
+  const p = pad;
+  await savePad({ ...p, ended: true });
+  await ensureRealtime();
+  if (state.auth) await api(`/api/tamil-pads/${p.code}`, { method: 'DELETE', token: state.auth.token }).catch(() => null);
 }
 
 function stopRealtime() {
@@ -1061,6 +1186,14 @@ async function handle(req: PopupRequest, tabId: number | undefined): Promise<str
       return;
     }
 
+    case 'TAMIL_PAD_START':
+      await startPad();
+      return;
+
+    case 'TAMIL_PAD_END':
+      await endPad();
+      return;
+
     case 'OPEN_SCAN_WINDOW': {
       if (tabId === undefined || !tabOf(tabId)) throw new Error('Open a form first');
       const tab = await chrome.tabs.get(tabId).catch(() => undefined);
@@ -1175,6 +1308,7 @@ chrome.runtime.onConnect.addListener((port) => {
     await ensureRealtime();
     port.postMessage({ type: 'STATE', state: publicState(tabId) } satisfies StateMessage);
     void refreshAccount();
+    if (pad && !pad.ended) void refreshPad();
     // No form in this tab: the popup lists the forms that wait and Latest forms, before anything is scanned.
     if (!tabOf(tabId)) {
       void refreshHeld();

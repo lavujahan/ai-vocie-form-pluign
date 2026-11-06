@@ -74,7 +74,7 @@ No app to install on the phone. It works in the phone's browser.
 - **Connect phone again** if the phone page was closed; the answers are kept
 
 ### Tamil tools
-- **Tamil typing:** speak Tamil into the computer's microphone and copy the text anywhere, such as a letter or a message. It uses your voice minutes
+- **Tamil typing:** speak Tamil on your phone (scan a QR) or into the computer's microphone, and copy the text anywhere, such as a letter or a message. It uses your voice minutes
 - **Tamil helper** on the phone: type an English word and see it in Tamil
 - The phone screen can be set to தமிழ் or English
 

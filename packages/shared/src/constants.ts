@@ -24,6 +24,11 @@ export const LOW_CONFIDENCE = 0.6;
 /** Tamil helper on the phone page: the longest English text translated at once. */
 export const TRANSLATE_MAX_CHARS = 500;
 
+/** Tamil typing on the phone: the longest sentence (spoken or edited) kept for one piece. */
+export const TAMIL_PIECE_MAX_CHARS = 5000;
+/** Tamil typing on the phone: how long the phone's link lasts after it scans, and how long the text is kept. */
+export const TAMIL_PAD_HOURS = 2;
+
 export const USER_COOKIE = 'vf_session';
 
 /** Admin → Users → Add minutes: the default top-up. */

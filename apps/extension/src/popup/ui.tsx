@@ -102,7 +102,7 @@ function Bubbles({ onTips, onTamil }: { onTips: (() => void) | null; onTamil: ((
       )}
       {tamilNew && (
         <Callout title="New: Tamil typing" onOpen={() => (seenTamil(), onTamil())} onHide={seenTamil} className="relative mb-0.5 w-48">
-          Speak Tamil and copy the text anywhere.
+          Speak Tamil on your phone or this computer, then copy the text anywhere.
         </Callout>
       )}
       {onTips && (

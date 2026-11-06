@@ -105,6 +105,10 @@ export type PopupRequest = (
   | { type: 'DICTATE'; base64: string; mime: string; duration_ms: number; part: number }
   /** Tamil typing in a window of its own: it stays open when the page is clicked, and Chrome can ask for the mic there. */
   | { type: 'OPEN_TAMIL_WINDOW' }
+  /** Tamil typing on the phone: a new QR (the one before, if any, ends), in `ExtState.tamilPad`. */
+  | { type: 'TAMIL_PAD_START' }
+  /** Disconnect: the phone stops; the text stays. */
+  | { type: 'TAMIL_PAD_END' }
   /** QR for other: a new QR code for one customer, for a form under Latest forms, in `PopupResponse.qr`. */
   | { type: 'QUEUE_QR'; source_id: string; voice: boolean }
   /** The status of a queue QR's session, in `PopupResponse.text` ('waiting': not scanned yet). */
@@ -128,6 +132,26 @@ export type PopupResponse =
 
 /** chrome.storage.session key of the Tamil typing text: kept in this browser only, until sign out or Chrome closes. */
 export const TAMIL_TEXT_KEY = 'vf-tamil-text';
+/** chrome.storage.session key of what the box holds of each phone sentence (background/tamil-pad.ts). */
+export const TAMIL_MARKS_KEY = 'vf-tamil-marks';
+/** chrome.storage.local key of how the operator speaks in Tamil typing: 'phone' or 'computer' (unset: ask). */
+export const TAMIL_MODE_KEY = 'vf-tamil-mode';
+
+/** Tamil typing on the phone, as the popup shows it. */
+export type TamilPadView = {
+  code: string;
+  qr_url: string;
+  /** The QR works until then, if no phone scanned it. */
+  expires_at: string;
+  /** A phone opened it. */
+  paired: boolean;
+  /** Done on the phone, or Disconnect here. */
+  ended: boolean;
+  /** Sentences the phone sent (not counting deleted ones). */
+  count: number;
+  /** The last edit or delete from the phone, said in the popup. */
+  note: string | null;
+};
 
 export type ActiveSession = CreateSessionResponse & {
   tab_id: number;
@@ -190,6 +214,8 @@ export type ExtState = {
   uploadClicks: string[];
   /** Files saved for this tab's form from "Fetch from scan". */
   scans: ScanInfo[];
+  /** Tamil typing on the phone (the same for every tab); null when none was started. */
+  tamilPad: TamilPadView | null;
 };
 
 export type StateMessage = { type: 'STATE'; state: ExtState };

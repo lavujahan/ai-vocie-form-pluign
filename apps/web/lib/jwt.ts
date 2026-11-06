@@ -20,14 +20,23 @@ export type PhoneClaims = {
   paired_at?: string;
 };
 
-export type Claims = UserClaims | PhoneClaims;
+/** The phone of a Tamil typing QR (migration 0028): it reaches only that pad, never a form or a user. */
+export type PadClaims = {
+  /** The pad id. */
+  sub: string;
+  role: 'authenticated';
+  scope: 'pad';
+  pad_id: string;
+};
+
+export type Claims = UserClaims | PhoneClaims | PadClaims;
 
 function key(secret: string) {
   return new TextEncoder().encode(secret);
 }
 
 export async function signJwt(
-  claims: Omit<UserClaims, 'sub'> | Omit<PhoneClaims, 'sub'>,
+  claims: Omit<UserClaims, 'sub'> | Omit<PhoneClaims, 'sub'> | Omit<PadClaims, 'sub'>,
   sub: string,
   ttlSeconds: number,
   secret: string,
@@ -46,7 +55,7 @@ export async function signJwt(
 export async function verifyJwt(token: string, secret: string): Promise<Claims | null> {
   try {
     const { payload } = await jwtVerify(token, key(secret), { audience: 'authenticated', algorithms: ['HS256'] });
-    if (payload.scope !== 'user' && payload.scope !== 'phone') return null;
+    if (payload.scope !== 'user' && payload.scope !== 'phone' && payload.scope !== 'pad') return null;
     return payload as unknown as Claims;
   } catch {
     return null;
