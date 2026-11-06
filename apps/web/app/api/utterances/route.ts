@@ -1,6 +1,6 @@
 import { after, NextResponse } from 'next/server';
 import type { UtteranceResponse } from '@vff/shared';
-import { fieldsHash, mapTranscript } from '@/lib/agents/fieldMapper';
+import { fieldsHash, instructionsHash, mapTranscript } from '@/lib/agents/fieldMapper';
 import { isEmptyTranscript } from '@/lib/agents/guardrails';
 import { isTransient, withRetry } from '@/lib/sarvam/client';
 import { STT_MAX_SECONDS, sttConfig, transcribe } from '@/lib/sarvam/stt';
@@ -137,11 +137,13 @@ export const POST = route(async (req) => {
         { onUsage: (run) => usage.push(openaiEvent(owner, 'map', run)) },
       ),
     );
-    // fields= / cached=: the same form should show the same hash, and most of its input cached.
+    // fields= / instructions= / cached=: the same form should show the same hashes, and from its second recording
+    // on most of its input cached (about 97%; `pnpm check:cache` shows what the code gets).
     const mapRun = [...usage].reverse().find((e) => e.kind === 'map');
     console.log(
       `utterance seq=${seq} part=${part} stt=${tStt}ms map=${Date.now() - tMap0}ms values=${outcome.empty ? 0 : outcome.values.length} chars=${fullText.length}` +
-        ` fields=${fieldsHash(fields)} cached=${mapRun?.cached_input_tokens ?? 0}/${mapRun?.input_tokens ?? 0}`,
+        ` fields=${fieldsHash(fields)} instructions=${instructionsHash()} model=${process.env.MAPPER_MODEL || process.env.AGENT_MODEL || 'default'}` +
+          ` cached=${mapRun?.cached_input_tokens ?? 0}/${mapRun?.input_tokens ?? 0}`,
     );
 
     if (outcome.empty) {

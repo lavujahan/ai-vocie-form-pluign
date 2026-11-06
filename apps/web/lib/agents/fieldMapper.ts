@@ -100,6 +100,9 @@ export const fieldsHash = (fields: AgentField[]) =>
     .digest('hex')
     .slice(0, 8);
 
+/** Short hash of the instructions, for the log: every server running the same code shows the same one. */
+export const instructionsHash = () => createHash('sha256').update(mapperInstructions(false)).digest('hex').slice(0, 8);
+
 export function buildMapperPrompt(input: MapInput): string {
   const current = Object.entries(input.current)
     .filter(([, v]) => v)
@@ -169,6 +172,8 @@ export async function mapTranscript(
      * recordings it cost about 40% more and was no more accurate).
      */
     validateTool?: boolean;
+    /** OpenAI's prompt_cache_key (after "mapper:"); default "all". */
+    cacheKey?: string;
   } = {},
 ): Promise<MapOutcome> {
   // From here on the fields are f1, f2, …; the answer's ids are turned back into the site's keys at the end.
@@ -177,7 +182,7 @@ export async function mapTranscript(
   const fields = input.targetFieldKey ? input.fields.filter((f) => f.field_key === input.targetFieldKey) : input.fields;
   // One cache key for every form: the instructions are cached for all of them, and a form's fields
   // after its first recording (OpenAI reuses the longest start it has seen).
-  const { model, modelSettings, timeoutMs } = agentModel('mapper', opts.model);
+  const { model, modelSettings, timeoutMs } = agentModel('mapper', opts.model, opts.cacheKey);
   const withTool = opts.validateTool ?? false;
   const agent = new Agent<MapperContext, typeof MappingResult>({
     name: 'Field Mapping Agent',
